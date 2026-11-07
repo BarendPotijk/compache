@@ -1,0 +1,15 @@
+
+why # secrets
+*.env
+
+# data
+*.db
+
+# logs
+*.log
+
+# OS generated files
+.DS_Store
+
+# vscode
+.vscode/
