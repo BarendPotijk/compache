@@ -35,6 +35,7 @@ They cooperate: the planner prices a cold return at the gate's own cold plan, an
 | [Compaction](compaction.md) | The gate: window, sizing, tiers, last resort, admission, projection, recovery |
 | [Retention](retention.md) | The planner: decision rule, test vectors, return curve, pings |
 | [Integration](integration.md) | Harness contract, providers, build order, evaluation |
+| [Design](design.md) | Architecture, fitting the policy from traces, integrations, build plan |
 | [Reference](reference.md) | Defaults, invariants, design decisions, open issues |
 
 ## Terms

@@ -76,19 +76,4 @@ Don't reopen these without new evidence.
 
 ## Open issues
 
-**Design**
-
-- **Block position:** choose one request-scoped position that holds from the first request on.
-- **Preserved thinking:** replacing a result an earlier response read may be rejected by an enforcing provider. Mitigation needs designing.
-- **Unbounded tool results:** a turn reading large documents on a small window can loop, with the model expanding what the shed replaced. Results need bounds at the source and the shed needs a guard.
-- **Fork carry:** what a cold plan builds on when the stored digest no longer matches. The safe reading is nothing.
-- **Unknown window:** whether a model missing from the table falls back to a default W or fails.
-
-**Project**
-
-- Language and first harness.
-- Which providers first.
-- Licence.
-- Whether citations are core or optional, and whether protected evidence stays.
-- Whether to ship a neutral return curve or require fitting.
-- Which threads to build an evaluation dataset from.
+Every open choice is listed once, with the proposal where there is one, in the [README](../README.md#open-design-choices). Settled ones are in [Design](design.md#decided).

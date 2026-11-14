@@ -1,0 +1,152 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="592" viewBox="0 0 900 592" role="img" aria-labelledby="arch-title arch-desc">
+  <title id="arch-title">compache architecture</title>
+  <desc id="arch-desc">Offline, two fitters turn traces into a profile, and a solver combines the profile with a model spec into a policy. Online, the gate and the planner read that policy on every request and at every run end, and their telemetry feeds the next fit.</desc>
+  <style>
+    text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif; }
+    .bg { fill: #ffffff; }
+    .lane { fill: #f6f8fa; }
+    .lane-t { font-size: 11px; font-weight: 700; letter-spacing: .08em; fill: #1f2328; }
+    .lane-s { font-size: 11px; fill: #656d76; }
+    .box { fill: #ffffff; stroke: #d0d7de; stroke-width: 1.25; }
+    .group { fill: none; stroke: #8c959f; stroke-width: 1; stroke-dasharray: 4 4; }
+    .t { font-size: 13px; font-weight: 600; fill: #1f2328; text-anchor: middle; }
+    .s { font-size: 11px; fill: #656d76; text-anchor: middle; }
+    .a { font-size: 11px; fill: #1f2328; text-anchor: middle; }
+    .m { font-size: 10px; fill: #656d76; text-anchor: middle; font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
+    .flow { fill: none; stroke: #424a53; stroke-width: 1.4; }
+    .head { fill: #424a53; }
+    .policy { fill: #e1ecf9; stroke: #2a78d6; stroke-width: 2; }
+    .pflow { fill: none; stroke: #2a78d6; stroke-width: 2; }
+    .phead { fill: #2a78d6; }
+    .tele { fill: none; stroke: #6e7781; stroke-width: 1.3; stroke-dasharray: 5 4; }
+    .thead { fill: #6e7781; }
+    .chip { fill: #f6f8fa; stroke: #d0d7de; stroke-width: 1; }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #0d1117; }
+      .lane { fill: #161b22; }
+      .lane-t, .t, .a { fill: #e6edf3; }
+      .lane-s, .s, .m { fill: #9198a1; }
+      .box { fill: #0d1117; stroke: #30363d; }
+      .group { stroke: #6e7681; }
+      .flow { stroke: #c9d1d9; }
+      .head { fill: #c9d1d9; }
+      .policy { fill: #142438; stroke: #3987e5; }
+      .pflow { stroke: #3987e5; }
+      .phead { fill: #3987e5; }
+      .tele { stroke: #8b949e; }
+      .thead { fill: #8b949e; }
+      .chip { fill: #161b22; stroke: #30363d; }
+    }
+  </style>
+  <defs>
+    <marker id="arch-ah" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="9" markerHeight="9" orient="auto"><path class="head" d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="arch-ahp" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><path class="phead" d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="arch-aht" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="9" markerHeight="9" orient="auto"><path class="thead" d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="900" height="592" rx="14"/>
+
+  <!-- lanes first, so no arrow is painted over -->
+  <rect class="lane" x="8" y="8" width="884" height="238" rx="12"/>
+  <text class="lane-t" x="24" y="33">OFFLINE</text>
+  <text class="lane-s" x="90" y="33">on demand, from your own traces</text>
+  <rect class="lane" x="8" y="330" width="884" height="254" rx="12"/>
+  <text class="lane-t" x="24" y="355">ONLINE</text>
+  <text class="lane-s" x="82" y="355">every request, no model calls</text>
+
+  <!-- OFFLINE -->
+  <rect class="box" x="24" y="62" width="124" height="100" rx="8"/>
+  <text class="t" x="86" y="86">Your traces</text>
+  <text class="s" x="86" y="108">Langfuse · MLflow</text>
+  <text class="s" x="86" y="124">OTel · SQL</text>
+  <text class="s" x="86" y="140">compache's own log</text>
+
+  <path class="flow" d="M148,112 H228" marker-end="url(#arch-ah)"/>
+  <text class="a" x="187" y="104">connectors</text>
+
+  <rect class="box" x="228" y="82" width="152" height="60" rx="8"/>
+  <text class="t" x="304" y="108">Normalized threads</text>
+  <text class="s" x="304" y="126">thread → run → call</text>
+
+  <path class="flow" d="M380,112 H395 V75 H410" marker-end="url(#arch-ah)"/>
+  <path class="flow" d="M395,112 V133 H410" marker-end="url(#arch-ah)"/>
+
+  <rect class="box" x="410" y="50" width="176" height="50" rx="8"/>
+  <text class="t" x="498" y="72">Cadence fitter</text>
+  <text class="s" x="498" y="89">when threads come back</text>
+
+  <rect class="box" x="410" y="108" width="176" height="50" rx="8"/>
+  <text class="t" x="498" y="130">Dependency fitter</text>
+  <text class="s" x="498" y="147">what later turns reuse</text>
+
+  <path class="flow" d="M586,72 H723" marker-end="url(#arch-ah)"/>
+  <path class="flow" d="M586,133 H664 V94 H723" marker-end="url(#arch-ah)"/>
+
+  <rect class="box" x="723" y="50" width="154" height="60" rx="8"/>
+  <text class="t" x="800" y="76">Profile</text>
+  <text class="s" x="800" y="94">the workload</text>
+
+  <path class="flow" d="M800,110 V140" marker-end="url(#arch-ah)"/>
+
+  <rect class="box" x="723" y="140" width="154" height="50" rx="8"/>
+  <text class="t" x="800" y="162">Solver</text>
+  <text class="s" x="800" y="179">replays your threads</text>
+
+  <rect class="box" x="540" y="186" width="150" height="50" rx="8"/>
+  <text class="t" x="615" y="208">Model spec</text>
+  <text class="s" x="615" y="225">window, cache, prices</text>
+  <path class="flow" d="M690,211 H706 V165 H723" marker-end="url(#arch-ah)"/>
+
+  <!-- bridge: the policy -->
+  <path class="flow" d="M800,190 V258" marker-end="url(#arch-ah)"/>
+  <rect class="policy" x="716" y="258" width="168" height="60" rx="8"/>
+  <text class="t" x="800" y="284">Policy</text>
+  <text class="s" x="800" y="302">every knob, in one file</text>
+
+  <path class="pflow" d="M716,288 H369 V372" marker-end="url(#arch-ahp)"/>
+  <text class="a" x="542" y="280">the gate and the planner read it</text>
+
+  <path class="tele" d="M286,372 V300 H86 V162" marker-end="url(#arch-aht)"/>
+  <text class="s" x="186" y="292">telemetry feeds the next fit</text>
+
+  <!-- ONLINE -->
+  <rect class="box" x="24" y="386" width="140" height="170" rx="8"/>
+  <text class="t" x="94" y="412">Your agent</text>
+  <text class="s" x="94" y="434">LangChain · LangGraph</text>
+  <text class="s" x="94" y="450">Hermes · opencode</text>
+  <text class="s" x="94" y="466">SDK wrapper · proxy</text>
+
+  <rect class="group" x="244" y="372" width="250" height="198" rx="10"/>
+  <text class="s" x="256" y="391" style="text-anchor:start">compache runtime</text>
+
+  <rect class="box" x="264" y="400" width="210" height="62" rx="8"/>
+  <text class="t" x="369" y="426">Gate</text>
+  <text class="s" x="369" y="444">how and when we compact</text>
+
+  <rect class="box" x="264" y="488" width="210" height="62" rx="8"/>
+  <text class="t" x="369" y="514">Planner</text>
+  <text class="s" x="369" y="532">when we ping</text>
+
+  <rect class="box" x="690" y="386" width="194" height="170" rx="8"/>
+  <text class="t" x="787" y="412">Provider</text>
+  <text class="s" x="787" y="432">Anthropic · OpenAI · Gemini</text>
+  <rect class="chip" x="717" y="450" width="140" height="36" rx="18"/>
+  <text class="a" x="787" y="472">prompt cache</text>
+  <text class="s" x="787" y="508">cheap to read,</text>
+  <text class="s" x="787" y="523">costly to write</text>
+
+  <path class="flow" d="M164,424 H264" marker-end="url(#arch-ah)"/>
+  <text class="a" x="201" y="416">each request</text>
+
+  <path class="flow" d="M474,420 H690" marker-end="url(#arch-ah)"/>
+  <text class="a" x="582" y="412">view + breakpoints</text>
+  <path class="flow" d="M690,440 H474" marker-end="url(#arch-ah)"/>
+  <text class="a" x="582" y="456">usage: the bill</text>
+
+  <path class="flow" d="M164,519 H264" marker-end="url(#arch-ah)"/>
+  <text class="a" x="201" y="511">run ends</text>
+
+  <path class="flow" d="M474,519 H690" marker-end="url(#arch-ah)"/>
+  <text class="a" x="582" y="511">pings while idle</text>
+  <text class="m" x="590" y="536">keep_warm(n) · compact · lapse</text>
+</svg>
