@@ -9,11 +9,15 @@ compache fits a context-compaction and cache keep-warm policy to your own traces
 - **Offline:** two fitters describe your workload, and the solver combines that with the provider's prices into one policy file.
 - **Online:** the gate decides how and when to compact, and the planner decides when to ping. Neither calls a model, so the same inputs always give the same request.
 
-## System design and build plan
+## One request through the layers
 
-![System design. Host integrations call four runtime functions, which use the pure core and the provider adapters. Connectors, two fitters and a solver produce the policy the core reads. Each part carries its build phase.](docs/assets/system-design.svg)
+![Sequence diagram. Before every request the integration calls prepare, the gate returns a recipe and a view, and the rewritten request is sent. After the response it calls observe. At run end the planner decides whether to ping.](docs/assets/request-sequence.svg)
 
-Each part carries the number of the phase that builds it. The exit check for every phase is in the [build plan](docs/design.md#build-plan).
+- **Prepare:** the gate decides the view before the request leaves.
+- **Observe:** the bill comes back, and the runtime calibrates and records it.
+- **End of run:** the planner decides, and pings repeat while the thread is idle.
+
+The blue arrows are the two decisions compache outputs. The order the layers get built in is in the [build plan](docs/design.md#build-plan).
 
 ## Open design choices
 

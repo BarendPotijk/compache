@@ -108,6 +108,8 @@ end_run(thread, now) -> decision            planner, where observe cannot infer 
 expand(thread, handle, offset) -> text      the recovery tool
 ```
 
+![One request through the layers, as a sequence diagram.](assets/request-sequence.svg)
+
 Each decision is also returned as a record, so a host can execute it itself: schedule pings in its own queue, or apply the view in its own code.
 
 **Defaults.** With no policy file, the gate runs on the [reference defaults](reference.md#defaults) and the model spec table. The planner needs a return curve and none ships, so without one it returns `lapse`. The runtime records its own gaps, so a first cadence fit needs no tracing backend. A model missing from the table is observed, never rewritten.
@@ -196,8 +198,6 @@ plugins/opencode/    TypeScript plugin that calls the local service
 ```
 
 ## Build plan
-
-![The package as layers, with the build phase of each part.](assets/system-design.svg)
 
 Two tracks that share the contracts of phase 0 and meet again at the simulator, which replays threads through the real gate. Phases 1 to 3 contain the [build order](integration.md#build-order) for the gate and planner.
 
