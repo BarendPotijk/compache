@@ -2,7 +2,7 @@
 
 A harness-agnostic optimizer for long agent conversations. It keeps a conversation inside the model's context window without rewriting the provider's cached prefix by accident, and decides at every run end whether keeping that prefix warm is worth paying for.
 
-**Status (0.2.0):** [RAG workload fitting, constrained search, cost replay, a deterministic retrieval gate and retention decisions](optimizer.md) are implemented, alongside the trace contracts and coding-agent labeling skill. The broader architecture below is a roadmap. Provider adapters, bill calibration, durable state and actual ping scheduling remain unimplemented. See the implementation guide for the supported subset and assumptions.
+**Status (0.3.0):** [RAG workload fitting, constrained search, cost replay, a deterministic retrieval gate and retention decisions](optimizer.md) are implemented, alongside the trace contracts and coding-agent labeling skill. The broader architecture below is a roadmap. Experimental subscription execution and an OpenCode policy baseline are available; production adapters, bill calibration, durable state and live idle-time ping scheduling remain unimplemented. See the implementation guide for the supported subset and assumptions.
 
 ## The one idea
 
@@ -32,6 +32,9 @@ They cooperate: the planner prices a cold return at the gate's own cold plan, an
 | Doc | Covers |
 |---|---|
 | [Implemented RAG optimizer](optimizer.md) | Runnable fit/solve/replay, promotion checks, pure gate/planner, economics and coverage limits |
+| [Live comparison](live-comparison.md) | Subscription runner, measured usage, cache scenarios and limitations |
+| [OpenCode baseline](opencode-baseline.md) | Pinned default compaction behavior and adapter boundaries |
+| [Public benchmarks](public-benchmarks.md) | RAG, memory and evidence-dependency evaluation options |
 | [Offline trace contracts](trace-contracts.md) | Implemented JSONL APIs, scoped Langfuse conversion, evidence packets, label validation |
 | [Foundations](foundations.md) | Provider assumptions, request layout, prefix stability |
 | [Compaction](compaction.md) | The gate: window, sizing, tiers, last resort, admission, projection, recovery |

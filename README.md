@@ -2,7 +2,7 @@
 
 compache fits a context-compaction and cache keep-warm policy to your own traces, then applies it deterministically on every model request.
 
-**Status (0.2.0):** the standard-RAG optimizer is runnable. It fits return timing and dependency-distance aggregates, searches compaction/retention policies on training threads, and evaluates the winner on separate threads. The package also exposes a deterministic retrieval gate, bounded source expansion and keep-warm decisions. Live provider adapters, ping execution, durable state, bill calibration and the OpenAI labeling worker remain future work. See the [implementation guide](docs/optimizer.md) for the supported subset.
+**Status (0.3.0):** the standard-RAG optimizer is runnable. It fits return timing and dependency-distance aggregates, searches compaction/retention policies on training threads, and evaluates the winner on separate threads. The package also exposes a deterministic retrieval gate, bounded source expansion and keep-warm decisions. The experimental live runner adds an OpenCode baseline, subscription execution, bounded recovery and per-call usage accounting. Production provider adapters, durable state, bill calibration and the OpenAI labeling worker remain future work. See the [implementation guide](docs/optimizer.md) for the supported subset.
 
 ## Run the optimizer
 
@@ -27,6 +27,12 @@ compache solve --threads threads.jsonl --labels labels.jsonl \
 Use your actual collection cutoff. The command writes the training-selected `candidate-policy.json`, the full `report.json`, and `policy.json`. The latter contains the recommended policy: a candidate only passes offline validation with lower held-out modeled cost, satisfied dependency/admission constraints and complete cost coverage. Otherwise it retains the preserve-all, no-ping baseline; it is null if even that baseline fails admission. Validation never picks another candidate or refits the policy on held-out data.
 
 The [Python API](docs/optimizer.md#python-api) provides `fit_profile`, `optimize`, `replay`, `prepare`, `end_run` and `expand`. Runtime decisions do not read dependency labels or future answers.
+
+## Long-context live comparison
+
+The [long RAG generator](examples/rag_long/README.md) creates separate training and held-out conversations with 15–21k-token retrieval bundles, earlier constraints, source versions and old-evidence dependencies. The [OpenCode adapter](docs/opencode-baseline.md) follows pinned default compaction behavior. The [live runner](docs/live-comparison.md) executes three replicas of each arm using Luna at low reasoning and records every answer, summary, recovery and keep-warm call.
+
+Subscription snapshots carry Codex overhead in their reported usage. Their physical cache counters differ from a persistent integration, so the 5- and 30-minute savings scenarios explicitly model prefix reuse over the same measured calls. See [public benchmark choices](docs/public-benchmarks.md) for the next quality checks.
 
 ## Try the first milestone
 

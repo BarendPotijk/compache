@@ -7,7 +7,7 @@ import math
 from dataclasses import replace
 
 from compache.traces import ContractError, Thread
-from .contracts import Policy, digest, seconds
+from .contracts import Policy, digest, seconds, number
 from .fit import label_index, validate_profile
 from .gate import Request, Source, ThreadState, prepare, wire_part
 from .planner import end_run
@@ -16,9 +16,11 @@ from .planner import end_run
 class Cache:
     """Whole-part prefix matching, rounded down to configured cache blocks."""
 
-    def __init__(self, spec, enabled=True):
+    def __init__(self, spec, enabled=True, overhead_tokens=0):
+        number(overhead_tokens, "overhead_tokens", integer=True)
         self.spec = spec
         self.enabled = enabled
+        self.overhead_tokens = overhead_tokens
         self.lines = ()
         self.counts = ()
         self.refreshed = None
@@ -27,6 +29,9 @@ class Cache:
         spec = self.spec
         lines = tuple(wire_part(p) for p in parts)
         counts = tuple(spec.part_tokens(p.text) for p in parts)
+        if self.overhead_tokens:
+            lines = ("__modeled_stable_runtime_prefix__",) + lines
+            counts = (self.overhead_tokens,) + counts
         total = sum(counts)
         eligible = (
             self.enabled
@@ -93,7 +98,7 @@ def assess(label, full_ids):
     }
 
 
-def _cold_preview(request, state, policy, answer, now):
+def _cold_preview(request, state, policy, answer, now, overhead_tokens=0):
     preview = Request(
         request.thread_id,
         request.run_id + ":preview",
@@ -101,7 +106,14 @@ def _cold_preview(request, state, policy, answer, now):
         request.model,
         request.parts + (answer,),
     )
-    return prepare(preview, policy, copy.deepcopy(state), now, force_cold=True)
+    return prepare(
+        preview,
+        policy,
+        copy.deepcopy(state),
+        now,
+        force_cold=True,
+        overhead_tokens=overhead_tokens,
+    )
 
 
 def replay(
@@ -113,7 +125,12 @@ def replay(
     observation_end: str,
     caching=True,
     include_ledger=True,
+    recovery_overhead="priced",
+    overhead_tokens=0,
 ) -> dict:
+    number(overhead_tokens, "overhead_tokens", integer=True)
+    if recovery_overhead not in ("priced", "zero"):
+        raise ContractError("recovery_overhead must be priced or zero")
     if profile is not None:
         validate_profile(profile)
         if policy.profile_hash != digest(profile):
@@ -133,11 +150,13 @@ def replay(
     unobserved_pings = 0
     for thread in sorted(threads, key=lambda t: t.thread_id):
         state = ThreadState(thread.thread_id)
-        cache = Cache(spec, caching)
+        cache = Cache(spec, caching, overhead_tokens)
         for i, run in enumerate(thread.runs):
             request = Request.from_thread(thread, run.run_id)
             start, finish = seconds(run.generation.started_at), seconds(run.ended_at)
-            prepared = prepare(request, policy, state, start)
+            prepared = prepare(
+                request, policy, state, start, overhead_tokens=overhead_tokens
+            )
             label = labels_by_id.get(run.run_id)
             assessment = assess(label, prepared.full_part_ids)
             record = {
@@ -170,7 +189,9 @@ def replay(
             usage = cache.charge(
                 prepared.parts,
                 start,
-                spec.expansion_output_tokens if missing else output,
+                spec.expansion_output_tokens
+                if missing and recovery_overhead == "priced"
+                else output,
             )
             ledger.append(
                 {
@@ -181,7 +202,7 @@ def replay(
                     **usage,
                 }
             )
-            if missing:
+            if missing and recovery_overhead == "priced":
                 sources = {p.part_id: p for p in request.parts}
                 restore = set()
                 for choices in assessment["restore_alternatives"]:
@@ -206,7 +227,9 @@ def replay(
                         part_id=run.run_id + "/restored/" + pid,
                         run_index=run.run_index,
                     )
-                prepared = prepare(request, policy, state, start)
+                prepared = prepare(
+                    request, policy, state, start, overhead_tokens=overhead_tokens
+                )
                 if not prepared.admitted:
                     record["admitted"] = False
                     record["reason"] = "recovery_exceeds_estimated_limit"
@@ -229,7 +252,9 @@ def replay(
             answer = Source(
                 run.output.part_id, "output", run.run_index, run.output.text
             )
-            cold = _cold_preview(request, state, policy, answer, finish)
+            cold = _cold_preview(
+                request, state, policy, answer, finish, overhead_tokens
+            )
             decision = (
                 end_run(
                     policy,
@@ -284,10 +309,14 @@ def replay(
     changes = sum(r["unknown_context_changed"] for r in unknown)
     summary = {
         "threads": len(threads),
+        "recovery_overhead": recovery_overhead,
+        "modeled_stable_runtime_overhead_tokens": overhead_tokens,
         "planned_runs": sum(len(t.runs) for t in threads),
         "replayed_runs": len(records),
         "skipped_runs": skipped,
-        "cost_input_equivalents": math.fsum(r["cost_input_equivalents"] for r in ledger),
+        "cost_input_equivalents": math.fsum(
+            r["cost_input_equivalents"] for r in ledger
+        ),
         "request_cost": math.fsum(
             r["cost_input_equivalents"] for r in ledger if r["event"] == "request"
         ),
@@ -338,6 +367,11 @@ def replay(
     summary["interpretation"] += (
         " Unavailable bodies are unpriced; totals cover visible projection text only, not the hidden full workload."
     )
+    if recovery_overhead == "zero":
+        summary["interpretation"] += (
+            " Recovery overhead is assumed zero: no expansion calls or restored content are inserted."
+            " Known missing requirements are still reported; frozen answers are not quality evidence."
+        )
     return {
         "schema_version": "compache-replay-v1",
         "policy_hash": policy.hash,

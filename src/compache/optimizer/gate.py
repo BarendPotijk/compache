@@ -6,6 +6,7 @@ import math
 import re
 import copy
 from dataclasses import dataclass, field, replace
+from functools import cached_property, lru_cache
 
 from compache.traces import ContractError, Thread
 from .contracts import Policy, canonical, digest, number
@@ -32,9 +33,15 @@ class Source:
         if self.text is not None and not isinstance(self.text, str):
             raise ContractError("source text must be string or null")
 
-    @property
+    @cached_property
     def fingerprint(self):
-        return digest(self.__dict__)
+        return digest({k: getattr(self, k) for k in self.__dataclass_fields__})
+
+    @cached_property
+    def wire(self):
+        return (
+            canonical({"id": self.part_id, "kind": self.kind, "text": self.text}) + "\n"
+        )
 
 
 @dataclass(frozen=True)
@@ -141,12 +148,10 @@ def placeholder(thread_id: str, source: Source) -> str:
 
 
 def wire_part(source: Source) -> str:
-    return (
-        canonical({"id": source.part_id, "kind": source.kind, "text": source.text})
-        + "\n"
-    )
+    return source.wire
 
 
+@lru_cache(maxsize=1024)
 def terms(text: str):
     stop = {
         "what",
@@ -183,7 +188,7 @@ def terms(text: str):
                 word = word[: -len(suffix)]
                 break
         result.add(word)
-    return result
+    return frozenset(result)
 
 
 def protected_sources(request: Request):
@@ -253,8 +258,10 @@ def _prepare(
     *,
     force_cold=False,
     protected_ids=frozenset(),
+    overhead_tokens=0,
 ) -> Prepared:
     number(now, "now", -1e20)
+    number(overhead_tokens, "overhead_tokens", integer=True)
     if request.thread_id != state.thread_id:
         raise ContractError("state belongs to another thread")
     if state.last_started_at is not None and now < state.last_started_at:
@@ -300,15 +307,12 @@ def _prepare(
         action = "observe_only"
     else:
         projected = _project(request, state, state.removed)
-        size = sum(spec.part_tokens(p.text) for p in projected)
+        size = overhead_tokens + sum(spec.part_tokens(p.text) for p in projected)
+        wire_bytes = sum(len(wire_part(p).encode()) for p in projected)
         threshold = active.cold_trigger if cold or not usable else active.warm_trigger
         pressure = max(
             size,
-            math.ceil(
-                sum(len(wire_part(p).encode()) for p in projected)
-                * spec.context_tokens
-                / spec.byte_limit
-            ),
+            math.ceil(wire_bytes * spec.context_tokens / spec.byte_limit),
         )
         if (
             pressure > threshold * spec.context_tokens
@@ -331,22 +335,19 @@ def _prepare(
                 if saving > 0:
                     state.removed.add(p.part_id)
                     size -= saving
+                    compacted = replace(p, text=placeholder(request.thread_id, p))
+                    wire_bytes -= len(wire_part(p).encode()) - len(
+                        wire_part(compacted).encode()
+                    )
                     pressure = max(
                         size,
-                        math.ceil(
-                            sum(
-                                len(wire_part(s).encode())
-                                for s in _project(request, state, state.removed)
-                            )
-                            * spec.context_tokens
-                            / spec.byte_limit
-                        ),
+                        math.ceil(wire_bytes * spec.context_tokens / spec.byte_limit),
                     )
             if not cold and usable and state.removed != old_removed:
                 action = "replaced_warm"
     projected = _project(request, state, state.removed)
     wire = tuple(wire_part(p) for p in projected)
-    size = sum(spec.part_tokens(p.text) for p in projected)
+    size = overhead_tokens + sum(spec.part_tokens(p.text) for p in projected)
     admitted = observe_only or (
         size <= (1 - active.reserve) * spec.context_tokens
         and sum(len(x.encode()) for x in wire) <= spec.byte_limit
@@ -408,6 +409,7 @@ def prepare(
     *,
     force_cold=False,
     protected_ids=frozenset(),
+    overhead_tokens=0,
 ) -> Prepared:
     """Plan deterministically; commit explicit state only after successful admission."""
     proposed = copy.deepcopy(state)
@@ -418,6 +420,7 @@ def prepare(
         now,
         force_cold=force_cold,
         protected_ids=protected_ids,
+        overhead_tokens=overhead_tokens,
     )
     if result.admitted:
         state.__dict__.update(proposed.__dict__)

@@ -123,6 +123,8 @@ def _parser() -> argparse.ArgumentParser:
             command.add_argument("--policy", type=Path, required=True)
         if name == "replay":
             command.add_argument("--profile", type=Path, required=True)
+            command.add_argument("--recovery-overhead", choices=("priced", "zero"), default="priced")
+            command.add_argument("--runtime-overhead-tokens", type=int, default=0)
         if name == "prepare":
             command.add_argument("--thread-id", required=True)
             command.add_argument("--run-id", required=True)
@@ -193,7 +195,9 @@ def _optimizer_command(args):
     if args.group == "replay":
         profile = json.loads(args.profile.read_text(encoding="utf-8"))
         result = replay(
-            threads, labels, policy, profile, observation_end=args.observation_end
+            threads, labels, policy, profile, observation_end=args.observation_end,
+            recovery_overhead=args.recovery_overhead,
+            overhead_tokens=args.runtime_overhead_tokens,
         )
         _write_json(args.output, result)
         return result["summary"]
