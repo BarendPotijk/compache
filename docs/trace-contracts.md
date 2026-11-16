@@ -1,6 +1,6 @@
 # Offline trace and dependency contracts
 
-Implemented in this milestone: validated RAG thread objects, JSONL loading/writing, a scoped Langfuse-shaped envelope adapter, dependency packet preparation, and label validation. The runtime gate/planner, live Langfuse client and OpenAI annotation worker are not implemented.
+Implemented: validated RAG thread objects, JSONL loading/writing, a scoped Langfuse-shaped envelope adapter, dependency packet preparation, and label validation. Version 0.2 also adds the [offline optimizer and pure RAG gate/planner](optimizer.md). A live Langfuse client and OpenAI annotation worker remain unimplemented.
 
 ## Scope
 
@@ -35,6 +35,8 @@ Export and normalization preserve the canonical evidence projection. Optional `s
 Task requirements assess the user's request even when the answer fails. Claims assess the observed output. Requirement alternatives are OR; sources within one alternative are AND; separate requirements are AND. A fresh retrieval or earlier answer can make an older document occurrence nonessential. Citation presence does not establish support, and observational support does not prove causal necessity.
 
 `validate_label` checks structure, identities, exact quotes, source kinds, temporal boundaries, visibility and coverage. It rejects `necessity:tested` until an intervention artifact/runner exists. It does not establish semantic accuracy. Unknown evidence, refusals and incomplete model output must not become negative dependency examples. Model labels are frozen evidence artifacts for later deterministic fitting; rerunning a model need not reproduce the labels.
+
+A complete label with a visible question requires at least one task requirement; a visible answer requires at least one claim. `historical_context_needed: no` requires an all-current sufficient alternative. `yes` requires nonempty alternatives with at least one historical source in each. Unknown cases remain unknown in the optimizer.
 
 ## Commands
 

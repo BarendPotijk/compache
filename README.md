@@ -2,7 +2,31 @@
 
 compache fits a context-compaction and cache keep-warm policy to your own traces, then applies it deterministically on every model request.
 
-**Status:** the offline trace and dependency-label contracts are implemented, with a reproducible standard-RAG benchmark and coding-agent skill. The fitters, solver, runtime gate, retention planner and OpenAI annotation worker remain design work. The full design is in [docs](docs/README.md).
+**Status (0.2.0):** the standard-RAG optimizer is runnable. It fits return timing and dependency-distance aggregates, searches compaction/retention policies on training threads, and evaluates the winner on separate threads. The package also exposes a deterministic retrieval gate, bounded source expansion and keep-warm decisions. Live provider adapters, ping execution, durable state, bill calibration and the OpenAI labeling worker remain future work. See the [implementation guide](docs/optimizer.md) for the supported subset.
+
+## Run the optimizer
+
+Requires Python 3.11+. The runtime has no external dependencies and these commands make no network requests.
+
+```sh
+python3 -m pip install -e .
+python3 scripts/run_rag_optimizer.py --output /tmp/compache-evaluation
+python3 -m unittest discover -s tests -v
+```
+
+The [evaluation fixture](examples/rag_workload/README.md) contains the 45 conversations and 207 actual subagent answers, with the original fabricated customer timings restored and Codex usage counters excluded. Its labels are frozen observational judgments. Model specifications explicitly define illustrative economics and byte-based token estimates; reported savings are not measured provider bills.
+
+For your own normalized traces:
+
+```sh
+compache solve --threads threads.jsonl --labels labels.jsonl \
+  --model-spec model.json --observation-end 2026-06-21T11:21:27+00:00 \
+  --output /tmp/compache-policy
+```
+
+Use your actual collection cutoff. The command writes the training-selected `candidate-policy.json`, the full `report.json`, and `policy.json`. The latter contains the recommended policy: a candidate only passes offline validation with lower held-out modeled cost, satisfied dependency/admission constraints and complete cost coverage. Otherwise it retains the preserve-all, no-ping baseline; it is null if even that baseline fails admission. Validation never picks another candidate or refits the policy on held-out data.
+
+The [Python API](docs/optimizer.md#python-api) provides `fit_profile`, `optimize`, `replay`, `prepare`, `end_run` and `expand`. Runtime decisions do not read dependency labels or future answers.
 
 ## Try the first milestone
 
@@ -19,7 +43,7 @@ The [benchmark](benchmarks/rag_v1/README.md) contains 45 fictional threads, 207 
 
 Use the [dependency-labeling skill](skills/compache-label-dependencies/SKILL.md) to annotate prepared packets with your coding agent. Its scripts call the same package functions and validator as the CLI. The [contract documentation](docs/trace-contracts.md) describes the supported offline Langfuse envelope, source identities and coverage rules. These commands need no API keys and make no network requests.
 
-## Planned runtime architecture
+## Runtime architecture roadmap
 
 ![Architecture. Offline, two fitters turn traces into a profile and a solver turns that into a policy. Online, the gate and the planner read the policy.](docs/assets/architecture.svg)
 
@@ -37,6 +61,8 @@ Use the [dependency-labeling skill](skills/compache-label-dependencies/SKILL.md)
 The blue arrows are the two decisions compache outputs. The order the layers get built in is in the [build plan](docs/design.md#build-plan).
 
 ## Open design choices
+
+This list describes the broader roadmap. The shipped RAG subset settles prompts/answers as verbatim, retrieves only bounded source pages, uses explicit in-memory state, defaults to zero tolerated known misses/unknown-context changes, and returns `keep_warm` or `lapse`. See the implementation guide for other differences from the full design.
 
 Already settled: [statistical fitters, no shipped return curve, Python 3.11 and up](docs/design.md#decided).
 

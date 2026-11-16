@@ -1,6 +1,3 @@
-"""Compache: offline RAG trace and dependency contracts.
+"""Compache: offline workload optimization and deterministic RAG decisions."""
 
-The context-compaction gate and keep-warm planner remain design-stage.
-"""
-
-__version__ = "0.1.0"
+__version__ = "0.2.0"
