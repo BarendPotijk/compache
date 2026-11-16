@@ -32,6 +32,9 @@ They cooperate: the planner prices a cold return at the gate's own cold plan, an
 | Doc | Covers |
 |---|---|
 | [Implemented RAG optimizer](optimizer.md) | Runnable fit/solve/replay, promotion checks, pure gate/planner, economics and coverage limits |
+| [Scaled RAG workload](scaled-rag-workload.md) | Fictional 300-thread workload, sharded export, planning assumptions and audit scope |
+| [Scaled RAG results](scaled-rag-results.md) | Frozen-policy admission failures, measured sample and limits on cost/coverage claims |
+| [Scaled RAG results](scaled-rag-results.md) | Frozen-policy admission failures, measured sample and limits on cost/coverage claims |
 | [Live comparison](live-comparison.md) | Subscription runner, measured usage, cache scenarios and limitations |
 | [OpenCode baseline](opencode-baseline.md) | Pinned default compaction behavior and adapter boundaries |
 | [Public benchmarks](public-benchmarks.md) | RAG, memory and evidence-dependency evaluation options |

@@ -28,6 +28,18 @@ import run_live_comparison as runner
 
 
 class LiveTests(unittest.TestCase):
+    def test_distinct_paired_cases_preserve_legacy_selection(self):
+        self.assertEqual(
+            runner.selected_thread_id({"heldout_thread_id": "old"}, 2), "old"
+        )
+        plan = {"evaluation_thread_ids": ["a", "b", "c"]}
+        self.assertEqual(
+            [runner.selected_thread_id(plan, i) for i in (1, 2, 3)], ["a", "b", "c"]
+        )
+        for bad in (["a", "a", "c"], ["a", "b"], "abc", ["a", None, "c"]):
+            with self.assertRaises(ValueError):
+                runner.selected_thread_id({"evaluation_thread_ids": bad}, 1)
+
     def test_plain_answers_are_kept_but_malformed_tools_fail(self):
         self.assertEqual(
             runner.decode_live_response("A quoted policy [source]."),
@@ -38,6 +50,10 @@ class LiveTests(unittest.TestCase):
         self.assertEqual(
             runner.decode_live_response('{"answer":"Verbatim answer"}}'),
             ({"answer": "Verbatim answer"}, "json_trailing_brace"),
+        )
+        self.assertEqual(
+            runner.decode_live_response('{"answer":"Verbatim answer"}"}'),
+            ({"answer": "Verbatim answer"}, "json_trailing_quote_brace"),
         )
         with self.assertRaises(ContractError):
             runner.decode_live_response(
@@ -187,6 +203,29 @@ class LiveTests(unittest.TestCase):
             self.assertEqual(
                 len(runner.read_rows(out / "runs/opencode-1/ledger.jsonl")), len(rows)
             )
+            # A refused request must leave a durable stop record and incur no
+            # provider call, rather than appearing as a completed cheap thread.
+            refused = replace(
+                policy, model_spec=replace(spec, context_tokens=10).to_dict()
+            )
+            runner.dump(out / "policy.json", refused.to_dict())
+            with self.assertRaisesRegex(RuntimeError, "admission failed"):
+                runner.one_arm(
+                    source,
+                    out,
+                    plan,
+                    "compache",
+                    1,
+                    base,
+                    "unused",
+                    invoke_override=fake,
+                )
+            stopped = json.loads((out / "runs/compache-1/stopped.json").read_text())
+            self.assertEqual(stopped["completed_answers"], 0)
+            self.assertEqual(stopped["run_index"], 1)
+            self.assertFalse(stopped["model_call_sent_for_blocked_run"])
+            self.assertFalse((out / "runs/compache-1/complete.json").exists())
+            self.assertEqual(len(prompts), called)
 
 
 if __name__ == "__main__":

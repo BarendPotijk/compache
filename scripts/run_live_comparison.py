@@ -14,6 +14,8 @@ import hashlib
 import itertools
 import math
 import json
+import copy
+import re
 from pathlib import Path
 import sys
 import threading
@@ -95,9 +97,11 @@ def decode_live_response(text):
                 and set(obj) == {"answer"}
                 and isinstance(obj["answer"], str)
                 and obj["answer"].strip()
-                and value[end:].strip() == "}"
+                and value[end:].strip() in ("}", '"}')
             ):
-                return obj, "json_trailing_brace"
+                return obj, "json_trailing_brace" if value[
+                    end:
+                ].strip() == "}" else "json_trailing_quote_brace"
         if not value or value.startswith(("{", "[", "```")):
             raise
         return {"answer": text}, "plain_text"
@@ -310,6 +314,64 @@ def render(nonce, messages, arm, suffix="Answer the latest substantive user ques
     )
 
 
+def selected_thread_id(plan, replica):
+    """Select a paired case, retaining the original repeated-case protocol."""
+    selected = plan.get("evaluation_thread_ids")
+    if selected is None:
+        return plan["heldout_thread_id"]
+    if (
+        not isinstance(selected, list)
+        or len(selected) != 3
+        or any(not isinstance(x, str) or not x for x in selected)
+        or len(set(selected)) != 3
+        or type(replica) is not int
+        or not 1 <= replica <= 3
+    ):
+        raise ValueError("evaluation_thread_ids requires three distinct paired cases")
+    return selected[replica - 1]
+
+
+def bind_live_requirements(label, sources, quote_actual_output=False):
+    """Conservatively bind output alternatives to the answer actually generated.
+
+    Literal screening may omit valid paraphrases. It cannot create support from
+    a fabricated answer that was never used in the live conversation.
+    """
+    if label is None:
+        return None, {"output_alternatives_removed": 0, "unassessable_requirements": []}
+    bound = {
+        "status": label["status"],
+        "task_requirements": copy.deepcopy(label["task_requirements"]),
+    }
+    available = {s.part_id: s for s in sources}
+    removed = 0
+    unknown = []
+    for req in bound["task_requirements"]:
+        alternatives = []
+        for alternative in req["alternatives"]:
+            supported = True
+            for item in alternative["sources"]:
+                part = available.get(item["part_id"])
+                if part is not None and part.kind == "output":
+                    if quote_actual_output and req["source_kind"] == "output":
+                        item["quote"] = re.split(
+                            r"(?<=[.!?])\s+", part.text.strip(), maxsplit=1
+                        )[0]
+                    elif item["quote"] not in part.text:
+                        supported = False
+            if supported:
+                alternatives.append(alternative)
+            else:
+                removed += 1
+        if req["alternatives"] and not alternatives:
+            unknown.append(req["requirement_id"])
+        req["alternatives"] = alternatives
+    return bound, {
+        "output_alternatives_removed": removed,
+        "unassessable_requirements": unknown,
+    }
+
+
 def one_arm(
     data,
     out,
@@ -328,13 +390,23 @@ def one_arm(
     fixture = next(
         t
         for t in load_threads(data / "threads.jsonl")
-        if t.thread_id == plan["heldout_thread_id"]
+        if t.thread_id == selected_thread_id(plan, replica)
     )
+    if plan.get("planned_answers_per_arm", len(fixture.runs)) != len(fixture.runs):
+        raise ValueError("selected case length differs from the frozen plan")
     expected = {
         l["target_run_id"]: l
         for l in read_rows(data / "labels.jsonl")
         if l["thread_id"] == fixture.thread_id
     }
+    design = {}
+    if plan.get("bind_live_output_dependencies"):
+        design = {
+            x["run_id"]: x
+            for x in json.loads((out / "quality-design.json").read_text())[
+                fixture.thread_id
+            ]
+        }
     state = ThreadState(fixture.thread_id)
     baseline = OpenCodeBaseline(
         Settings(
@@ -404,6 +476,7 @@ def one_arm(
         row = {
             "arm": arm,
             "replicate": replica,
+            "thread_id": fixture.thread_id,
             "sequence": sequence,
             "role": role,
             "run_id": run.run_id,
@@ -470,10 +543,35 @@ def one_arm(
             logical = seconds(run.started_at)
             diagnostic = {}
             if arm == "compache":
+                live_label = expected.get(run.run_id)
+                binding = None
+                if plan.get("bind_live_output_dependencies"):
+                    live_label, binding = bind_live_requirements(
+                        live_label,
+                        canonical,
+                        design[run.run_id].get("actual_prior_output_required", False),
+                    )
                 prepared = prepare(
                     req, policy, state, logical, overhead_tokens=overhead
                 )
                 if not prepared.admitted:
+                    dump(
+                        directory / "stopped.json",
+                        {
+                            "status": "blocked_by_admission",
+                            "thread_id": fixture.thread_id,
+                            "run_id": run.run_id,
+                            "run_index": run.run_index,
+                            "planned_answers": len(fixture.runs),
+                            "completed_answers": len(run_records),
+                            "completed_calls": len(ledger),
+                            "counts": planned_counts,
+                            "telemetry": prepared.telemetry(),
+                            "assessment": assess(live_label, prepared.full_part_ids),
+                            "live_output_binding": binding,
+                            "model_call_sent_for_blocked_run": False,
+                        },
+                    )
                     raise RuntimeError(
                         f"Compache admission failed at turn {run.run_index}"
                     )
@@ -481,9 +579,14 @@ def one_arm(
                 diagnostic = {
                     **prepared.telemetry(),
                     "missing_authored_requirements": assess(
-                        expected.get(run.run_id), prepared.full_part_ids
+                        live_label, prepared.full_part_ids
                     )["missed_requirements"],
                 }
+                if binding is not None:
+                    diagnostic["live_output_binding"] = binding
+                    diagnostic["live_dependency_assessment"] = assess(
+                        live_label, prepared.full_part_ids
+                    )
             else:
                 compact = baseline.prepare(req, previous_usage)
                 if compact:
@@ -712,6 +815,10 @@ def main():
             != plan["profile_hash"]
         ):
             raise ValueError("frozen profile changed")
+        if plan.get("bind_live_output_dependencies") and fingerprint(
+            args.output / "quality-design.json"
+        ) != plan.get("quality_design_sha256"):
+            raise ValueError("frozen live dependency design changed")
         if args.working_dir is None and args.transport == "codex":
             raise ValueError("stable working-dir required")
         budget = Budget(args.max_cost_usd) if args.transport == "openai" else None
