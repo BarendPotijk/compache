@@ -302,6 +302,7 @@ def _prepare(
         else ("planned_cold" if cold else "planned_prefix_changed")
     )
     old_removed = set(state.removed)
+    deferred_warm = False
     if observe_only:
         # Retain previous placeholders if already visible; no new cuts on incomplete data.
         action = "observe_only"
@@ -313,6 +314,10 @@ def _prepare(
         pressure = max(
             size,
             math.ceil(wire_bytes * spec.context_tokens / spec.byte_limit),
+        )
+        needs_admission_reduction = (
+            size > (1 - active.reserve) * spec.context_tokens
+            or wire_bytes > spec.byte_limit
         )
         if (
             pressure > threshold * spec.context_tokens
@@ -344,7 +349,23 @@ def _prepare(
                         math.ceil(wire_bytes * spec.context_tokens / spec.byte_limit),
                     )
             if not cold and usable and state.removed != old_removed:
-                action = "replaced_warm"
+                if (
+                    pressure > active.target * spec.context_tokens
+                    and not needs_admission_reduction
+                ):
+                    # A warm rewrite is costly. If protected context prevents
+                    # reaching the target, keep the cached view until a cold
+                    # return or an actual admission constraint requires a cut.
+                    # Cold compaction can still take every safe available saving.
+                    state.removed = old_removed
+                    deferred_warm = True
+                    action = "deferred_warm"
+                else:
+                    action = (
+                        "replaced_warm"
+                        if not needs_admission_reduction
+                        else "replaced_warm_for_admission"
+                    )
     projected = _project(request, state, state.removed)
     wire = tuple(wire_part(p) for p in projected)
     size = overhead_tokens + sum(spec.part_tokens(p.text) for p in projected)
@@ -356,6 +377,8 @@ def _prepare(
         (
             "unknown_model_or_masked_content_admission_not_verified"
             if observe_only
+            else "warm_compaction_target_unreachable"
+            if deferred_warm
             else None
         )
         if admitted

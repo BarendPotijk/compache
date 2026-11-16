@@ -21,6 +21,7 @@ import threading
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 from compache.optimizer import (
+    Constraints,
     ModelSpec,
     Policy,
     Request,
@@ -45,6 +46,7 @@ from compache.optimizer.opencode import (
 )
 from compache.optimizer.planner import end_run
 from compache.optimizer.replay import assess, _cold_preview
+from compache.optimizer.solve import feasible as policy_feasible
 from compache.traces import load_threads, ContractError
 from appserver_rag_transport import SubscriptionSnapshotSession
 from openai_rag_transport import OpenAISession, Budget
@@ -101,7 +103,12 @@ def decode_live_response(text):
         return {"answer": text}, "plain_text"
 
 
-def training(data, out, context, overhead, transport="codex"):
+def training(
+    data, out, context, overhead, transport="codex", min_dependency_coverage=0.95
+):
+    constraints = Constraints(
+        min_historical_dependency_coverage=min_dependency_coverage
+    )
     source_hashes = {
         n: fingerprint(data / n)
         for n in ("threads.jsonl", "labels.jsonl", "manifest.json")
@@ -144,7 +151,9 @@ def training(data, out, context, overhead, transport="codex"):
     graces = sorted({0, 1, max(distances, default=1)})
     candidates = []
     # Frozen small grid; no held-out answer, score or cost enters selection.
-    for grace, target, warm in itertools.product(graces, (0.15, 0.30), (0.65, 0.85)):
+    for grace, target, warm in itertools.product(
+        graces, (0.10, 0.15, 0.20, 0.25), (0.50, 0.60)
+    ):
         policy = Policy(
             spec.to_dict(),
             digest(profile),
@@ -182,15 +191,7 @@ def training(data, out, context, overhead, transport="codex"):
                 * (1.5 if r["input_tokens_estimated"] > 272000 else 1)
                 for r in result["ledger"]
             )
-        feasible = not any(
-            summary[k]
-            for k in (
-                "admission_failures",
-                "skipped_runs",
-                "miss_runs",
-                "unknown_changed_runs",
-            )
-        )
+        feasible = policy_feasible(summary, constraints)
         candidates.append(
             {
                 "policy": policy.to_dict(),
@@ -217,7 +218,12 @@ def training(data, out, context, overhead, transport="codex"):
         )
     winner = min(
         eligible,
-        key=lambda x: (x["selection_cost_input_equivalents"], digest(x["policy"])),
+        key=lambda x: (
+            round(x["selection_cost_input_equivalents"], 9),
+            -x["policy"]["target"],
+            -x["policy"]["warm_trigger"],
+            digest(x["policy"]),
+        ),
     )
     if source_hashes != {n: fingerprint(data / n) for n in source_hashes}:
         raise ValueError("training inputs changed while fitting")
@@ -228,6 +234,7 @@ def training(data, out, context, overhead, transport="codex"):
         {
             "candidates": candidates,
             "selected_policy_hash": digest(winner["policy"]),
+            "constraints": constraints.to_dict(),
             "heldout_used_for_selection": False,
         },
     )
@@ -235,6 +242,7 @@ def training(data, out, context, overhead, transport="codex"):
         "schema": "compache-native-comparison-v1",
         "model": MODEL,
         "reasoning_effort": "low",
+        "constraints": constraints.to_dict(),
         "transport": transport,
         "replicates": 3,
         "arms": ["opencode", "compache"],
@@ -650,6 +658,7 @@ def main():
     parser.add_argument("--transport", choices=("codex", "openai"), default="codex")
     parser.add_argument("--context", type=int)
     parser.add_argument("--overhead", type=int)
+    parser.add_argument("--min-dependency-coverage", type=float, default=0.95)
     parser.add_argument("--max-cost-usd", type=float, default=25)
     parser.add_argument("--codex", default="codex")
     parser.add_argument("--working-dir", type=Path)
@@ -676,7 +685,14 @@ def main():
             if args.overhead is not None
             else (500 if args.transport == "openai" else 16000)
         )
-        training(args.data, args.output, context, overhead, args.transport)
+        training(
+            args.data,
+            args.output,
+            context,
+            overhead,
+            args.transport,
+            args.min_dependency_coverage,
+        )
     else:
         plan = json.loads((args.output / "plan.json").read_text())
         if plan.get("transport", "codex") != args.transport:

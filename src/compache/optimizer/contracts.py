@@ -118,7 +118,7 @@ class Policy(Artifact):
     retrieval_grace_runs: int | None = None
     cold_trigger: float = 0.17
     target: float = 0.15
-    warm_trigger: float = 0.65
+    warm_trigger: float = 0.60
     reserve: float = 0.05
     ping_lead_seconds: float = 45
     freshness_margin_seconds: float = 20
@@ -159,12 +159,38 @@ class Policy(Artifact):
 
 @dataclass(frozen=True)
 class Constraints(Artifact):
-    max_miss_rate: float = 0.0
+    max_miss_rate: float = 1.0
     max_unknown_change_rate: float = 0.0
-    schema_version: str = "compache-constraints-v1"
+    min_historical_dependency_coverage: float = 0.95
+    schema_version: str = "compache-constraints-v2"
+
+    @classmethod
+    def from_dict(cls, data):
+        if (
+            isinstance(data, dict)
+            and data.get("schema_version") == "compache-constraints-v1"
+        ):
+            if set(data) != {
+                "max_miss_rate",
+                "max_unknown_change_rate",
+                "schema_version",
+            }:
+                raise ContractError("invalid legacy constraints fields")
+            return cls(
+                max_miss_rate=data["max_miss_rate"],
+                max_unknown_change_rate=data["max_unknown_change_rate"],
+                min_historical_dependency_coverage=0.0,
+            )
+        return super().from_dict(data)
 
     def __post_init__(self):
-        if self.schema_version != "compache-constraints-v1":
+        if self.schema_version != "compache-constraints-v2":
             raise ContractError("invalid constraints version")
         number(self.max_miss_rate, "max_miss_rate", 0, 1)
         number(self.max_unknown_change_rate, "max_unknown_change_rate", 0, 1)
+        number(
+            self.min_historical_dependency_coverage,
+            "min_historical_dependency_coverage",
+            0,
+            1,
+        )

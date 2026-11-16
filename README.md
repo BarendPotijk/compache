@@ -2,7 +2,7 @@
 
 compache fits a context-compaction and cache keep-warm policy to your own traces, then applies it deterministically on every model request.
 
-**Status (0.3.0):** the standard-RAG optimizer is runnable. It fits return timing and dependency-distance aggregates, searches compaction/retention policies on training threads, and evaluates the winner on separate threads. The package also exposes a deterministic retrieval gate, bounded source expansion and keep-warm decisions. The experimental live runner adds an OpenCode baseline, subscription execution, bounded recovery and per-call usage accounting. Production provider adapters, durable state, bill calibration and the OpenAI labeling worker remain future work. See the [implementation guide](docs/optimizer.md) for the supported subset.
+**Status (0.4.0):** the standard-RAG optimizer is runnable. It fits return timing and dependency-distance aggregates, searches compaction/retention policies on training threads, and evaluates the winner on separate threads. The package also exposes a deterministic retrieval gate, bounded source expansion and keep-warm decisions. The experimental live runner adds an OpenCode baseline, subscription execution, bounded recovery and per-call usage accounting. Production provider adapters, durable state, bill calibration and the OpenAI labeling worker remain future work. See the [implementation guide](docs/optimizer.md) for the supported subset.
 
 ## Run the optimizer
 
@@ -23,6 +23,8 @@ compache solve --threads threads.jsonl --labels labels.jsonl \
   --model-spec model.json --observation-end 2026-06-21T11:21:27+00:00 \
   --output /tmp/compache-policy
 ```
+
+Targets are selected from 10%, 15%, 20% and 25% of the configured window. The default historical-dependency coverage floor is 95%; use `--min-dependency-coverage 0.90` for a 90% floor. Warm pressure triggers are 50% or 60%, with 60% the standalone default. Cold returns are the normal opportunity to compact. The [current offline selection](docs/dependency-targets.md) chooses a 20% target and reports both retained requirements and achieved context size.
 
 Use your actual collection cutoff. The command writes the training-selected `candidate-policy.json`, the full `report.json`, and `policy.json`. The latter contains the recommended policy: a candidate only passes offline validation with lower held-out modeled cost, satisfied dependency/admission constraints and complete cost coverage. Otherwise it retains the preserve-all, no-ping baseline; it is null if even that baseline fails admission. Validation never picks another candidate or refits the policy on held-out data.
 
@@ -68,7 +70,7 @@ The blue arrows are the two decisions compache outputs. The order the layers get
 
 ## Open design choices
 
-This list describes the broader roadmap. The shipped RAG subset settles prompts/answers as verbatim, retrieves only bounded source pages, uses explicit in-memory state, defaults to zero tolerated known misses/unknown-context changes, and returns `keep_warm` or `lapse`. See the implementation guide for other differences from the full design.
+This list describes the broader roadmap. The shipped RAG subset settles prompts/answers as verbatim, retrieves only bounded source pages, uses explicit in-memory state, defaults to 95% historical-requirement coverage and zero changed unknown-context runs, and returns `keep_warm` or `lapse`. See the implementation guide for other differences from the full design.
 
 Already settled: [statistical fitters, no shipped return curve, Python 3.11 and up](docs/design.md#decided).
 

@@ -1,0 +1,14 @@
+{
+  "source_hashes": {
+    "fixtures/threads.jsonl": "498e84106e67dfb64c07a45f19b6aaba26b310f999e89b288a8ed07f94c16fea",
+    "fixtures/labels.jsonl": "bbae1cac45e652936034f49c7b45038517b9491474cd4d3595be6880a7f2c71c",
+    "fixtures/manifest.json": "117e4d55271cc916486c6cc023303466665abe2ccf3c25a60218e65729d34137",
+    "policy.json": "ce000f93791383e4acc616f1486e7f29c0f3701b723a448b239d0b0a4b4032a5",
+    "profile.json": "559c4b58bb45e72ca5787ba415dd56655d6321c8cc280534f9e273170bd93e4a"
+  },
+  "default_coverage": 0.95,
+  "sensitivity_coverage": 0.9,
+  "holdout": "previously used; diagnostic only, not fresh unseen",
+  "cost": "offline byte-estimated input equivalents, not measured tokens or billing",
+  "new_model_calls": 0
+}

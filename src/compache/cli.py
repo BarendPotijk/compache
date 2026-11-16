@@ -116,14 +116,27 @@ def _parser() -> argparse.ArgumentParser:
         if name == "solve":
             command.add_argument("--heldout-company")
             command.add_argument("--heldout-fraction", type=float, default=0.25)
-            command.add_argument("--max-miss-rate", type=float, default=0.0)
+            command.add_argument(
+                "--max-miss-rate",
+                type=float,
+                default=1.0,
+                help="Optional ceiling on runs with any missing requirement",
+            )
+            command.add_argument(
+                "--min-dependency-coverage",
+                type=float,
+                default=0.95,
+                help="Minimum retained fraction of historical evidence requirements",
+            )
             command.add_argument("--max-unknown-change-rate", type=float, default=0.0)
             command.add_argument("--max-pings", type=int, default=6)
         if name in ("prepare", "replay"):
             command.add_argument("--policy", type=Path, required=True)
         if name == "replay":
             command.add_argument("--profile", type=Path, required=True)
-            command.add_argument("--recovery-overhead", choices=("priced", "zero"), default="priced")
+            command.add_argument(
+                "--recovery-overhead", choices=("priced", "zero"), default="priced"
+            )
             command.add_argument("--runtime-overhead-tokens", type=int, default=0)
         if name == "prepare":
             command.add_argument("--thread-id", required=True)
@@ -172,7 +185,11 @@ def _optimizer_command(args):
             labels,
             spec,
             observation_end=args.observation_end,
-            constraints=Constraints(args.max_miss_rate, args.max_unknown_change_rate),
+            constraints=Constraints(
+                max_miss_rate=args.max_miss_rate,
+                max_unknown_change_rate=args.max_unknown_change_rate,
+                min_historical_dependency_coverage=args.min_dependency_coverage,
+            ),
             heldout_company=args.heldout_company,
             heldout_fraction=args.heldout_fraction,
             timing_source=args.timing_source,
@@ -195,7 +212,11 @@ def _optimizer_command(args):
     if args.group == "replay":
         profile = json.loads(args.profile.read_text(encoding="utf-8"))
         result = replay(
-            threads, labels, policy, profile, observation_end=args.observation_end,
+            threads,
+            labels,
+            policy,
+            profile,
+            observation_end=args.observation_end,
             recovery_overhead=args.recovery_overhead,
             overhead_tokens=args.runtime_overhead_tokens,
         )

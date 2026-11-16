@@ -16,7 +16,7 @@ The custom workload has 72 turns but its explicitly historical dependency questi
 
 A failed attempt that uses an external tool is rejected before its answer enters canonical history. Its raw events and every available model-call usage counter are retained separately as Codex retry overhead. Resumption reuses completed calls only when the reconstructed prompt hash, role, and run identity match; it does not regenerate favorable answers. Tool-isolation changes and resulting runtime-overhead changes are recorded in continuation metadata.
 
-## Reproduce
+## Run the current implementation
 
 ```sh
 python3 scripts/build_long_rag_workload.py --output /tmp/compache-long-fixtures
@@ -33,3 +33,5 @@ The ledger's `usage` records the final provider invocation used for context-pres
 See [the completed six-run result](live-comparison-result.md). The selected long-workload candidate lost to the OpenCode baseline under both TTL assumptions and is not recommended as a default policy.
 
 The timeline allocates each measured logical-call wall duration to its final provider invocation and zero to earlier internal invocations to avoid double counting. These allocated zeros are not measured zero-latency responses. Original logical-call UTC bounds and wall durations remain in the raw ledger; individual internal invocation latencies are unavailable.
+
+The published six-run live result used version 0.3.0 at commit `6479d4bbbe68d8b5480750f3ddeae00276110236`. Version 0.4.0 changes warm-compaction deferral, candidate targets and historical coverage constraints. The earlier live result remains an immutable measurement of 0.3.0; offline replay of the revised policy is not a new live cost or quality measurement.

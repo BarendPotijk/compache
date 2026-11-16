@@ -43,6 +43,11 @@ def feasible(summary, constraints):
         and not summary["skipped_runs"]
         and (summary["miss_rate"] or 0) <= constraints.max_miss_rate
         and summary["unknown_change_rate"] <= constraints.max_unknown_change_rate
+        and (
+            summary["historical_requirements_assessed"] == 0
+            or summary["historical_dependency_coverage"]
+            >= constraints.min_historical_dependency_coverage
+        )
     )
 
 
@@ -72,8 +77,8 @@ def candidates(profile, spec, max_pings=6):
     if not profile["dependency"]["assessable_runs"]:
         return
     for g in grace:
-        for target in (0.15, 0.30):
-            for warm in (0.65, 0.85):
+        for target in (0.10, 0.15, 0.20, 0.25):
+            for warm in (0.50, 0.60):
                 for n in ping_counts:
                     yield Policy(
                         spec.to_dict(),
@@ -148,6 +153,7 @@ def optimize(
             -(grace if grace is not None else 10**9),
             p["max_pings"],
             -p["target"],
+            -p["warm_trigger"],
             digest(p),
         )
 

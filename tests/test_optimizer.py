@@ -25,6 +25,7 @@ from compache.optimizer import (
 from compache.optimizer.contracts import digest
 from compache.optimizer.fit import cdf, survival_curve
 from compache.optimizer.replay import Cache, assess
+from compache.optimizer.solve import candidates, feasible
 from compache.traces import ContractError, Thread, load_threads
 
 
@@ -141,6 +142,76 @@ class ContractAndFitTests(unittest.TestCase):
             Policy(spec.to_dict(), "x", freshness_margin_seconds=45)
         with self.assertRaises(ContractError):
             Constraints(max_miss_rate=2)
+        current = Constraints()
+        self.assertEqual(current.min_historical_dependency_coverage, 0.95)
+        self.assertEqual(Constraints.from_dict(current.to_dict()), current)
+        legacy = Constraints.from_dict(
+            {
+                "schema_version": "compache-constraints-v1",
+                "max_miss_rate": 0.0,
+                "max_unknown_change_rate": 0.0,
+            }
+        )
+        self.assertEqual(legacy.max_miss_rate, 0)
+        self.assertEqual(legacy.min_historical_dependency_coverage, 0)
+
+    def test_historical_coverage_respects_complete_alternatives_and_ignores_direct_lookup_denominator(
+        self,
+    ):
+        historical = [
+            {
+                "requirement_id": f"h{i}",
+                "historical_context_needed": "yes",
+                "alternatives": [
+                    {"sources": [{"part_id": f"a{i}"}, {"part_id": f"b{i}"}]},
+                    {"sources": [{"part_id": f"c{i}"}]},
+                ],
+            }
+            for i in range(20)
+        ]
+        direct = [
+            {
+                "requirement_id": f"d{i}",
+                "historical_context_needed": "no",
+                "alternatives": [{"sources": [{"part_id": "current"}]}],
+            }
+            for i in range(100)
+        ]
+        label = {"status": "complete", "task_requirements": historical + direct}
+        kept = {"current", "a19"} | {f"c{i}" for i in range(19)}
+        result = assess(label, kept)
+        self.assertEqual(result["historical_requirements_assessed"], 20)
+        self.assertEqual(result["historical_requirements_retained"], 19)
+        summary = {
+            "admission_failures": 0,
+            "skipped_runs": 0,
+            "miss_rate": 0.1,
+            "unknown_change_rate": 0,
+            "historical_requirements_assessed": 20,
+            "historical_dependency_coverage": 0.95,
+        }
+        self.assertTrue(feasible(summary, Constraints()))
+        summary["historical_dependency_coverage"] = 0.90
+        self.assertFalse(feasible(summary, Constraints()))
+        self.assertTrue(
+            feasible(summary, Constraints(min_historical_dependency_coverage=0.90))
+        )
+        summary["unknown_change_rate"] = 0.01
+        self.assertFalse(
+            feasible(summary, Constraints(min_historical_dependency_coverage=0.90))
+        )
+
+    def test_search_uses_requested_targets_and_warm_thresholds(self):
+        t = thread()
+        spec = ModelSpec("test")
+        profile = fit_profile([t], labels_for(t), spec, observation_end=END)
+        policies = [
+            p
+            for p in candidates(profile, spec, max_pings=0)
+            if p.retrieval_grace_runs is not None
+        ]
+        self.assertEqual({p.target for p in policies}, {0.10, 0.15, 0.20, 0.25})
+        self.assertEqual({p.warm_trigger for p in policies}, {0.50, 0.60})
 
     def test_kaplan_meier_ties_censoring_and_horizon(self):
         curve = survival_curve([(10, True), (10, False), (20, True), (30, False)], 100)
@@ -253,16 +324,150 @@ class GateTests(unittest.TestCase):
         self.assertIn("t-r1-doc", c.removed_part_ids)
 
     def test_crossing_warm_trigger_replans_once(self):
-        t = thread(n=4)
+        spec = ModelSpec(
+            "test", context_tokens=10000, bytes_per_token=1, part_overhead_tokens=0
+        )
+        policy = Policy(
+            spec.to_dict(), "x", retrieval_grace_runs=0, protect_query_matches=False
+        )
+        first = Request(
+            "t",
+            "r1",
+            1,
+            "test",
+            (Source("u1", "input", 1, "q"), Source("d1", "retrieval", 1, "x" * 6000)),
+        )
+        req = Request(
+            "t",
+            "r2",
+            2,
+            "test",
+            first.parts
+            + (
+                Source("a1", "output", 1, "a"),
+                Source("u2", "input", 2, "q"),
+                Source("d2", "retrieval", 2, "y" * 1000),
+            ),
+        )
         st = ThreadState("t")
-        prepare(Request.from_thread(t, "t-r3"), self.policy, st, 1200)
-        req = Request.from_thread(t, "t-r4")
-        b = prepare(req, self.policy, st, 1210)
+        prepare(first, policy, st, 0)
+        b = prepare(req, policy, st, 10)
         self.assertEqual(b.action, "replaced_warm")
         self.assertEqual(b.prefix_transition, "rewritten")
-        c = prepare(req, self.policy, st, 1211)
+        self.assertLessEqual(b.tokens, policy.target * spec.context_tokens)
+        c = prepare(req, policy, st, 11)
         self.assertEqual(c.wire, b.wire)
         self.assertEqual(c.action, "applied_warm")
+
+    def test_warm_below_sixty_percent_waits_for_cold_return(self):
+        spec = ModelSpec(
+            "test", context_tokens=10000, bytes_per_token=1, part_overhead_tokens=0
+        )
+        policy = Policy(
+            spec.to_dict(), "x", retrieval_grace_runs=0, protect_query_matches=False
+        )
+        first = Request(
+            "t",
+            "r1",
+            1,
+            "test",
+            (Source("u1", "input", 1, "q"), Source("d1", "retrieval", 1, "x" * 4000)),
+        )
+        req = Request(
+            "t",
+            "r2",
+            2,
+            "test",
+            first.parts
+            + (
+                Source("a1", "output", 1, "a"),
+                Source("u2", "input", 2, "q"),
+                Source("d2", "retrieval", 2, "y" * 1000),
+            ),
+        )
+        state = ThreadState("t")
+        prior = prepare(first, policy, state, 0)
+        warm = prepare(req, policy, state, 10)
+        self.assertEqual(warm.wire[: len(prior.wire)], prior.wire)
+        self.assertFalse(warm.removed_part_ids)
+        cold = prepare(req, policy, state, 400)
+        self.assertEqual(cold.window, "cold")
+        self.assertEqual(cold.removed_part_ids, {"d1"})
+
+    def test_unreachable_warm_target_preserves_prefix_but_cold_takes_partial_cut(self):
+        spec = ModelSpec(
+            "test", context_tokens=10000, bytes_per_token=1, part_overhead_tokens=0
+        )
+        policy = Policy(
+            spec.to_dict(), "x", retrieval_grace_runs=0, protect_query_matches=False
+        )
+        first = Request(
+            "t",
+            "r1",
+            1,
+            "test",
+            (Source("u1", "input", 1, "q"), Source("d1", "retrieval", 1, "x" * 3000)),
+        )
+        req = Request(
+            "t",
+            "r2",
+            2,
+            "test",
+            first.parts
+            + (
+                Source("a1", "output", 1, "a"),
+                Source("u2", "input", 2, "q"),
+                Source("d2", "retrieval", 2, "y" * 4000),
+            ),
+        )
+        state = ThreadState("t")
+        prior = prepare(first, policy, state, 0)
+        warm = prepare(req, policy, state, 10)
+        self.assertEqual(warm.action, "deferred_warm")
+        self.assertEqual(warm.reason, "warm_compaction_target_unreachable")
+        self.assertFalse(state.removed)
+        self.assertEqual(warm.wire[: len(prior.wire)], prior.wire)
+        again = prepare(req, policy, state, 11)
+        self.assertEqual(again.wire, warm.wire)
+        cold = prepare(req, policy, state, 400)
+        self.assertTrue(cold.admitted)
+        self.assertEqual(cold.removed_part_ids, {"d1"})
+        self.assertGreater(cold.tokens, policy.target * spec.context_tokens)
+        # A cold return is already uncached, so partial savings are useful.
+
+    def test_admission_can_force_partial_warm_cut_without_dropping_current(self):
+        spec = ModelSpec(
+            "test", context_tokens=10000, bytes_per_token=1, part_overhead_tokens=0
+        )
+        policy = Policy(
+            spec.to_dict(), "x", retrieval_grace_runs=0, protect_query_matches=False
+        )
+        first = Request(
+            "t",
+            "r1",
+            1,
+            "test",
+            (Source("u1", "input", 1, "q"), Source("d1", "retrieval", 1, "x" * 3000)),
+        )
+        req = Request(
+            "t",
+            "r2",
+            2,
+            "test",
+            first.parts
+            + (
+                Source("a1", "output", 1, "a"),
+                Source("u2", "input", 2, "q"),
+                Source("d2", "retrieval", 2, "y" * 7000),
+            ),
+        )
+        state = ThreadState("t")
+        prepare(first, policy, state, 0)
+        result = prepare(req, policy, state, 10)
+        self.assertTrue(result.admitted)
+        self.assertEqual(result.action, "replaced_warm_for_admission")
+        self.assertEqual(result.removed_part_ids, {"d1"})
+        self.assertIn("d2", result.full_part_ids)
 
     def test_new_policy_latches_only_when_cold(self):
         t = thread()

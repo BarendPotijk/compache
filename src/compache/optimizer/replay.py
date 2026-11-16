@@ -77,6 +77,8 @@ def assess(label, full_ids):
             "assessable": False,
             "missed_requirements": [],
             "restore_alternatives": [],
+            "historical_requirements_assessed": 0,
+            "historical_requirements_retained": 0,
         }
     assessable = label["status"] == "complete" and all(
         t["historical_context_needed"] != "unknown" and t["alternatives"]
@@ -84,17 +86,24 @@ def assess(label, full_ids):
     )
     missed = []
     alternatives = []
+    historical_total = historical_retained = 0
     for req in label["task_requirements"]:
         if req["historical_context_needed"] == "unknown" or not req["alternatives"]:
             continue
         sets = [{s["part_id"] for s in a["sources"]} for a in req["alternatives"]]
-        if not any(s <= full_ids for s in sets):
+        retained = any(s <= full_ids for s in sets)
+        if req["historical_context_needed"] == "yes":
+            historical_total += 1
+            historical_retained += int(retained)
+        if not retained:
             missed.append(req["requirement_id"])
             alternatives.append([s - full_ids for s in sets])
     return {
         "assessable": assessable,
         "missed_requirements": missed,
         "restore_alternatives": alternatives,
+        "historical_requirements_assessed": historical_total,
+        "historical_requirements_retained": historical_retained,
     }
 
 
@@ -170,6 +179,12 @@ def replay(
                 "removed_part_ids": sorted(prepared.removed_part_ids),
                 "dependency_assessable": assessment["assessable"],
                 "missed_requirements": assessment["missed_requirements"],
+                "historical_requirements_assessed": assessment[
+                    "historical_requirements_assessed"
+                ],
+                "historical_requirements_retained": assessment[
+                    "historical_requirements_retained"
+                ],
                 "unknown_context_changed": not assessment["assessable"]
                 and bool(prepared.removed_part_ids),
                 "recovered_part_ids": [],
@@ -307,6 +322,8 @@ def replay(
     unknown = [r for r in records if not r["dependency_assessable"]]
     misses = sum(bool(r["missed_requirements"]) for r in assessed)
     changes = sum(r["unknown_context_changed"] for r in unknown)
+    historical_total = sum(r["historical_requirements_assessed"] for r in records)
+    historical_retained = sum(r["historical_requirements_retained"] for r in records)
     summary = {
         "threads": len(threads),
         "recovery_overhead": recovery_overhead,
@@ -335,6 +352,12 @@ def replay(
         "unknown_runs": len(unknown),
         "miss_runs": misses,
         "miss_rate": misses / len(assessed) if assessed else None,
+        "historical_requirements_assessed": historical_total,
+        "historical_requirements_retained": historical_retained,
+        "historical_dependency_coverage": historical_retained / historical_total
+        if historical_total
+        else None,
+        "historical_coverage_basis": "Fraction of labeled historical requirements with one complete sufficient evidence alternative retained before recovery; AND within each alternative, OR across alternatives. Unknown requirements and direct lookup requirements are excluded, with unknown runs reported separately.",
         "unknown_changed_runs": changes,
         "unknown_change_rate": changes / len(unknown) if unknown else 0,
         "admission_failures": sum(not r["admitted"] for r in records),
