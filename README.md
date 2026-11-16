@@ -2,7 +2,24 @@
 
 compache fits a context-compaction and cache keep-warm policy to your own traces, then applies it deterministically on every model request.
 
-**Status:** design only, no code yet. The full design is in [docs](docs/README.md).
+**Status:** the offline trace and dependency-label contracts are implemented, with a reproducible standard-RAG benchmark and coding-agent skill. The fitters, solver, runtime gate, retention planner and OpenAI annotation worker remain design work. The full design is in [docs](docs/README.md).
+
+## Try the first milestone
+
+Requires Python 3.11 or newer; the package has no runtime dependencies.
+
+```sh
+python3 -m pip install -e .
+compache traces validate benchmarks/rag_v1/threads.jsonl
+compache dependencies prepare --threads benchmarks/rag_v1/threads.jsonl --thread-id rag-001 --run-id rag-001-run-03 --output /tmp/compache-packet.json
+python3 -m unittest discover -s tests -v
+```
+
+The [benchmark](benchmarks/rag_v1/README.md) contains 45 fictional threads, 207 runs and 15 question families across three companies. It exercises earlier user constraints, retrieved context, prior answers, alternative evidence, version changes and missing content. Timing is simulated; token usage is unknown. Its 45 final-run expectations are authored test cases, not measured causal necessity or production workload frequencies.
+
+Use the [dependency-labeling skill](skills/compache-label-dependencies/SKILL.md) to annotate prepared packets with your coding agent. Its scripts call the same package functions and validator as the CLI. The [contract documentation](docs/trace-contracts.md) describes the supported offline Langfuse envelope, source identities and coverage rules. These commands need no API keys and make no network requests.
+
+## Planned runtime architecture
 
 ![Architecture. Offline, two fitters turn traces into a profile and a solver turns that into a policy. Online, the gate and the planner read the policy.](docs/assets/architecture.svg)
 
@@ -56,4 +73,4 @@ Already settled: [statistical fitters, no shipped return curve, Python 3.11 and 
 **Project**
 
 19. **Licence.** Needed before the first release.
-20. **Development interpreter.** `.python-version` pins 3.15.0 while the floor is 3.11. Proposed: pin 3.11.
+20. **Development interpreter.** `.python-version` and the package floor now use Python 3.11.
