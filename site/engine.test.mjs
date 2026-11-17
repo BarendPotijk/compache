@@ -150,7 +150,7 @@ test('planner returns expected costs and gains for each permitted plan',()=>{
   const held=[{id:'system',kind:'system',turn:-1,tokens:2048},{id:'i0',kind:'input',turn:0,tokens:100000}];
   const full=[...held,{id:'o0',kind:'output',turn:0,tokens:500}];
   const p=evaluatePingPlan(held,full,c,0);
-  assert.equal(p.rows.length,c.maxPings);
+  assert.equal(p.rows.length,c.maxPings+1);assert.equal(p.rows[0].pings,0);
   for(const r of p.rows)assert.equal(r.net,r.expectedGain-r.expectedCost);
   assert.equal(p.chosen,planPings(held,full,c,0));
 });
@@ -203,4 +203,48 @@ test('below cache minimum fresh tokens use base input price',()=>{
   const r=runArm(workload([t(0,0,100)]),c,'compache');
   assert.equal(r.ledger[0].inputCost,120/1e6);
   assert.equal(priceCall(120,0,0,c.model,{cacheable:false}).inputCost,120/1e6);
+});
+
+test('zero retrieval mode produces no retrieval dependencies or requirements',()=>{
+  const c=config({threads:2,tokenMedian:0,tokenP95:0,retrievalDependencyProbability:1,inputDependencyProbability:0,outputDependencyProbability:0});
+  const w=generateWorkload(c);
+  for(const thread of w.threads)for(const turn of thread.turns){assert.equal(turn.retrievalTokens,0);assert.ok(turn.dependencies.every(d=>d.kind!=='retrieval'));}
+  const r=runArm(w,c,'compache');assert.equal(r.retention.byKind.retrieval.expectedRequired,0);assert.equal(r.retention.expected,null);
+  const sim=simulate({...c,retentionRequirement:.75});assert.equal(sim.optimization.feasible,true);assert.equal(sim.optimization.retention,null);
+});
+test('retrieval bounds, retention range and nonfinite values are validated',()=>{
+  const c=config({tokenMedian:500000,tokenP95:500000,retentionRequirement:.75});assert.equal(generateWorkload(c).threads[0].turns[0].retrievalTokens,500000);
+  assert.throws(()=>configure({tokenMedian:500001}));assert.throws(()=>configure({retentionRequirement:.749}));assert.throws(()=>configure({tokenMedian:NaN}));assert.throws(()=>configure({tokenP95:Infinity}));
+});
+test('answer cache breakdown sums exactly and distinguishes expired matches and new blocks',()=>{
+  const c=config({systemTokens:100,cacheMinTokens:1,cacheBlockTokens:1,safetyReserve:0,model:{context:100000,maxInput:100000},ttlMinutes:5});
+  const r=runArm(workload([t(0,0,100),t(1,4,100),t(2,10,100)]),c,'compache');
+  const answers=r.ledger.filter(x=>x.role==='answer');
+  assert.equal(answers[0].cacheBreakdown.firstRequest,answers[0].inputTokens);
+  assert.ok(answers[1].cacheBreakdown.cached>0);assert.ok(answers[1].cacheBreakdown.newContext>0);
+  assert.ok(answers[2].cacheBreakdown.expiredPrefix>0);
+  for(const row of answers)assert.equal(Object.values(row.cacheBreakdown).reduce((a,b)=>a+b,0),row.inputTokens);
+  assert.equal(Object.values(r.cacheBreakdown).reduce((a,b)=>a+b,0),r.byRole.answer.inputTokens);
+});
+test('a compaction rewrite leaves previously sent blocks in changed-prefix fresh tokens',()=>{
+  const c=config({systemTokens:100,cacheMinTokens:1,cacheBlockTokens:1,safetyReserve:0,target:.2,warmTrigger:.8,model:{context:1200,maxInput:1200},ttlMinutes:10});
+  const r=runArm(workload([t(0,0),t(1,1),t(2,2)]),c,'compache');
+  assert.ok(r.compactions>0);assert.ok(r.ledger.find(x=>x.role==='answer'&&x.turn===2).cacheBreakdown.changedPrefix>0);
+});
+test('ping payoff includes zero and exposes timing even when disabled',()=>{
+  const c=config({keepWarm:false}),held=[{id:'s',tokens:1000,kind:'system',turn:-1}],full=held;
+  const p=evaluatePingPlan(held,full,c,0);assert.deepEqual(p.rows,[{pings:0,expectedGain:0,expectedCost:0,net:0}]);assert.equal(p.ttl,c.ttlMinutes);assert.equal(p.interval,c.ttlMinutes-c.pingLeadMinutes);assert.equal(p.reason,'disabled');
+});
+
+test('Compache archives an expired prefix before a no-ping cold return',()=>{
+  const c=config({systemTokens:100,cacheMinTokens:1,cacheBlockTokens:1,safetyReserve:0,model:{context:100000,maxInput:100000},ttlMinutes:5,keepWarm:false});
+  const r=runArm(workload([t(0,0,100),t(1,6,100)]),c,'compache');
+  const second=r.ledger.filter(row=>row.role==='answer')[1];
+  assert.deepEqual(second.cacheBreakdown,{cached:0,newContext:130,firstRequest:0,expiredPrefix:210,changedPrefix:0});
+  assert.equal(second.inputTokens,340);assert.equal(second.inputCost,340*c.model.inputRate*c.model.writeMultiplier/1e6);
+});
+test('failed admission with decisions but no ledger remains safe',()=>{
+  const c=config({systemTokens:100,safetyReserve:0,model:{context:1000,maxInput:100}});
+  const r=runArm(workload([t(0,0,100)]),c,'compache',{collectLedger:false,collectDecisions:true});
+  assert.equal(r.complete,false);assert.equal(r.ledger.length,0);assert.equal(r.decisions.length,1);assert.equal(r.decisions[0].admitted,false);
 });

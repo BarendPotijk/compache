@@ -1,10 +1,10 @@
 /* Deterministic hypothetical cost model. This does not execute either product. */
 export const DEFAULTS = Object.freeze({
-  seed: 42, companies: 1, threads: 100, maxTurns: 160, lengthDistribution: 'lognormal', plannedTurns: 80, plannedTurnsP95: 140,
+  seed: 42, companies: 1, threads: 100, maxTurns: 160, lengthDistribution: 'lognormal', plannedTurns: 8, plannedTurnsP95: 20,
   continuationProbability: 0.99, tokenMedian: 25000, tokenP95: 45000,
   companyVariation: 0, gapMedianMinutes: 4, gapP95Minutes: 60,
   dependencyProbability: 0.25, dependencyLookback: 24, inputDependencyProbability: 0.25, retrievalDependencyProbability: 0.25, outputDependencyProbability: 0.25, inputDependencyLookback: 24, retrievalDependencyLookback: 24, outputDependencyLookback: 24, retentionRequirement: 0.95, retrievalRetentionRuns: 0, inputTokens: 200, outputTokens: 500, ttlMinutes: 30,
-  target: 0.20, warmTrigger: 0.5, maxPings: 3, keepWarm: true, pingLeadMinutes: 0.75,
+  target: 0.20, warmTrigger: 0.5, maxPings: 12, keepWarm: true, pingLeadMinutes: 0.75,
   pingOutputTokens: 16, safetyReserve: 32000, systemTokens: 2048,
   cacheMinTokens: 1024, cacheBlockTokens: 1, tailTokens: 20000,
   summaryTokens: 4000, summaryInputCap: 40000, toolSummaryTokens: 500, summarySystemTokens: 2048, recordTokens: 1500, flushOutputTokens: 256,
@@ -26,7 +26,7 @@ export function configure(overrides = {}) {
     if(Object.hasOwn(overrides,'dependencyProbability') && !Object.hasOwn(overrides,pk)) c[pk]=overrides.dependencyProbability;
     if(Object.hasOwn(overrides,'dependencyLookback') && !Object.hasOwn(overrides,lk)) c[lk]=overrides.dependencyLookback;
   }
-  for (const [k,min,max] of [['companies',1,200],['threads',1,200],['maxTurns',1,160],['plannedTurns',1,160],['plannedTurnsP95',1,320],['dependencyLookback',1,160],['inputDependencyLookback',1,160],['retrievalDependencyLookback',1,160],['outputDependencyLookback',1,160],['retrievalRetentionRuns',0,160],['retentionRequirement',0.9,1],['maxPings',0,10],['target',0.01,0.45],['seed',0,4294967295],['tokenMedian',1,500000],['tokenP95',1,1000000],['gapMedianMinutes',0.001,100000],['gapP95Minutes',0.001,1000000],['companyVariation',0,2],['continuationProbability',0,1],['dependencyProbability',0,1],['inputDependencyProbability',0,1],['retrievalDependencyProbability',0,1],['outputDependencyProbability',0,1],['ttlMinutes',0.01,100000],['warmTrigger',0.23,1],['pingLeadMinutes',0,100000],['inputTokens',1,100000],['outputTokens',0,200000],['pingOutputTokens',0,10000],['safetyReserve',0,1000000],['systemTokens',0,1000000],['cacheMinTokens',0,1000000],['cacheBlockTokens',1,100000],['tailTokens',0,1000000],['summaryTokens',1,100000],['summaryInputCap',1,1000000],['toolSummaryTokens',1,100000],['summarySystemTokens',0,100000],['recordTokens',0,100000],['flushOutputTokens',0,100000]]) finite(c[k],k,min,max);
+  for (const [k,min,max] of [['companies',1,200],['threads',1,200],['maxTurns',1,160],['plannedTurns',1,160],['plannedTurnsP95',1,320],['dependencyLookback',1,160],['inputDependencyLookback',1,160],['retrievalDependencyLookback',1,160],['outputDependencyLookback',1,160],['retrievalRetentionRuns',0,160],['retentionRequirement',0.75,1],['maxPings',0,12],['target',0.01,0.45],['seed',0,4294967295],['tokenMedian',0,500000],['tokenP95',0,1000000],['gapMedianMinutes',0.001,100000],['gapP95Minutes',0.001,1000000],['companyVariation',0,2],['continuationProbability',0,1],['dependencyProbability',0,1],['inputDependencyProbability',0,1],['retrievalDependencyProbability',0,1],['outputDependencyProbability',0,1],['ttlMinutes',0.01,100000],['warmTrigger',0.23,1],['pingLeadMinutes',0,100000],['inputTokens',1,100000],['outputTokens',0,200000],['pingOutputTokens',0,10000],['safetyReserve',0,1000000],['systemTokens',0,1000000],['cacheMinTokens',0,1000000],['cacheBlockTokens',1,100000],['tailTokens',0,1000000],['summaryTokens',1,100000],['summaryInputCap',1,1000000],['toolSummaryTokens',1,100000],['summarySystemTokens',0,100000],['recordTokens',0,100000],['flushOutputTokens',0,100000]]) finite(c[k],k,min,max);
   for (const k of ['companies','threads','maxTurns','plannedTurns','plannedTurnsP95','dependencyLookback','inputDependencyLookback','retrievalDependencyLookback','outputDependencyLookback','retrievalRetentionRuns','maxPings','seed','inputTokens','outputTokens','pingOutputTokens','safetyReserve','systemTokens','cacheMinTokens','cacheBlockTokens','tailTokens','summaryTokens','summaryInputCap','toolSummaryTokens','summarySystemTokens','recordTokens','flushOutputTokens']) if (!Number.isInteger(c[k])) throw new RangeError(`${k} must be an integer`);
   if (!['fixed','geometric','lognormal'].includes(c.lengthDistribution)) throw new RangeError('invalid lengthDistribution');
   if ((c.lengthDistribution==='lognormal' && c.plannedTurnsP95 < c.plannedTurns) || c.tokenP95 < c.tokenMedian || c.gapP95Minutes < c.gapMedianMinutes) throw new RangeError('p95 must be at least the median');
@@ -56,11 +56,11 @@ export function generateWorkload(config) {
     const turns=[]; let time=0;
     for(let i=0;i<length;i++) {
       if(i>0) {if(random()>=c.continuationProbability) break; const g=lognormal(random,c.gapMedianMinutes,c.gapP95Minutes); gaps.push(g); time+=g;}
-      const total=Math.max(2,Math.min(1000000,Math.round(lognormal(random,c.tokenMedian,c.tokenP95)*factor)));
+      const total=c.tokenMedian===0?0:Math.max(1,Math.min(1000000,Math.round(lognormal(random,c.tokenMedian,c.tokenP95)*factor)));
       const input=c.inputTokens, retrieval=total, deps=[];
       if(i) for(const kind of ['input','retrieval','output']) {
         const p=c[`${kind}DependencyProbability`], lookback=c[`${kind}DependencyLookback`];
-        if(random()<p) deps.push({kind,turn:i-1-Math.floor(random()*Math.min(i,lookback))});
+        if(!(kind==='retrieval' && c.tokenMedian===0) && random()<p) deps.push({kind,turn:i-1-Math.floor(random()*Math.min(i,lookback))});
       }
       turns.push({index:i,time,inputTokens:input,retrievalTokens:retrieval,outputTokens:c.outputTokens,dependencies:deps});
     }
@@ -120,8 +120,8 @@ export function evaluatePingPlan(held, full, c, runIndex=0) {
   const returnProbability=currentSurvival>0?c.continuationProbability*nextSurvival/currentSurvival:0;
   const cold=coldPreview(full.slice(1),c), coldInput=sum(cold);
   let reason=!c.keepWarm?'disabled':!c.maxPings?'no pings allowed':interval<=0?'ping interval is not positive':heldInput<c.cacheMinTokens?'prefix is below cache minimum':k>(c.warmTrigger-c.safetyReserve/c.model.context)*c.model.context?'prefix exceeds keep-warm ceiling':returnProbability<=0?'no modeled future return':null;
-  const rows=[];
-  if(reason)return {chosen:0,reason,coldTokens:coldInput,heldTokens:heldInput,returnProbability,rows};
+  const rows=[{pings:0,expectedGain:0,expectedCost:0,net:0}];
+  if(reason)return {chosen:0,reason,coldTokens:coldInput,heldTokens:heldInput,interval,ttl:c.ttlMinutes,returnProbability,rows};
   const heldShared=sharedPrefix(held,full);
   const cachedHeld=heldShared>=c.cacheMinTokens ? Math.floor(heldShared/c.cacheBlockTokens)*c.cacheBlockTokens : 0;
   const fullCached=k>=c.cacheMinTokens ? Math.floor(k/c.cacheBlockTokens)*c.cacheBlockTokens : 0;
@@ -140,7 +140,7 @@ export function evaluatePingPlan(held, full, c, runIndex=0) {
     rows.push({pings:n,expectedGain,expectedCost:cost,net});
     if(net>value){value=net;best=n;}
   }
-  return {chosen:best,reason:best?'positive expected value':'no positive expected value',coldTokens:coldInput,heldTokens:heldInput,returnProbability,rows};
+  return {interval,ttl:c.ttlMinutes,chosen:best,reason:best?'positive expected value':'no positive expected value',coldTokens:coldInput,heldTokens:heldInput,returnProbability,rows};
 }
 export function planPings(held,full,c,runIndex=0) {return evaluatePingPlan(held,full,c,runIndex).chosen;}
 
@@ -148,23 +148,43 @@ const block=(id,tokens,kind,turn,source=id)=>Object.freeze({id,tokens,kind,turn,
 function admitted(input,output,c,arm,role){const reserve=arm==='compache'?c.safetyReserve:role==='answer'?Math.min(20000,.25*c.model.context):0;return input<=c.model.maxInput && input+Math.max(output,reserve)<=c.model.context;}
 export function runArm(workload, config, arm, {collectDecisions=true,collectLedger=true}={}) {
   const c=configure(config); if(!['compache','openclaw'].includes(arm)) throw new RangeError('invalid arm');
-  const ledger=[], curves=[], decisions=[], roles={}, total={inputTokens:0,cachedTokens:0,freshTokens:0,outputTokens:0,inputCost:0,cachedCost:0,outputCost:0,cost:0,calls:0};
+  const ledger=[], curves=[], decisions=[], roles={}, cacheBreakdown=collectLedger?{cached:0,newContext:0,firstRequest:0,expiredPrefix:0,changedPrefix:0}:null, total={inputTokens:0,cachedTokens:0,freshTokens:0,outputTokens:0,inputCost:0,cachedCost:0,outputCost:0,cost:0,calls:0};
   let completedThreads=0,completedRuns=0,attemptedRuns=0,compactions=0,recalls=0,required=0,covered=0,failedCalls=0,pings=0,totalRemovedTokens=0,totalRecallTokens=0;
   const pre=Object.fromEntries(['input','retrieval','output'].map(kind=>[kind,{expectedRequired:0,expectedRetained:0,observedRequired:0,observedRetained:0}]));
   for(const thread of workload.threads) {
-    let history=[],snapshots=[],callIndex=0,threadCost=0,summaryIndex=0,failed=false;
+    let history=[],snapshots=[],expiredSnapshots=[],seenBlocks=new Set(),callIndex=0,threadCost=0,summaryIndex=0,failed=false;
     const system=block('system',c.systemTokens,'system',-1);
+    function expireSnapshots(time) {
+      const stillLive=[]; for(const snapshot of snapshots) {if(time-snapshot.time<c.ttlMinutes)stillLive.push(snapshot);else if(collectLedger)expiredSnapshots.push(snapshot);}
+      snapshots=stillLive; if(expiredSnapshots.length>16)expiredSnapshots=expiredSnapshots.slice(-16);
+    }
     function request(blocks,role,time,output,turn) {
       const input=sum(blocks);
       if(!admitted(input,output,c,arm,role)){failedCalls++;if(collectLedger)ledger.push({arm,thread:thread.id,turn,role,time,inputTokens:input,outputTokens:output,admitted:false});return null;}
-      snapshots=snapshots.filter(s=>time-s.time<c.ttlMinutes);
+      expireSnapshots(time);
       let prefix=0; for(const s of snapshots) prefix=Math.max(prefix,sharedPrefix(s.blocks,blocks));
       const cached=prefix>=c.cacheMinTokens ? Math.floor(prefix/c.cacheBlockTokens)*c.cacheBlockTokens : 0;
+      let attribution=null;
+      if(collectLedger && role==='answer') {
+        attribution={cached,newContext:0,firstRequest:0,expiredPrefix:0,changedPrefix:0};
+        if(callIndex===0)attribution.firstRequest=input-cached;
+        else {
+          let best=prefix; for(const snapshot of expiredSnapshots) best=Math.max(best,sharedPrefix(snapshot.blocks,blocks));
+          const bestCached=best>=c.cacheMinTokens?Math.floor(best/c.cacheBlockTokens)*c.cacheBlockTokens:0;
+          attribution.expiredPrefix=Math.max(0,bestCached-cached);
+          let offset=0; for(const b of blocks) {
+            const tail=Math.max(0,offset+b.tokens-Math.max(offset,bestCached));
+            if(tail){if(seenBlocks.has(`${b.id}:${b.tokens}`))attribution.changedPrefix+=tail;else attribution.newContext+=tail;}
+            offset+=b.tokens;
+          }
+        }
+        for(const key of Object.keys(cacheBreakdown))cacheBreakdown[key]+=attribution[key];
+      }
       const costs=priceCall(input,cached,output,c.model,{cacheable:input>=c.cacheMinTokens});
-      const row={arm,thread:thread.id,turn,role,time,admitted:true,...costs}; if(collectLedger)ledger.push(row); callIndex++;
+      const row={arm,thread:thread.id,turn,role,time,admitted:true,...costs,...(attribution?{cacheBreakdown:attribution}:{})}; if(collectLedger)ledger.push(row); callIndex++;
       const roleTotal=roles[role] ||= {calls:0,inputTokens:0,cachedTokens:0,freshTokens:0,outputTokens:0,inputCost:0,cachedCost:0,outputCost:0,cost:0};
       for(const target of [total,roleTotal]) {target.calls++; for(const k of ['inputTokens','cachedTokens','freshTokens','outputTokens','inputCost','cachedCost','outputCost','cost']) target[k]+=costs[k];}
-      threadCost+=costs.cost; if(input>=c.cacheMinTokens) snapshots.push({time,blocks:blocks.slice()});
+      threadCost+=costs.cost; if(collectLedger)for(const b of blocks)seenBlocks.add(`${b.id}:${b.tokens}`); if(input>=c.cacheMinTokens) snapshots.push({time,blocks:blocks.slice()});
       return row;
     }
     for(let i=0;i<thread.turns.length;i++) {
@@ -178,11 +198,11 @@ export function runArm(workload, config, arm, {collectDecisions=true,collectLedg
         if(i) {
           const present=new Set(history.filter(b=>b.kind==='retrieval').map(b=>b.source));
           for(const kind of ['input','retrieval','output']) {
-            const p=c[`${kind}DependencyProbability`], limit=Math.min(i,c[`${kind}DependencyLookback`]), prefix=kind==='input'?'i':kind==='retrieval'?'r':'o';
+            const p=kind==='retrieval' && c.tokenMedian===0?0:c[`${kind}DependencyProbability`], limit=Math.min(i,c[`${kind}DependencyLookback`]), prefix=kind==='input'?'i':kind==='retrieval'?'r':'o';
             let n=kind==='retrieval'?0:limit; if(kind==='retrieval')for(let age=1;age<=limit;age++) if(present.has(`${prefix}${i-age}`)) n++;
             pre[kind].expectedRequired+=p; pre[kind].expectedRetained+=p*n/limit;
           }
-          for(const d of turn.dependencies) {const prefix=d.kind==='input'?'i':d.kind==='retrieval'?'r':'o';pre[d.kind].observedRequired++;if(d.kind!=='retrieval'||present.has(`${prefix}${d.turn}`))pre[d.kind].observedRetained++;}
+          for(const d of turn.dependencies) {if(d.kind==='retrieval' && thread.turns[d.turn]?.retrievalTokens===0)continue;const prefix=d.kind==='input'?'i':d.kind==='retrieval'?'r':'o';pre[d.kind].observedRequired++;if(d.kind!=='retrieval'||present.has(`${prefix}${d.turn}`))pre[d.kind].observedRetained++;}
         }
         let added=[];
         for(const source of protectedSources) if(!history.some(b=>b.source===source)) {
@@ -192,7 +212,7 @@ export function runArm(workload, config, arm, {collectDecisions=true,collectLedg
         let view=[system,...history,input,retrieval,...added];
         const before=view.slice(), removed=[];
         const recallTokens=sum(added); totalRecallTokens+=recallTokens;
-        snapshots=snapshots.filter(s=>turn.time-s.time<c.ttlMinutes);
+        expireSnapshots(turn.time);
         const warm=snapshots.some(s=>sharedPrefix(s.blocks,view)>=c.cacheMinTokens);
         const threshold=(warm?c.warmTrigger:c.target+.02)*c.model.context;
         let projectedSize=sum(view);
@@ -232,8 +252,8 @@ export function runArm(workload, config, arm, {collectDecisions=true,collectLedg
         history.push(input,retrieval);
       }
       const view=[system,...history];
-      required+=turn.dependencies.length;
-      for(const d of turn.dependencies) if(view.some(b=>b.source===`${d.kind==='input'?'i':d.kind==='retrieval'?'r':'o'}${d.turn}`)) covered++;
+      required+=turn.dependencies.filter(d=>d.kind!=='retrieval'||thread.turns[d.turn]?.retrievalTokens!==0).length;
+      for(const d of turn.dependencies.filter(d=>d.kind!=='retrieval'||thread.turns[d.turn]?.retrievalTokens!==0)) if(view.some(b=>b.source===`${d.kind==='input'?'i':d.kind==='retrieval'?'r':'o'}${d.turn}`)) covered++;
       const row=request(view,'answer',turn.time,turn.outputTokens,i);
       if(!row){if(decision){decision.admitted=false;if(collectLedger)Object.assign(ledger.at(-1),{beforeTokens:decision.beforeTokens,afterTokens:decision.afterTokens,cacheState:decision.cacheState,triggerTokens:decision.triggerTokens,targetTokens:decision.targetTokens,removedTokens:decision.removedTokens,recallTokens:decision.recallTokens});decisions.push(Object.freeze(decision));}failed=true;break;}
       if(decision)decision.admitted=true;
@@ -252,7 +272,7 @@ export function runArm(workload, config, arm, {collectDecisions=true,collectLedg
   const expectedRequired=Object.values(pre).reduce((n,x)=>n+x.expectedRequired,0), expectedRetained=Object.values(pre).reduce((n,x)=>n+x.expectedRetained,0), observedRequired=Object.values(pre).reduce((n,x)=>n+x.observedRequired,0), observedRetained=Object.values(pre).reduce((n,x)=>n+x.observedRetained,0);
   const byKindRetention=Object.fromEntries(Object.entries(pre).map(([kind,row])=>[kind,{...row,expected:row.expectedRequired?row.expectedRetained/row.expectedRequired:null,observed:row.observedRequired?row.observedRetained/row.observedRequired:null}]));
   const retention={expected:expectedRequired?expectedRetained/expectedRequired:null,observed:observedRequired?observedRetained/observedRequired:null,expectedRequired,expectedRetained,observedRequired,observedRetained,byKind:byKindRetention};
-  return {totals:total,byRole:roles,ledger,decisions,retention,removedTokens:totalRemovedTokens,recallTokens:totalRecallTokens,completedThreads,plannedThreads:workload.threads.length,completedRuns,plannedRuns:workload.totalRuns,attemptedRuns,failedCalls,complete:completedThreads===workload.threads.length,compactions,recalls,pings,rawSourceAvailability:required?covered/required:null,dependencyCoverage:required?covered/required:null,dependencies:{required,covered},curve:curves};
+  return {totals:total,byRole:roles,ledger,decisions,retention,cacheBreakdown,removedTokens:totalRemovedTokens,recallTokens:totalRecallTokens,completedThreads,plannedThreads:workload.threads.length,completedRuns,plannedRuns:workload.totalRuns,attemptedRuns,failedCalls,complete:completedThreads===workload.threads.length,compactions,recalls,pings,rawSourceAvailability:required?covered/required:null,dependencyCoverage:required?covered/required:null,dependencies:{required,covered},curve:curves};
 }
 export function simulate(overrides={}) {
   const base=configure(overrides), workload=generateWorkload(base), candidates=[];
@@ -278,6 +298,6 @@ export function simulate(overrides={}) {
   const compache=runArm(workload,config,'compache'), openclaw=runArm(workload,config,'openclaw');
   const optimization={feasible:feasible.length>0,retentionRequirement:base.retentionRequirement,retention:compache.retention.expected,candidateCount:candidates.length,selected:feasible.length?selected:null,diagnosticPolicy:feasible.length?null:selected,candidates};
   const savings=optimization.feasible&&compache.complete&&openclaw.complete ? {absolute:openclaw.totals.cost-compache.totals.cost,percent:openclaw.totals.cost?100*(openclaw.totals.cost-compache.totals.cost)/openclaw.totals.cost:null} : null;
-  const warnings=['Synthetic scenario projection: no actual Compache, OpenClaw or provider execution.', 'Policy is the lowest-cost feasible option in a finite grid fitted to this seeded scenario, not a global optimum or provider proof.', 'Retention constraint uses modeled pre-recall source availability averaged over configured dependency rates and uniform ages; observed pre-recall retention and post-recall source availability are separate. A zero expected denominator is reported as null and imposes no constraint.', 'Pricing and token counts are assumptions; cache and long-context rules vary by provider. TTL is modeled as a hard cutoff, though providers may retain cache entries longer.', 'OpenClaw client-summary Chat Completions is approximate: summary input uses a token proxy for character limits; one flush per compaction is modeled, but the independent 2 MB flush trigger is omitted. Native Responses compaction, retries, quality and other hosts are excluded.', 'Raw source availability tracks whether modeled dependency blocks remain verbatim; summaries may preserve facts and answer quality is not measured.', 'Keep-warm uses the configured gap distribution and an expected-value approximation, not a fitted Python policy. The cold preview assumes no future query or dependencies; call duration is modeled as zero and pings can occur after abandonment.', 'Incomplete arms or no feasible policy suppress full-workload savings; observed partial costs are not comparable totals.'];
+  const warnings=['Synthetic scenario projection: no actual Compache, OpenClaw or provider execution.', 'Policy is the lowest-cost feasible option in a finite grid fitted to this seeded scenario, not a global optimum or provider proof.', 'Answer cache breakdown distinguishes first requests, prior cached prefixes with up to 16 expired snapshots, new blocks, and previously-seen blocks outside matching prefixes; it is diagnostic, not proof of a specific cause.', 'Retention constraint uses modeled pre-recall source availability averaged over configured dependency rates and uniform ages; observed pre-recall retention and post-recall source availability are separate. A zero expected denominator is reported as null and imposes no constraint.', 'Pricing and token counts are assumptions; cache and long-context rules vary by provider. TTL is modeled as a hard cutoff, though providers may retain cache entries longer.', 'OpenClaw client-summary Chat Completions is approximate: summary input uses a token proxy for character limits; one flush per compaction is modeled, but the independent 2 MB flush trigger is omitted. Native Responses compaction, retries, quality and other hosts are excluded.', 'Raw source availability tracks whether modeled dependency blocks remain verbatim; summaries may preserve facts and answer quality is not measured.', 'Keep-warm uses the configured gap distribution and an expected-value approximation, not a fitted Python policy. The cold preview assumes no future query or dependencies; call duration is modeled as zero and pings can occur after abandonment.', 'Incomplete arms or no feasible policy suppress full-workload savings; observed partial costs are not comparable totals.'];
   return {config,workload,compache,openclaw,optimization,savings,curves:{compache:compache.curve,openclaw:openclaw.curve},warnings};
 }
