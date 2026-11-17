@@ -82,6 +82,13 @@ def _parser() -> argparse.ArgumentParser:
         required=True,
         help="Exactly one JSONL label for this packet",
     )
+    comparison = groups.add_parser("compare", help="Replay a frozen policy against pinned Headroom lossless library arms")
+    for name in ("threads", "labels", "policy", "profile", "output"):
+        comparison.add_argument(f"--{name}", type=Path, required=True)
+    comparison.add_argument("--observation-end", required=True)
+    comparison.add_argument("--runtime-overhead-tokens", type=int, default=0)
+    comparison.add_argument("--headroom-tokenizer-model", default="gpt-4o",
+                            help="Headroom's local tokenizer selection; no model call is made")
     for name in ("fit", "solve", "replay", "prepare"):
         command = groups.add_parser(
             name,
@@ -252,7 +259,26 @@ def _optimizer_command(args):
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
-        if args.group in ("fit", "solve", "replay", "prepare"):
+        if args.group == "compare":
+            from .baselines.headroom import HeadroomLossless
+            from .comparison import compare_headroom
+            from .optimizer import Policy
+
+            result = compare_headroom(
+                load_threads(args.threads), _read_jsonl(args.labels),
+                Policy.from_dict(json.loads(args.policy.read_text())),
+                json.loads(args.profile.read_text()),
+                HeadroomLossless(args.headroom_tokenizer_model),
+                observation_end=args.observation_end,
+                overhead_tokens=args.runtime_overhead_tokens,
+            )
+            _write_json(args.output, result)
+            print(json.dumps({"output": str(args.output), "baselines": {
+                k: {"comparable_cost": v["comparable_cost"],
+                    "compache_saving_fraction": v["compache_saving_fraction"],
+                    **v["summary"]} for k, v in result["baselines"].items()
+            }}))
+        elif args.group in ("fit", "solve", "replay", "prepare"):
             print(json.dumps(_optimizer_command(args), ensure_ascii=False))
         elif args.group == "traces":
             if args.action == "normalize":

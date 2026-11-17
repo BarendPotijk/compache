@@ -29,6 +29,8 @@ They cooperate: the planner prices a cold return at the gate's own cold plan, an
 
 ## Docs
 
+[Comparison scopes and Headroom replay](comparisons.md) · [Application structure](application-structure.md)
+
 | Doc | Covers |
 |---|---|
 | [Implemented RAG optimizer](optimizer.md) | Runnable fit/solve/replay, promotion checks, pure gate/planner, economics and coverage limits |
