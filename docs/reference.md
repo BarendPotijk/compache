@@ -76,4 +76,4 @@ Don't reopen these without new evidence.
 
 ## Open issues
 
-Every open choice is listed once, with the proposal where there is one, in the [README](../README.md#open-design-choices). Settled ones are in [Design](design.md#decided).
+Every open choice is listed once, with the proposal where there is one, in the [archived README](design/README.md#open-design-choices). Settled ones are in [Design](design.md#decided).

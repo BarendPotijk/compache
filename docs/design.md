@@ -2,7 +2,7 @@
 
 The [gate](compaction.md) and the [planner](retention.md) are specified. This doc covers what surrounds them: how their parameters are fitted from a user's own traces, what the package outputs, how it plugs into providers, frameworks and harnesses, and the order to build it in.
 
-**Status:** agreed in outline. See [Decided](#decided). Every open choice is listed in the [README](../README.md#open-design-choices).
+**Status:** agreed in outline. See [Decided](#decided). Every open choice is listed in the [README](design/README.md#open-design-choices).
 
 ## Shape
 
