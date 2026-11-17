@@ -63,3 +63,8 @@ They cooperate: the planner prices a cold return at the gate's own cold plan, an
 | **shared part** | Eager tools plus static instructions: what every conversation of the model has cached |
 | **handle** | What a placeholder names to fetch the original: `tool:<id>`, `document:<uri>`, `source:<key>`, `answer:<n>`, `turn:<n>` |
 | **ping** | A replay of the run's last request with the answer appended, a cache point at its end and `max_tokens: 0`. It reads the prefix, caches the answer, and restarts the TTL |
+
+## Interactive exploration
+
+- [Cost explorer methodology](interactive-explorer.md): controls, deterministic accounting and pinned OpenClaw client-summary scope.
+- [Benchmark source plan](benchmark-trace-plan.md): QASPER, MuSiQue and LongMemEval, with provenance and rights constraints.

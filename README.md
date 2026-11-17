@@ -4,6 +4,23 @@ compache fits a context-compaction and cache keep-warm policy to your own traces
 
 **Status (0.4.1):** the standard-RAG optimizer is runnable. It fits return timing and dependency-distance aggregates, searches compaction/retention policies on training threads, and evaluates the winner on separate threads. The package exposes a deterministic retrieval gate, selective recall, bounded source expansion, empirical token calibration and keep-warm decisions. The experimental live runner adds an OpenCode baseline, subscription execution, bounded recovery and per-call usage accounting. Production provider adapters, durable state, invoice calibration and the OpenAI labeling worker remain future work. See the [implementation guide](docs/optimizer.md) for the supported subset.
 
+## Explore your workload interactively
+
+[![Open the interactive Compache cost explorer](docs/assets/cost-explorer.svg)](https://compache-cost-explorer.barend-potijk2.chatgpt.site)
+
+**[Open the explorer](https://compache-cost-explorer.barend-potijk2.chatgpt.site)**. Run the same calculator locally:
+
+```sh
+python3 -m http.server 8765 --bind 127.0.0.1 --directory site
+# Open http://127.0.0.1:8765/
+```
+
+Choose model economics, retrieval and output tokens, dependency intensity/lookback, thread-length distribution, return probability/delays, and compaction thresholds. Inputs describe one company with one parameter set. Compare cost per run, answer-input cache hit rate and context over a thread. Expand any run to see cache state, protected sources, compaction and keep-warm expected value. Compare 5- and 30-minute windows, share a scenario, or export the ledger.
+
+This is a seeded deterministic **scenario projection of Compache versus OpenClaw's client-summary path**. It includes summary, memory-flush and keep-warm costs; extra recovery calls are zero and recalled input is charged. It is not a runtime benchmark, a port of the Python optimizer, or a claim about all OpenClaw configurations. Dependency identification is assumed perfect; no answer-quality result is inferred. Negative savings and incomplete comparisons remain visible. The existing measured experiments below still use **OpenCode**. See [the methodology and pinned sources](docs/interactive-explorer.md).
+
+For the next document-grounded trace corpus, [the source plan](docs/benchmark-trace-plan.md) recommends **QASPER**, **MuSiQue** for controlled multi-hop cases, and **LongMemEval** for a separate memory check. Authored follow-ups and dependency links remain synthetic. These datasets are not yet inputs to the calculator.
+
 ## Run the optimizer
 
 Requires Python 3.11+. The runtime has no external dependencies and these commands make no network requests.
