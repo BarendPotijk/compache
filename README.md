@@ -2,11 +2,11 @@
 
 Context compaction and cache keep-warm policies fitted to your workload.
 
-**[Open the interactive calculator ↗](https://compache-cost-explorer.barend-potijk2.chatgpt.site)** · [Methodology & sources](https://compache-cost-explorer.barend-potijk2.chatgpt.site/methodology.html)
+**[Open the interactive calculator ↗](https://barendpotijk.github.io/compache)** · [Methodology & sources](https://barendpotijk.github.io/compache/methodology.html)
 
 Set the model, input/retrieval/output tokens, dependencies, thread length, return probability and time between runs. Choose a dependency retention requirement—95% by default—and compare Compache with OpenClaw's client-summary path.
 
-[![Compache calculator: editable workload inputs, cost per run, cache hit rate, context averages, thread counts and keep-warm payoff](docs/assets/calculator-preview.jpg)](https://compache-cost-explorer.barend-potijk2.chatgpt.site)
+[![Compache calculator: editable workload inputs, cost per run, cache hit rate, context averages, thread counts and keep-warm payoff](docs/assets/calculator-preview.jpg)](https://barendpotijk.github.io/compache)
 
 *Preview of one synthetic scenario. Click the image to change the inputs; interactive controls run on the linked site.*
 

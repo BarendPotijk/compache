@@ -10,7 +10,7 @@ python3 -m http.server 8765 --bind 127.0.0.1 --directory site
 node --test site/*.test.mjs
 ```
 
-Use the scenario link to preserve inputs in the URL fragment, or export the JSON ledger to inspect every request. The export includes configuration, seed, generated workload, model-default cache settings, per-call ledgers, per-role totals, every searched candidate, selected policy, expected/observed retention, decision diagnostics and limitations. Decision previews keep the latest 16 blocks and report omitted counts/tokens; totals by kind cover the entire view. No content is sent to a service. Serve over HTTP; opening `index.html` directly as a file cannot load its module worker reliably. The same files can be served by GitHub Pages or any static host; GitHub Pages is not enabled by this PR.
+Use the scenario link to preserve inputs in the URL fragment, or export the JSON ledger to inspect every request. The export includes configuration, seed, generated workload, model-default cache settings, per-call ledgers, per-role totals, every searched candidate, selected policy, expected/observed retention, decision diagnostics and limitations. Decision previews keep the latest 16 blocks and report omitted counts/tokens; totals by kind cover the entire view. No content is sent to a service. Serve over HTTP; opening `index.html` directly as a file cannot load its module worker reliably. GitHub Pages serves the calculator at https://barendpotijk.github.io/compache/. The Pages workflow tests the calculator and publishes only its nine website files when site files or the workflow change on main. The former ChatGPT Site remains an earlier published copy.
 
 ## Workload assumptions
 
