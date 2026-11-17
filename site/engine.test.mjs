@@ -49,9 +49,9 @@ test('zero costs and zero dependencies have null denominators',()=>{
   const r=simulate({threads:1,maxTurns:2,plannedTurns:2,plannedTurnsP95:2,lengthDistribution:'fixed',dependencyProbability:0,keepWarm:false,model:{inputRate:0,cachedRate:0,outputRate:0}});
   assert.equal(r.savings.absolute,0); assert.equal(r.savings.percent,null); assert.equal(r.compache.dependencyCoverage,null);
 });
-test('negative savings are retained and not clamped',()=>{
-  const r=simulate({threads:1,maxTurns:10,plannedTurns:10,plannedTurnsP95:10,lengthDistribution:'fixed',continuationProbability:1,tokenMedian:1000,tokenP95:1000,companyVariation:0,gapMedianMinutes:.01,gapP95Minutes:.01,dependencyProbability:0,keepWarm:false,systemTokens:2000,cacheMinTokens:1,cacheBlockTokens:1,safetyReserve:0,target:.1,model:{context:26000,maxInput:26000,inputRate:1,cachedRate:0,outputRate:0,longThreshold:1e7}});
-  assert.ok(r.compache.complete && r.openclaw.complete); assert.ok(r.savings.absolute<0);
+test('negative savings are retained and not clamped after optimization',()=>{
+  const r=simulate({threads:1,plannedTurns:60,plannedTurnsP95:60,maxTurns:60,lengthDistribution:'fixed',continuationProbability:1,tokenMedian:25000,tokenP95:25000,companyVariation:0,dependencyProbability:.25,gapMedianMinutes:100,gapP95Minutes:100,keepWarm:false});
+  assert.ok(r.optimization.feasible && r.compache.complete && r.openclaw.complete); assert.ok(r.savings.absolute<0);
 });
 test('configuration bounds reject impossible values',()=>{
   assert.throws(()=>configure({threads:201}));assert.throws(()=>configure({gapMedianMinutes:2,gapP95Minutes:1}));assert.throws(()=>configure({lengthDistribution:'other'}));
@@ -164,4 +164,43 @@ test('decision previews are bounded while kind totals cover the full view',()=>{
   assert.equal(Object.values(d.afterByKind).reduce((a,b)=>a+b,0),d.afterTokens);
   assert.equal(d.beforeTokens,d.beforeBlocks.reduce((a,b)=>a+b.tokens,0)+d.beforeOmittedTokens);
   assert.ok(Object.isFrozen(d.beforeByKind));
+});
+
+test('independent per-kind dependency controls and lookbacks are causal',()=>{
+  const c=config({threads:1,maxTurns:12,plannedTurns:12,plannedTurnsP95:12,inputDependencyProbability:0,retrievalDependencyProbability:1,outputDependencyProbability:0,retrievalDependencyLookback:3});
+  const turns=generateWorkload(c).threads[0].turns;
+  for(const turn of turns.slice(1)) {assert.equal(turn.dependencies.length,1);assert.equal(turn.dependencies[0].kind,'retrieval');assert.ok(turn.index-turn.dependencies[0].turn<=3);}
+  const all=generateWorkload({...c,inputDependencyProbability:1,outputDependencyProbability:1}).threads[0].turns;
+  for(const turn of all.slice(1))assert.deepEqual(turn.dependencies.map(d=>d.kind),['input','retrieval','output']);
+});
+test('retention is measured before recall and separates observed and expected from post-recall',()=>{
+  const c=config({systemTokens:100,cacheMinTokens:0,cacheBlockTokens:1,safetyReserve:0,target:.2,model:{context:1000,maxInput:1000},ttlMinutes:1,inputDependencyProbability:0,retrievalDependencyProbability:1,outputDependencyProbability:0,retrievalDependencyLookback:2,retrievalRetentionRuns:0});
+  const r=runArm(workload([t(0,0),t(1,2),t(2,4,100,[{kind:'retrieval',turn:0}])]),c,'compache');
+  assert.ok(r.retention.expected<1);assert.equal(r.retention.observed,0);assert.equal(r.rawSourceAvailability,1);assert.equal(r.recalls,1);
+  assert.equal(r.retention.byKind.retrieval.observedRetained,0);
+});
+test('grid optimizer is deterministic and tightening retention cannot lower its minimum cost',()=>{
+  const common={threads:3,companies:1,plannedTurns:32,plannedTurnsP95:32,maxTurns:32,lengthDistribution:'fixed',continuationProbability:1,tokenMedian:10000,tokenP95:10000,keepWarm:false};
+  const lo=simulate({...common,retentionRequirement:.9}),hi=simulate({...common,retentionRequirement:.95});
+  assert.ok(lo.optimization.feasible && hi.optimization.feasible);
+  assert.ok(hi.optimization.retention>=.95-1e-12);
+  assert.ok(hi.compache.totals.cost>=lo.compache.totals.cost-1e-12);
+  assert.ok(lo.optimization.candidates.every(x=>x.feasible===!!(x.complete&&(x.retention===null||x.retention>=.9-1e-12))));
+  assert.deepEqual(hi.optimization.selected,simulate({...common,retentionRequirement:.95}).optimization.selected);
+});
+test('infeasible retention or admission never claims recommended policy or savings',()=>{
+  const x=simulate({threads:1,maxTurns:3,plannedTurns:3,plannedTurnsP95:3,lengthDistribution:'fixed',tokenMedian:2000,tokenP95:2000,companyVariation:0,systemTokens:100,safetyReserve:0,keepWarm:false,model:{context:500,maxInput:500}});
+  assert.equal(x.optimization.feasible,false);assert.equal(x.optimization.selected,null);assert.equal(x.savings,null);
+});
+test('a later dependency cannot affect earlier policy decisions',()=>{
+  const c=config({systemTokens:100,cacheMinTokens:0,cacheBlockTokens:1,safetyReserve:0,target:.2,model:{context:1000,maxInput:1000},ttlMinutes:1});
+  const first=[t(0,0),t(1,2),t(2,4,100)], second=[t(0,0),t(1,2),t(2,4,100,[{kind:'retrieval',turn:0}])];
+  const a=runArm(workload(first),c,'compache'),b=runArm(workload(second),c,'compache');
+  assert.deepEqual(a.decisions.slice(0,2),b.decisions.slice(0,2));
+});
+test('below cache minimum fresh tokens use base input price',()=>{
+  const c=config({systemTokens:10,cacheMinTokens:1024,cacheBlockTokens:128,model:{context:100000,maxInput:100000,inputRate:1,writeMultiplier:2},safetyReserve:0});
+  const r=runArm(workload([t(0,0,100)]),c,'compache');
+  assert.equal(r.ledger[0].inputCost,120/1e6);
+  assert.equal(priceCall(120,0,0,c.model,{cacheable:false}).inputCost,120/1e6);
 });

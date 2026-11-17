@@ -3,10 +3,10 @@ export const DEFAULTS = Object.freeze({
   seed: 42, companies: 1, threads: 100, maxTurns: 160, lengthDistribution: 'lognormal', plannedTurns: 80, plannedTurnsP95: 140,
   continuationProbability: 0.99, tokenMedian: 25000, tokenP95: 45000,
   companyVariation: 0, gapMedianMinutes: 4, gapP95Minutes: 60,
-  dependencyProbability: 0.25, dependencyLookback: 24, inputTokens: 200, outputTokens: 500, ttlMinutes: 5,
+  dependencyProbability: 0.25, dependencyLookback: 24, inputDependencyProbability: 0.25, retrievalDependencyProbability: 0.25, outputDependencyProbability: 0.25, inputDependencyLookback: 24, retrievalDependencyLookback: 24, outputDependencyLookback: 24, retentionRequirement: 0.95, retrievalRetentionRuns: 0, inputTokens: 200, outputTokens: 500, ttlMinutes: 30,
   target: 0.20, warmTrigger: 0.5, maxPings: 3, keepWarm: true, pingLeadMinutes: 0.75,
   pingOutputTokens: 16, safetyReserve: 32000, systemTokens: 2048,
-  cacheMinTokens: 1024, cacheBlockTokens: 128, tailTokens: 20000,
+  cacheMinTokens: 1024, cacheBlockTokens: 1, tailTokens: 20000,
   summaryTokens: 4000, summaryInputCap: 40000, toolSummaryTokens: 500, summarySystemTokens: 2048, recordTokens: 1500, flushOutputTokens: 256,
   model: Object.freeze({context: 1050000, maxInput: 922000, inputRate: 0.1,
     cachedRate: 0.01, outputRate: 0.5, writeMultiplier: 1.25,
@@ -21,8 +21,13 @@ function finite(n, name, min, max) {
 }
 export function configure(overrides = {}) {
   const c = {...DEFAULTS, ...overrides, model: {...DEFAULTS.model, ...(overrides.model || {})}};
-  for (const [k,min,max] of [['companies',1,200],['threads',1,200],['maxTurns',1,160],['plannedTurns',1,160],['plannedTurnsP95',1,320],['dependencyLookback',1,160],['maxPings',0,10],['target',0.01,0.45],['seed',0,4294967295],['tokenMedian',1,500000],['tokenP95',1,1000000],['gapMedianMinutes',0.001,100000],['gapP95Minutes',0.001,1000000],['companyVariation',0,2],['continuationProbability',0,1],['dependencyProbability',0,1],['ttlMinutes',0.01,100000],['warmTrigger',0.23,1],['pingLeadMinutes',0,100000],['inputTokens',1,100000],['outputTokens',0,200000],['pingOutputTokens',0,10000],['safetyReserve',0,1000000],['systemTokens',0,1000000],['cacheMinTokens',0,1000000],['cacheBlockTokens',1,100000],['tailTokens',0,1000000],['summaryTokens',1,100000],['summaryInputCap',1,1000000],['toolSummaryTokens',1,100000],['summarySystemTokens',0,100000],['recordTokens',0,100000],['flushOutputTokens',0,100000]]) finite(c[k],k,min,max);
-  for (const k of ['companies','threads','maxTurns','plannedTurns','plannedTurnsP95','dependencyLookback','maxPings','seed','inputTokens','outputTokens','pingOutputTokens','safetyReserve','systemTokens','cacheMinTokens','cacheBlockTokens','tailTokens','summaryTokens','summaryInputCap','toolSummaryTokens','summarySystemTokens','recordTokens','flushOutputTokens']) if (!Number.isInteger(c[k])) throw new RangeError(`${k} must be an integer`);
+  for (const kind of ['input','retrieval','output']) {
+    const pk=`${kind}DependencyProbability`, lk=`${kind}DependencyLookback`;
+    if(Object.hasOwn(overrides,'dependencyProbability') && !Object.hasOwn(overrides,pk)) c[pk]=overrides.dependencyProbability;
+    if(Object.hasOwn(overrides,'dependencyLookback') && !Object.hasOwn(overrides,lk)) c[lk]=overrides.dependencyLookback;
+  }
+  for (const [k,min,max] of [['companies',1,200],['threads',1,200],['maxTurns',1,160],['plannedTurns',1,160],['plannedTurnsP95',1,320],['dependencyLookback',1,160],['inputDependencyLookback',1,160],['retrievalDependencyLookback',1,160],['outputDependencyLookback',1,160],['retrievalRetentionRuns',0,160],['retentionRequirement',0.9,1],['maxPings',0,10],['target',0.01,0.45],['seed',0,4294967295],['tokenMedian',1,500000],['tokenP95',1,1000000],['gapMedianMinutes',0.001,100000],['gapP95Minutes',0.001,1000000],['companyVariation',0,2],['continuationProbability',0,1],['dependencyProbability',0,1],['inputDependencyProbability',0,1],['retrievalDependencyProbability',0,1],['outputDependencyProbability',0,1],['ttlMinutes',0.01,100000],['warmTrigger',0.23,1],['pingLeadMinutes',0,100000],['inputTokens',1,100000],['outputTokens',0,200000],['pingOutputTokens',0,10000],['safetyReserve',0,1000000],['systemTokens',0,1000000],['cacheMinTokens',0,1000000],['cacheBlockTokens',1,100000],['tailTokens',0,1000000],['summaryTokens',1,100000],['summaryInputCap',1,1000000],['toolSummaryTokens',1,100000],['summarySystemTokens',0,100000],['recordTokens',0,100000],['flushOutputTokens',0,100000]]) finite(c[k],k,min,max);
+  for (const k of ['companies','threads','maxTurns','plannedTurns','plannedTurnsP95','dependencyLookback','inputDependencyLookback','retrievalDependencyLookback','outputDependencyLookback','retrievalRetentionRuns','maxPings','seed','inputTokens','outputTokens','pingOutputTokens','safetyReserve','systemTokens','cacheMinTokens','cacheBlockTokens','tailTokens','summaryTokens','summaryInputCap','toolSummaryTokens','summarySystemTokens','recordTokens','flushOutputTokens']) if (!Number.isInteger(c[k])) throw new RangeError(`${k} must be an integer`);
   if (!['fixed','geometric','lognormal'].includes(c.lengthDistribution)) throw new RangeError('invalid lengthDistribution');
   if ((c.lengthDistribution==='lognormal' && c.plannedTurnsP95 < c.plannedTurns) || c.tokenP95 < c.tokenMedian || c.gapP95Minutes < c.gapMedianMinutes) throw new RangeError('p95 must be at least the median');
   if (c.target + 0.02 >= c.warmTrigger || c.warmTrigger > 1 - c.safetyReserve/c.model.context) throw new RangeError('require cold trigger below warm trigger and warm trigger within reserve');
@@ -53,9 +58,9 @@ export function generateWorkload(config) {
       if(i>0) {if(random()>=c.continuationProbability) break; const g=lognormal(random,c.gapMedianMinutes,c.gapP95Minutes); gaps.push(g); time+=g;}
       const total=Math.max(2,Math.min(1000000,Math.round(lognormal(random,c.tokenMedian,c.tokenP95)*factor)));
       const input=c.inputTokens, retrieval=total, deps=[];
-      if(i && random()<c.dependencyProbability) {
-        const kinds=['input','retrieval','output'], count=1+Math.floor(random()*3);
-        for(let j=0;j<count;j++) { const k=Math.floor(random()*kinds.length), kind=kinds.splice(k,1)[0]; deps.push({kind,turn:i-1-Math.floor(random()*Math.min(i,c.dependencyLookback))}); }
+      if(i) for(const kind of ['input','retrieval','output']) {
+        const p=c[`${kind}DependencyProbability`], lookback=c[`${kind}DependencyLookback`];
+        if(random()<p) deps.push({kind,turn:i-1-Math.floor(random()*Math.min(i,lookback))});
       }
       turns.push({index:i,time,inputTokens:input,retrievalTokens:retrieval,outputTokens:c.outputTokens,dependencies:deps});
     }
@@ -69,10 +74,10 @@ export function sharedPrefix(a,b) {
   for(let i=0;i<Math.min(a.length,b.length);i++) {if(a[i].id!==b[i].id || a[i].tokens!==b[i].tokens) break; total+=a[i].tokens;}
   return total;
 }
-export function priceCall(input,cached,output,model) {
+export function priceCall(input,cached,output,model,{cacheable=true}={}) {
   if (![input,cached,output].every(Number.isFinite) || input<0 || output<0 || cached<0 || cached>input) throw new RangeError('invalid call token counts');
   const long=model.longThreshold>0 && input>model.longThreshold, im=long?model.longInputMultiplier:1, om=long?model.longOutputMultiplier:1;
-  const fresh=input-cached, inputCost=fresh*model.inputRate*model.writeMultiplier*im/1e6, cachedCost=cached*model.cachedRate*im/1e6, outputCost=output*model.outputRate*om/1e6;
+  const fresh=input-cached, inputCost=fresh*model.inputRate*(cacheable?model.writeMultiplier:1)*im/1e6, cachedCost=cached*model.cachedRate*im/1e6, outputCost=output*model.outputRate*om/1e6;
   return {inputTokens:input,cachedTokens:cached,freshTokens:fresh,outputTokens:output,inputCost,cachedCost,outputCost,cost:inputCost+cachedCost+outputCost,long};
 }
 // Normal CDF approximation used only by the explicitly modeled planner.
@@ -83,9 +88,10 @@ export function coldPreview(history, c) {
   // are candidates; user input and assistant output stay in their original order.
   const system=block('system',c.systemTokens,'system',-1), view=[...history];
   let size=c.systemTokens+sum(view);
+  const lastTurn=Math.max(-1,...view.map(b=>b.turn));
   if(size>(c.target+.02)*c.model.context) {
     for(let j=0;j<view.length && size>c.target*c.model.context;) {
-      if(view[j].kind==='retrieval') {size-=view[j].tokens;view.splice(j,1);} else j++;
+      if(view[j].kind==='retrieval' && lastTurn+1-Number(view[j].source.slice(1))>c.retrievalRetentionRuns) {size-=view[j].tokens;view.splice(j,1);} else j++;
     }
   }
   return [system,...view];
@@ -121,9 +127,9 @@ export function evaluatePingPlan(held, full, c, runIndex=0) {
   const fullCached=k>=c.cacheMinTokens ? Math.floor(k/c.cacheBlockTokens)*c.cacheBlockTokens : 0;
   // Expired structural prefixes receive no cold cache credit. One later call
   // approximates the cost of carrying a larger warm prefix.
-  const coldCost=priceCall(coldInput,0,0,c.model).cost;
+  const coldCost=priceCall(coldInput,0,0,c.model,{cacheable:coldInput>=c.cacheMinTokens}).cost;
   const warmCost=priceCall(k,fullCached,0,c.model).cost;
-  const laterExtra=Math.max(0,warmCost-priceCall(coldInput,coldInput>=c.cacheMinTokens?Math.floor(coldInput/c.cacheBlockTokens)*c.cacheBlockTokens:0,0,c.model).cost);
+  const laterExtra=Math.max(0,warmCost-priceCall(coldInput,coldInput>=c.cacheMinTokens?Math.floor(coldInput/c.cacheBlockTokens)*c.cacheBlockTokens:0,0,c.model,{cacheable:coldInput>=c.cacheMinTokens}).cost);
   const saving=coldCost-warmCost-laterExtra;
   let best=0, value=0, cost=0;
   for(let n=1;n<=c.maxPings;n++) {
@@ -140,21 +146,22 @@ export function planPings(held,full,c,runIndex=0) {return evaluatePingPlan(held,
 
 const block=(id,tokens,kind,turn,source=id)=>Object.freeze({id,tokens,kind,turn,source});
 function admitted(input,output,c,arm,role){const reserve=arm==='compache'?c.safetyReserve:role==='answer'?Math.min(20000,.25*c.model.context):0;return input<=c.model.maxInput && input+Math.max(output,reserve)<=c.model.context;}
-export function runArm(workload, config, arm, {collectDecisions=true}={}) {
+export function runArm(workload, config, arm, {collectDecisions=true,collectLedger=true}={}) {
   const c=configure(config); if(!['compache','openclaw'].includes(arm)) throw new RangeError('invalid arm');
   const ledger=[], curves=[], decisions=[], roles={}, total={inputTokens:0,cachedTokens:0,freshTokens:0,outputTokens:0,inputCost:0,cachedCost:0,outputCost:0,cost:0,calls:0};
   let completedThreads=0,completedRuns=0,attemptedRuns=0,compactions=0,recalls=0,required=0,covered=0,failedCalls=0,pings=0,totalRemovedTokens=0,totalRecallTokens=0;
+  const pre=Object.fromEntries(['input','retrieval','output'].map(kind=>[kind,{expectedRequired:0,expectedRetained:0,observedRequired:0,observedRetained:0}]));
   for(const thread of workload.threads) {
     let history=[],snapshots=[],callIndex=0,threadCost=0,summaryIndex=0,failed=false;
     const system=block('system',c.systemTokens,'system',-1);
     function request(blocks,role,time,output,turn) {
       const input=sum(blocks);
-      if(!admitted(input,output,c,arm,role)){failedCalls++;ledger.push({arm,thread:thread.id,turn,role,time,inputTokens:input,outputTokens:output,admitted:false});return null;}
+      if(!admitted(input,output,c,arm,role)){failedCalls++;if(collectLedger)ledger.push({arm,thread:thread.id,turn,role,time,inputTokens:input,outputTokens:output,admitted:false});return null;}
       snapshots=snapshots.filter(s=>time-s.time<c.ttlMinutes);
       let prefix=0; for(const s of snapshots) prefix=Math.max(prefix,sharedPrefix(s.blocks,blocks));
       const cached=prefix>=c.cacheMinTokens ? Math.floor(prefix/c.cacheBlockTokens)*c.cacheBlockTokens : 0;
-      const costs=priceCall(input,cached,output,c.model);
-      const row={arm,thread:thread.id,turn,role,time,admitted:true,...costs}; ledger.push(row); callIndex++;
+      const costs=priceCall(input,cached,output,c.model,{cacheable:input>=c.cacheMinTokens});
+      const row={arm,thread:thread.id,turn,role,time,admitted:true,...costs}; if(collectLedger)ledger.push(row); callIndex++;
       const roleTotal=roles[role] ||= {calls:0,inputTokens:0,cachedTokens:0,freshTokens:0,outputTokens:0,inputCost:0,cachedCost:0,outputCost:0,cost:0};
       for(const target of [total,roleTotal]) {target.calls++; for(const k of ['inputTokens','cachedTokens','freshTokens','outputTokens','inputCost','cachedCost','outputCost','cost']) target[k]+=costs[k];}
       threadCost+=costs.cost; if(input>=c.cacheMinTokens) snapshots.push({time,blocks:blocks.slice()});
@@ -166,6 +173,17 @@ export function runArm(workload, config, arm, {collectDecisions=true}={}) {
       const protectedSources=new Set(turn.dependencies.filter(d=>d.kind==='retrieval').map(d=>`r${d.turn}`));
       let decision=null;
       if(arm==='compache') {
+        // Evaluate availability before current dependencies are recovered. The
+        // expectation integrates over the configured age law, not future labels.
+        if(i) {
+          const present=new Set(history.filter(b=>b.kind==='retrieval').map(b=>b.source));
+          for(const kind of ['input','retrieval','output']) {
+            const p=c[`${kind}DependencyProbability`], limit=Math.min(i,c[`${kind}DependencyLookback`]), prefix=kind==='input'?'i':kind==='retrieval'?'r':'o';
+            let n=kind==='retrieval'?0:limit; if(kind==='retrieval')for(let age=1;age<=limit;age++) if(present.has(`${prefix}${i-age}`)) n++;
+            pre[kind].expectedRequired+=p; pre[kind].expectedRetained+=p*n/limit;
+          }
+          for(const d of turn.dependencies) {const prefix=d.kind==='input'?'i':d.kind==='retrieval'?'r':'o';pre[d.kind].observedRequired++;if(d.kind!=='retrieval'||present.has(`${prefix}${d.turn}`))pre[d.kind].observedRetained++;}
+        }
         let added=[];
         for(const source of protectedSources) if(!history.some(b=>b.source===source)) {
           const sourceTurn=thread.turns[Number(source.slice(1))];
@@ -177,13 +195,14 @@ export function runArm(workload, config, arm, {collectDecisions=true}={}) {
         snapshots=snapshots.filter(s=>turn.time-s.time<c.ttlMinutes);
         const warm=snapshots.some(s=>sharedPrefix(s.blocks,view)>=c.cacheMinTokens);
         const threshold=(warm?c.warmTrigger:c.target+.02)*c.model.context;
-        if(sum(view)>threshold) {
+        let projectedSize=sum(view);
+        if(projectedSize>threshold) {
           let changed=false;
-          for(let j=0;j<history.length && sum(view)>c.target*c.model.context;) {
+          for(let j=0;j<history.length && projectedSize>c.target*c.model.context;) {
             const b=history[j];
-            if(b.kind==='retrieval' && !protectedSources.has(b.source)){history.splice(j,1);removed.push(b);changed=true;view=[system,...history,input,retrieval,...added];} else j++;
+            if(b.kind==='retrieval' && i-Number(b.source.slice(1))>c.retrievalRetentionRuns && !protectedSources.has(b.source)){history.splice(j,1);removed.push(b);changed=true;projectedSize-=b.tokens;} else j++;
           }
-          if(changed)compactions++;
+          if(changed){compactions++;view=[system,...history,input,retrieval,...added];}
         }
         const removedTokens=sum(removed); totalRemovedTokens+=removedTokens;
         if(collectDecisions) {const beforeBlocks=before.slice(-16), afterBlocks=view.slice(-16); decision={thread:thread.id,turn:i,beforeTokens:sum(before),afterTokens:sum(view),cacheState:warm?'warm':'cold',triggerTokens:threshold,targetTokens:c.target*c.model.context,removedTokens,removedSources:Object.freeze(removed.slice()),protectedSources:Object.freeze([...protectedSources,retrieval.source]),recallTokens,plannedPings:0,actualPings:0,beforeBlocks:Object.freeze(beforeBlocks),afterBlocks:Object.freeze(afterBlocks),beforeByKind:byKind(before),afterByKind:byKind(view),beforeOmittedCount:before.length-beforeBlocks.length,afterOmittedCount:view.length-afterBlocks.length,beforeOmittedTokens:sum(before)-sum(beforeBlocks),afterOmittedTokens:sum(view)-sum(afterBlocks),planner:null,admitted:null};}
@@ -216,10 +235,10 @@ export function runArm(workload, config, arm, {collectDecisions=true}={}) {
       required+=turn.dependencies.length;
       for(const d of turn.dependencies) if(view.some(b=>b.source===`${d.kind==='input'?'i':d.kind==='retrieval'?'r':'o'}${d.turn}`)) covered++;
       const row=request(view,'answer',turn.time,turn.outputTokens,i);
-      if(!row){if(decision){decision.admitted=false;Object.assign(ledger.at(-1),{beforeTokens:decision.beforeTokens,afterTokens:decision.afterTokens,cacheState:decision.cacheState,triggerTokens:decision.triggerTokens,targetTokens:decision.targetTokens,removedTokens:decision.removedTokens,recallTokens:decision.recallTokens});decisions.push(Object.freeze(decision));}failed=true;break;}
+      if(!row){if(decision){decision.admitted=false;if(collectLedger)Object.assign(ledger.at(-1),{beforeTokens:decision.beforeTokens,afterTokens:decision.afterTokens,cacheState:decision.cacheState,triggerTokens:decision.triggerTokens,targetTokens:decision.targetTokens,removedTokens:decision.removedTokens,recallTokens:decision.recallTokens});decisions.push(Object.freeze(decision));}failed=true;break;}
       if(decision)decision.admitted=true;
       completedRuns++; history.push(output);
-      if(thread===workload.threads[0]) curves.push({turn:i+1,inputTokens:row.inputTokens,cachedTokens:row.cachedTokens,cost:row.cost,cumulativeCost:threadCost});
+      if(collectLedger && thread===workload.threads[0]) curves.push({turn:i+1,inputTokens:row.inputTokens,cachedTokens:row.cachedTokens,cost:row.cost,cumulativeCost:threadCost});
       if(arm==='compache') {
         const plan=evaluatePingPlan(view,[system,...history],c,i), count=plan.chosen, next=thread.turns[i+1]?.time ?? Infinity, interval=c.ttlMinutes-c.pingLeadMinutes;
         if(decision){decision.planner=Object.freeze({...plan,rows:Object.freeze(plan.rows.map(r=>Object.freeze({...r})))});decision.plannedPings=count;}
@@ -230,13 +249,35 @@ export function runArm(workload, config, arm, {collectDecisions=true}={}) {
     }
     if(!failed)completedThreads++;
   }
-  return {totals:total,byRole:roles,ledger,decisions,removedTokens:totalRemovedTokens,recallTokens:totalRecallTokens,completedThreads,plannedThreads:workload.threads.length,completedRuns,plannedRuns:workload.totalRuns,attemptedRuns,failedCalls,complete:completedThreads===workload.threads.length,compactions,recalls,pings,rawSourceAvailability:required?covered/required:null,dependencyCoverage:required?covered/required:null,dependencies:{required,covered},curve:curves};
+  const expectedRequired=Object.values(pre).reduce((n,x)=>n+x.expectedRequired,0), expectedRetained=Object.values(pre).reduce((n,x)=>n+x.expectedRetained,0), observedRequired=Object.values(pre).reduce((n,x)=>n+x.observedRequired,0), observedRetained=Object.values(pre).reduce((n,x)=>n+x.observedRetained,0);
+  const byKindRetention=Object.fromEntries(Object.entries(pre).map(([kind,row])=>[kind,{...row,expected:row.expectedRequired?row.expectedRetained/row.expectedRequired:null,observed:row.observedRequired?row.observedRetained/row.observedRequired:null}]));
+  const retention={expected:expectedRequired?expectedRetained/expectedRequired:null,observed:observedRequired?observedRetained/observedRequired:null,expectedRequired,expectedRetained,observedRequired,observedRetained,byKind:byKindRetention};
+  return {totals:total,byRole:roles,ledger,decisions,retention,removedTokens:totalRemovedTokens,recallTokens:totalRecallTokens,completedThreads,plannedThreads:workload.threads.length,completedRuns,plannedRuns:workload.totalRuns,attemptedRuns,failedCalls,complete:completedThreads===workload.threads.length,compactions,recalls,pings,rawSourceAvailability:required?covered/required:null,dependencyCoverage:required?covered/required:null,dependencies:{required,covered},curve:curves};
 }
 export function simulate(overrides={}) {
-  const config=configure(overrides), workload=generateWorkload(config);
+  const base=configure(overrides), workload=generateWorkload(base), candidates=[];
+  const horizons=[...new Set([0,.75,.9,.95,1].map(f=>Math.ceil(base.retrievalDependencyLookback*f)))];
+  const targets=[.10,.15,.20,.25,.35,.45], warmTriggers=[.50,.55,.60];
+  for(const target of targets) for(const warmTrigger of warmTriggers) for(const retrievalRetentionRuns of horizons) {
+    const policy={target,warmTrigger,retrievalRetentionRuns};
+    if(target+.02>=warmTrigger || warmTrigger>1-base.safetyReserve/base.model.context) {candidates.push({...policy,cost:null,retention:null,complete:false,feasible:false,completedRuns:0});continue;}
+    const result=runArm(workload,{...base,...policy},'compache',{collectDecisions:false,collectLedger:false});
+    const retention=result.retention.expected;
+    // No modeled dependencies means the constraint is vacuous; report null, not 100%.
+    const feasible=result.complete && (retention===null || retention+1e-12>=base.retentionRequirement);
+    candidates.push({...policy,cost:result.totals.cost,retention,observedRetention:result.retention.observed,complete:result.complete,feasible,completedRuns:result.completedRuns});
+  }
+  const feasible=candidates.filter(x=>x.feasible);
+  feasible.sort((a,b)=>a.cost-b.cost || a.target-b.target || a.warmTrigger-b.warmTrigger || a.retrievalRetentionRuns-b.retrievalRetentionRuns);
+  // For diagnostics choose the most-retentive complete candidate, otherwise the
+  // candidate with the greatest completed-run count. Never claim it is feasible.
+  const diagnostic=[...candidates].filter(x=>x.cost!==null).sort((a,b)=>Number(b.complete)-Number(a.complete) || b.completedRuns-a.completedRuns || (b.retention??-1)-(a.retention??-1) || a.cost-b.cost)[0];
+  const pick=feasible[0] || diagnostic || {target:base.target,warmTrigger:base.warmTrigger,retrievalRetentionRuns:base.retrievalRetentionRuns};
+  const selected={target:pick.target,warmTrigger:pick.warmTrigger,retrievalRetentionRuns:pick.retrievalRetentionRuns};
+  const config=configure({...base,...selected});
   const compache=runArm(workload,config,'compache'), openclaw=runArm(workload,config,'openclaw');
-  const savings=compache.complete&&openclaw.complete ? {absolute:openclaw.totals.cost-compache.totals.cost,percent:openclaw.totals.cost?100*(openclaw.totals.cost-compache.totals.cost)/openclaw.totals.cost:null} : null;
-  const ttlScenarios=[5,30].map(ttlMinutes=>{const a=ttlMinutes===config.ttlMinutes?compache:runArm(workload,{...config,ttlMinutes},'compache',{collectDecisions:false}); const b=ttlMinutes===config.ttlMinutes?openclaw:runArm(workload,{...config,ttlMinutes},'openclaw',{collectDecisions:false});return {ttlMinutes,compache:a.totals.cost,openclaw:b.totals.cost,complete:a.complete&&b.complete,savings:a.complete&&b.complete?b.totals.cost-a.totals.cost:null};});
-  const warnings=['Synthetic scenario projection: no actual Compache, OpenClaw or provider execution.', 'Pricing and token counts are assumptions; cache and long-context rules vary by provider.', 'OpenClaw client-summary Chat Completions is approximate: summary input uses a token proxy for character limits; one flush per compaction is modeled, but the independent 2 MB flush trigger is omitted. Native Responses compaction, retries, quality and other hosts are excluded.', 'Raw source availability tracks whether modeled dependency blocks remain verbatim; summaries may preserve facts and answer quality is not measured.', 'Keep-warm uses the configured gap distribution and an expected-value approximation, not a fitted Python policy. The cold preview assumes no future query or dependencies; call duration is modeled as zero and pings can occur after abandonment.', 'Incomplete arms suppress full-workload savings; observed partial costs are not comparable totals.'];
-  return {config,workload,compache,openclaw,savings,ttlScenarios,curves:{compache:compache.curve,openclaw:openclaw.curve},warnings};
+  const optimization={feasible:feasible.length>0,retentionRequirement:base.retentionRequirement,retention:compache.retention.expected,candidateCount:candidates.length,selected:feasible.length?selected:null,diagnosticPolicy:feasible.length?null:selected,candidates};
+  const savings=optimization.feasible&&compache.complete&&openclaw.complete ? {absolute:openclaw.totals.cost-compache.totals.cost,percent:openclaw.totals.cost?100*(openclaw.totals.cost-compache.totals.cost)/openclaw.totals.cost:null} : null;
+  const warnings=['Synthetic scenario projection: no actual Compache, OpenClaw or provider execution.', 'Policy is the lowest-cost feasible option in a finite grid fitted to this seeded scenario, not a global optimum or provider proof.', 'Retention constraint uses modeled pre-recall source availability averaged over configured dependency rates and uniform ages; observed pre-recall retention and post-recall source availability are separate. A zero expected denominator is reported as null and imposes no constraint.', 'Pricing and token counts are assumptions; cache and long-context rules vary by provider. TTL is modeled as a hard cutoff, though providers may retain cache entries longer.', 'OpenClaw client-summary Chat Completions is approximate: summary input uses a token proxy for character limits; one flush per compaction is modeled, but the independent 2 MB flush trigger is omitted. Native Responses compaction, retries, quality and other hosts are excluded.', 'Raw source availability tracks whether modeled dependency blocks remain verbatim; summaries may preserve facts and answer quality is not measured.', 'Keep-warm uses the configured gap distribution and an expected-value approximation, not a fitted Python policy. The cold preview assumes no future query or dependencies; call duration is modeled as zero and pings can occur after abandonment.', 'Incomplete arms or no feasible policy suppress full-workload savings; observed partial costs are not comparable totals.'];
+  return {config,workload,compache,openclaw,optimization,savings,curves:{compache:compache.curve,openclaw:openclaw.curve},warnings};
 }
