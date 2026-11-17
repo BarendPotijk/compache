@@ -2,7 +2,7 @@
 
 The [gate](compaction.md) and the [planner](retention.md) are specified. This doc covers what surrounds them: how their parameters are fitted from a user's own traces, what the package outputs, how it plugs into providers, frameworks and harnesses, and the order to build it in.
 
-**Status:** broader architecture agreed in outline. Version 0.2 implements the [scoped RAG optimizer](optimizer.md); that guide is authoritative for the shipped APIs, sizing and assumptions. The broader tiers, provider integrations and bill calibration described here remain a roadmap. See [Decided](#decided) and [open design choices](../README.md#open-design-choices).
+**Status:** broader architecture agreed in outline. Version 0.2 implements the [scoped RAG optimizer](optimizer.md); that guide is authoritative for the shipped APIs, sizing and assumptions. The broader tiers, provider integrations and bill calibration described here remain a roadmap. See [Decided](#decided) and [open design choices](design/README.md#open-design-choices).
 
 ## Shape
 
