@@ -1,14 +1,65 @@
 import sys
 import unittest
+import json
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from report_scaled_live import matched_prefix, first_sentence
+from report_scaled_live import matched_prefix, first_sentence, audit_calibration
 from run_live_comparison import bind_live_requirements
-from compache.optimizer import Source
+from compache.optimizer import Source, ModelSpec, OnlineTokenCalibrator
 
 
 class ScaledLiveTests(unittest.TestCase):
+    def test_calibration_audit_rejects_future_usage_in_an_earlier_estimate(self):
+        spec = ModelSpec("test")
+        plan = {
+            "token_calibration": {"safety_margin": 0.1},
+            "overhead_tokens_for_planning_only": 10,
+        }
+        ruler = OnlineTokenCalibrator(10, 0.1)
+        rows = []
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for sequence, actual in enumerate((100, 300), 1):
+                text = "evidence " * sequence
+                payload = spec.part_tokens(text)
+                before = ruler.to_dict()
+                estimated = ruler.estimate_total("test", payload)
+                usage = {"input_tokens": actual, "cached_input_tokens": 0}
+                ruler.observe(
+                    "test", payload, usage, successful=True, provider_observed=True
+                )
+                row = {
+                    "sequence": sequence,
+                    "model": "test",
+                    "ok": True,
+                    "role": "answer",
+                    "tokens_estimated": estimated,
+                    "usage": usage,
+                    "token_calibration": {
+                        "payload_tokens_estimated": payload,
+                        "input_tokens_planned": estimated,
+                        "state_before": before,
+                        "state_after": ruler.to_dict(),
+                        "provider_observed": True,
+                    },
+                }
+                rows.append(row)
+                directory = root / f"call-{sequence:04d}"
+                directory.mkdir()
+                (directory / "prompt.txt").write_text(
+                    "header\nCONVERSATION\n"
+                    + json.dumps({"text": text})
+                    + "\nTASK\nanswer"
+                )
+            self.assertEqual(
+                audit_calibration(root, rows, plan, spec)["calls_audited"], 2
+            )
+            rows[0]["token_calibration"]["state_before"] = ruler.to_dict()
+            with self.assertRaisesRegex(ValueError, "causal token calibration"):
+                audit_calibration(root, rows, plan, spec)
+
     def test_admission_stop_does_not_count_skipped_turns_as_savings(self):
         completed = {
             "opencode-1": 96,

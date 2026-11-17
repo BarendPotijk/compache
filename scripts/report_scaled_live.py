@@ -14,6 +14,8 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 from compache.optimizer.cache_scenarios import reprice_prefix
+from compache.optimizer.calibration import OnlineTokenCalibrator
+from compache.optimizer import Policy
 from report_live_comparison import audit_events
 
 
@@ -42,8 +44,56 @@ def first_sentence(text):
     return re.split(r"(?<=[.!?])\s+", text.strip(), maxsplit=1)[0]
 
 
+def audit_calibration(directory, ledger, plan, spec):
+    """Rebuild estimates using only preceding actual calls, never final usage first."""
+    config = plan.get("token_calibration")
+    if config is None:
+        return None
+    ruler = OnlineTokenCalibrator(
+        plan["overhead_tokens_for_planning_only"], config["safety_margin"]
+    )
+    gaps = []
+    for row in ledger:
+        view = (directory / f"call-{row['sequence']:04d}" / "prompt.txt").read_text()
+        body = view.split("\nCONVERSATION\n", 1)[1].rsplit("\nTASK\n", 1)[0]
+        payload = sum(
+            spec.part_tokens(json.loads(line).get("text"))
+            for line in body.splitlines()
+            if line.strip()
+        )
+        before = ruler.to_dict()
+        estimated = ruler.estimate_total(row["model"], payload)
+        ruler.observe(
+            row["model"],
+            payload,
+            row["usage"],
+            successful=row["ok"],
+            provider_observed=True,
+        )
+        expected = {
+            "payload_tokens_estimated": payload,
+            "input_tokens_planned": estimated,
+            "state_before": before,
+            "state_after": ruler.to_dict(),
+            "provider_observed": True,
+        }
+        if row.get("token_calibration") != expected:
+            raise ValueError("causal token calibration does not reconcile")
+        if row["role"] == "answer" and row["tokens_estimated"] != estimated:
+            raise ValueError("gate and rendered-payload estimates differ")
+        gaps.append(estimated - row["usage"]["input_tokens"])
+    return {
+        "calls_audited": len(gaps),
+        "state": ruler.to_dict(),
+        "underestimated_calls": sum(gap < 0 for gap in gaps),
+        "minimum_estimate_minus_reported_input": min(gaps, default=None),
+        "scope": "Each logical request estimate versus its final reported provider invocation; internal invocations counted separately in costs.",
+    }
+
+
 def build(root):
     plan = read(root / "plan.json")
+    spec = Policy.from_dict(read(root / "policy.json")).spec
     if (
         hashlib.sha256((root / "quality-design.json").read_bytes()).hexdigest()
         != plan["quality_design_sha256"]
@@ -110,6 +160,11 @@ def build(root):
             ):
                 raise ValueError("invalid admission stop marker")
             tid = plan["evaluation_thread_ids"][rep - 1]
+            calibration = (
+                audit_calibration(directory, ledger, plan, spec)
+                if arm == "compache"
+                else None
+            )
             invocation = extra = 0
             usage = Counter()
             for row in ledger:
@@ -184,6 +239,7 @@ def build(root):
                 "reported_provider_invocations": invocation,
                 "internal_codex_invocations": extra,
                 "reported_usage": dict(usage),
+                "token_calibration_audit": calibration,
                 "wall_seconds": sum(r["wall_seconds"] for r in ledger),
                 "max_reported_input_tokens": max(
                     (
@@ -197,6 +253,12 @@ def build(root):
                     r.get("prefix_transition") in ("rewrite", "rewritten")
                     for r in ledger
                 ),
+                "deterministic_recalled_parts": sum(
+                    (a.get("diagnostic") or {}).get("recalled_parts", 0)
+                    for a in answers
+                )
+                if arm == "compache"
+                else None,
                 "missing_authored_requirements_before_recovery": sum(
                     len(
                         (a.get("diagnostic") or {}).get(
@@ -248,6 +310,8 @@ def build(root):
     result = {
         "schema": "compache-scaled-live-report-v1",
         "all_arms_completed": all_complete,
+        "fresh_runs": plan.get("fresh_runs"),
+        "reused_runs": plan.get("reused_runs", []),
         "planned_answers": 6 * plan["planned_answers_per_arm"],
         "completed_answers": sum(r["completed_answers"] for r in runs.values()),
         "all_attempt_usage_available": not unreported,

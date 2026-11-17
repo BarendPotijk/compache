@@ -2,11 +2,11 @@
 
 A harness-agnostic optimizer for long agent conversations. It keeps a conversation inside the model's context window without rewriting the provider's cached prefix by accident, and decides at every run end whether keeping that prefix warm is worth paying for.
 
-**Status (0.4.0):** [RAG workload fitting, constrained search, cost replay, a deterministic retrieval gate and retention decisions](optimizer.md) are implemented, alongside the trace contracts and coding-agent labeling skill. The broader architecture below is a roadmap. Experimental subscription execution and an OpenCode policy baseline are available; production adapters, bill calibration, durable state and live idle-time ping scheduling remain unimplemented. See the implementation guide for the supported subset and assumptions.
+**Status (0.4.1):** [RAG workload fitting, constrained search, cost replay, a deterministic retrieval gate, selective recall, empirical token calibration and retention decisions](optimizer.md) are implemented, alongside the trace contracts and coding-agent labeling skill. The broader architecture below is a roadmap. Experimental subscription execution and an OpenCode policy baseline are available; production adapters, invoice calibration, durable state and live idle-time ping scheduling remain unimplemented. See the implementation guide for the supported subset and assumptions.
 
 ## The one idea
 
-A cached prefix is cheap to read and expensive to write. So the view of the conversation sent to the model must stay byte-stable while the cache is warm, and may only be rewritten when the cache is already gone. Everything else follows from that.
+A cached prefix is cheap to read and expensive to write. The gate normally preserves and extends it while warm, and compacts at cold returns. At high context pressure it can rewrite a warm prefix under the target and admission rules described in the implementation guide.
 
 ## Two mechanisms
 
@@ -34,6 +34,7 @@ They cooperate: the planner prices a cold return at the gate's own cold plan, an
 | [Implemented RAG optimizer](optimizer.md) | Runnable fit/solve/replay, promotion checks, pure gate/planner, economics and coverage limits |
 | [Scaled RAG workload](scaled-rag-workload.md) | Fictional 300-thread workload, sharded export, planning assumptions and audit scope |
 | [Scaled RAG results](scaled-rag-results.md) | Frozen-policy admission failures, measured sample and limits on cost/coverage claims |
+| [Admission repair results](admission-fix-results.md) | Source protection, selective recall, causal token calibration and repeat evaluation |
 | [Scaled RAG results](scaled-rag-results.md) | Frozen-policy admission failures, measured sample and limits on cost/coverage claims |
 | [Live comparison](live-comparison.md) | Subscription runner, measured usage, cache scenarios and limitations |
 | [OpenCode baseline](opencode-baseline.md) | Pinned default compaction behavior and adapter boundaries |

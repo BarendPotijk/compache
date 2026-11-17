@@ -23,9 +23,11 @@ The supplied development corpus has already informed the implementation; thread 
 
 `prepare` reads a canonical request, policy, explicit thread state and clock. It has no access to labels or the target/future answer. Its byte-stable projection reuses existing placeholders while warm and appends new content. It considers a warm replan only above the configured 50% or 60% pressure threshold (standalone default 60%). A warm rewrite must reach the compaction target; when protected context makes that impossible, it keeps the cached projection (`deferred_warm`) until a cold return. If the unchanged view would breach the hard token/byte admission limit, it may take a partial safety cut (`replaced_warm_for_admission`); admission still fails if protected/current context cannot fit. Cold compaction can take partial savings even when the target is unreachable. Telemetry records these decisions. New policies latch at cold boundaries. Missing, edited or reordered canonical prefix parts invalidate the old recipe and recoveries.
 
-Oldest eligible retrievals are replaced until reaching the target, or until no eligible bodies remain. Grace is the number of preceding runs whose retrievals remain protected. A conservative lexical guard also protects distinctive current-question overlaps and document IDs cited in prior outputs. Identical fresh retrievals can make an older occurrence eligible. These rules are heuristics, not semantic classifiers. Callers can additionally pass `protected_ids`.
+Oldest eligible retrievals are replaced until reaching the target, or until no eligible bodies remain. Grace is the number of preceding runs whose retrievals remain protected. The 0.4.1 guard selects sources using explicit occurrence/document references, distinctive identifiers, or uncommon term pairs in the current question. Citations are followed only from relevant prior answers, and only to source occurrences available when that answer was written. Version/chunk references narrow the candidates; ambiguous references retain all matching candidates. An unrelated old citation does not permanently pin a document. Identical current retrievals can make an older occurrence eligible. These rules are heuristics, not semantic classifiers. Callers can additionally pass `protected_ids`.
 
-Cuts remain sticky while canonical history extends, including after cache expiry. A later query that needs a removed source must expand it. Each placeholder contains a stable handle scoped to the thread, part identity and body fingerprint. `expand` returns at most 48,000 characters per page; the caller must implement the model-visible tool and persist recovered content in its integration. Replay includes a simulated recovery mechanism, but no live tool integration ships here.
+Cuts remain sticky while canonical history extends, including after cache expiry. If the current guard selects an already compacted source, the gate appends a full copy as a current-run recall without changing its original placeholder. The appended copy is retained in subsequent projections, charged in admission and replay, and eligible for later compaction when no longer protected. Existing full copies are reused; `full_part_ids` counts an original as available only while an original or recalled copy remains full. A failed admission commits neither the recall nor cuts. `recalled_parts` reports newly appended copies. This local index operation makes no model call; its input tokens still cost money.
+
+Sources missed by the guard remain accessible through the explicit recovery tool. Each placeholder contains a stable handle scoped to the canonical thread, part identity and body fingerprint, including placeholders for recalled aliases. `expand` returns at most 48,000 characters per page. The caller must expose the model-visible tool and persist recovered content; the experimental live runner implements this protocol. Replay's label-driven priced recovery remains a separate oracle simulation, and prior oracle recoveries are also eligible for later compaction.
 
 Estimated token and byte admission limits protect known-model requests; failures do not commit thread state. Unknown models and masked inputs are observe-only, make no new cuts and explicitly report that admission is unverified. The pass-through is not a guarantee the provider will accept the request. Do not send null/masked bodies as if they were complete production prompts.
 
@@ -35,11 +37,13 @@ Estimated token and byte admission limits protect known-model requests; failures
 
 The replay cache holds one latest prefix per thread. It matches whole serialized parts, rounds shared tokens down to the configured block size, expires at TTL from request start, and refreshes on cacheable requests. It does not model provider cache eviction, routing, multiple surviving cache branches, cache-write latency, or queue delays. Ping plans stop when a new run starts, the collection cutoff arrives, or the simulated ping misses/produces billed output. The implementation sends no actual pings. An integration must recheck idleness, lease ownership, deadline and provider capability before executing a decision.
 
-The planner's expected-value formula uses continuous token sizes; the replay ledger applies the explicit minimum/block rounding. It prices a hypothetical cold view using only the just-completed history, without seeing the next user question. The one-generation RAG contract has zero later calls per run. Persistent stores, `observe`/bill calibration, cache breakpoints and provider-native requests are not implemented.
+The planner's expected-value formula uses continuous token sizes; the replay ledger applies the explicit minimum/block rounding. It prices a hypothetical cold view using only the just-completed history, without seeing the next user question. The offline one-generation RAG contract has zero later calls per run; the experimental live runner separately records recovery calls. Persistent stores, provider cache breakpoints and production-native request adapters remain unimplemented.
 
 ## Cost, risk and evidence
 
-The token ruler estimates `ceil(UTF-8 bytes / bytes_per_token)` for each body plus configured framing overhead per part. It does not tokenize provider requests or calibrate from Codex's large system/tool prompt. Ledger costs are base-input-token equivalents: fresh input + read multiplier × cached input + write multiplier × cache writes + output multiplier × output tokens. They are not currency amounts, actual usage, or subscription charges. Unavailable bodies have unknown cost; totals cover visible projection text and affected runs are flagged.
+The default token ruler estimates `ceil(UTF-8 bytes / bytes_per_token)` for each body plus configured framing overhead per part. `prepare(..., token_estimator=callback)` can replace the total estimate; the callback receives `(payload_tokens, overhead_tokens)` and is recomputed after every candidate cut. `OnlineTokenCalibrator` learns a model-specific maximum observed payload ratio from preceding successful provider inputs and adds an explicit margin (default 10%) plus a fixed runtime allowance. Observe actual counters only after each call, scope state to the same transport/framing, and replay observations in order on resume. Unknown models get no transferred observations. The live runner enables this through its frozen `token_calibration` plan; synthetic replay has no provider counters and uses the default ruler. Calibration is an empirical planning safeguard, not native tokenization or a guaranteed upper bound.
+
+Ledger costs are base-input-token equivalents: fresh input + read multiplier × cached input + write multiplier × cache writes + output multiplier × output tokens. They are not currency amounts, actual usage, or subscription charges. Unavailable bodies have unknown cost; totals cover visible projection text and affected runs are flagged.
 
 Task requirements use OR between alternatives and AND within each alternative and between requirements. A known miss means no sufficient alternative survives in full before recovery. Output-support claims do not substitute for task requirements. A partial, unknown or absent label makes the run unassessable; changing its context counts against the separate unknown-change ceiling. Neither source labels nor zero measured misses establish answer quality.
 
@@ -108,3 +112,25 @@ if result["recommended_policy"] is not None:
 ```
 
 The fixture model ID describes the source answers only. Its context window, TTL, cache eligibility, multipliers and ruler are illustrative inputs, not verified specifications of that model. Nothing in this example sends requests or executes retention plans.
+
+An adapter with actual usage counters can opt into causal calibration:
+
+```python
+from compache.optimizer import OnlineTokenCalibrator
+
+# Choose this allowance for your own runtime and rendering, not from a model name.
+ruler = OnlineTokenCalibrator(runtime_allowance_tokens, safety_margin=0.10)
+view = prepare(
+    request, policy, state, request_started_at,
+    overhead_tokens=runtime_allowance_tokens,
+    token_estimator=lambda payload, overhead: ruler.estimate_total(request.model, payload),
+)
+if not view.admitted:
+    raise RuntimeError(view.reason)
+payload = sum(policy.spec.part_tokens(part.text) for part in view.parts)
+# Send view.parts through your adapter. Only after a successful response:
+ruler.observe(request.model, payload, provider_usage,
+              successful=True, provider_observed=True)
+```
+
+`provider_usage["input_tokens"]` must include cached input; optional cached/output counters are validated. The payload must describe the exact call being observed, including appended recovery messages when present. Do not feed fabricated or locally estimated counters as provider usage. Persist `ruler.to_dict()` together with the corresponding completed-call position, or reconstruct it in call order; `OnlineTokenCalibrator.from_dict()` restores validated state. Use a fresh ruler when transport, rendering or the fixed allowance changes. The experimental runner records pre-observation and post-observation states and checks them on resume.

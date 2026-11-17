@@ -2,7 +2,7 @@
 
 compache fits a context-compaction and cache keep-warm policy to your own traces, then applies it deterministically on every model request.
 
-**Status (0.4.0):** the standard-RAG optimizer is runnable. It fits return timing and dependency-distance aggregates, searches compaction/retention policies on training threads, and evaluates the winner on separate threads. The package also exposes a deterministic retrieval gate, bounded source expansion and keep-warm decisions. The experimental live runner adds an OpenCode baseline, subscription execution, bounded recovery and per-call usage accounting. Production provider adapters, durable state, bill calibration and the OpenAI labeling worker remain future work. See the [implementation guide](docs/optimizer.md) for the supported subset.
+**Status (0.4.1):** the standard-RAG optimizer is runnable. It fits return timing and dependency-distance aggregates, searches compaction/retention policies on training threads, and evaluates the winner on separate threads. The package exposes a deterministic retrieval gate, selective recall, bounded source expansion, empirical token calibration and keep-warm decisions. The experimental live runner adds an OpenCode baseline, subscription execution, bounded recovery and per-call usage accounting. Production provider adapters, durable state, invoice calibration and the OpenAI labeling worker remain future work. See the [implementation guide](docs/optimizer.md) for the supported subset.
 
 ## Run the optimizer
 
@@ -35,6 +35,8 @@ The [Python API](docs/optimizer.md#python-api) provides `fit_profile`, `optimize
 The [long RAG generator](examples/rag_long/README.md) creates separate training and held-out conversations with 15–21k-token retrieval bundles, earlier constraints, source versions and old-evidence dependencies. The [OpenCode adapter](docs/opencode-baseline.md) follows pinned default compaction behavior. The [live runner](docs/live-comparison.md) executes three replicas of each arm using Luna at low reasoning and records every answer, summary, recovery and keep-warm call.
 
 Subscription snapshots carry Codex overhead in their reported usage. Their physical cache counters differ from a persistent integration, so the 5- and 30-minute savings scenarios explicitly model prefix reuse over the same measured calls. See [public benchmark choices](docs/public-benchmarks.md) for the next quality checks.
+
+The [expanded corpus](docs/scaled-rag-workload.md) contains 300 fictional conversations across 30 companies. Its [original result](docs/scaled-rag-results.md) exposed admission failures. Version 0.4.1 narrows citation protection to relevant source occurrences, recalls needed compacted sources without rewriting their earlier placeholders, and calibrates live token estimates from preceding provider usage. See the [repair evaluation](docs/admission-fix-results.md) for completion, dependency and cost results and their limits.
 
 ## Try the first milestone
 

@@ -203,6 +203,57 @@ class LiveTests(unittest.TestCase):
             self.assertEqual(
                 len(runner.read_rows(out / "runs/opencode-1/ledger.jsonl")), len(rows)
             )
+            # Calibration is explicitly enabled in the plan, reconstructs on
+            # resume, and never learns a token ratio from simulated counters.
+            calibrated = dict(plan, token_calibration={"safety_margin": 0.1})
+            runner.one_arm(
+                source,
+                out,
+                calibrated,
+                "compache",
+                2,
+                base,
+                "unused",
+                invoke_override=fake,
+            )
+            measured = runner.read_rows(out / "runs/compache-2/ledger.jsonl")
+            self.assertTrue(measured)
+            for row in measured:
+                detail = row["token_calibration"]
+                self.assertFalse(detail["provider_observed"])
+                self.assertEqual(detail["state_after"]["models"], {})
+                self.assertGreater(
+                    detail["input_tokens_planned"], detail["payload_tokens_estimated"]
+                )
+            called = len(prompts)
+            runner.one_arm(
+                source,
+                out,
+                calibrated,
+                "compache",
+                2,
+                base,
+                "unused",
+                invoke_override=fake,
+                resume=True,
+            )
+            self.assertEqual(len(prompts), called)
+            measured[0]["token_calibration"]["state_after"]["fixed_overhead"] += 1
+            (out / "runs/compache-2/ledger.jsonl").write_text(
+                "".join(json.dumps(row) + "\n" for row in measured)
+            )
+            with self.assertRaisesRegex(RuntimeError, "saved token calibration"):
+                runner.one_arm(
+                    source,
+                    out,
+                    calibrated,
+                    "compache",
+                    2,
+                    base,
+                    "unused",
+                    invoke_override=fake,
+                    resume=True,
+                )
             # A refused request must leave a durable stop record and incur no
             # provider call, rather than appearing as a completed cheap thread.
             refused = replace(

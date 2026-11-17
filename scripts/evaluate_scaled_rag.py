@@ -227,8 +227,11 @@ def main():
                         totals[scope + "/" + key][k] += v
             base = baseline(thread, policy.spec, 16000)
             s = result["summary"]
-            prefix = baseline(
-                thread, policy.spec, 16000, s["replayed_runs"] - s["admission_failures"]
+            admitted_count = s["replayed_runs"] - s["admission_failures"]
+            prefix = (
+                base
+                if admitted_count == len(thread.runs)
+                else baseline(thread, policy.spec, 16000, admitted_count)
             )
             for scope in ("all", split):
                 for k in (

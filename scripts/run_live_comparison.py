@@ -34,6 +34,7 @@ from compache.optimizer import (
     replay,
 )
 from compache.optimizer.contracts import digest, seconds
+from compache.optimizer.calibration import OnlineTokenCalibrator
 from compache.optimizer.integration import (
     RETRIEVE_SCHEMA,
     REOPEN_SCHEMA,
@@ -435,12 +436,49 @@ def one_arm(
     run_records = []
     previous_usage = Usage()
     overhead = plan["overhead_tokens_for_planning_only"]
+    calibration_config = plan.get("token_calibration") if arm == "compache" else None
+    calibrator = (
+        OnlineTokenCalibrator(overhead, calibration_config["safety_margin"])
+        if calibration_config is not None
+        else None
+    )
+    token_estimator = (
+        (lambda payload, fixed: calibrator.estimate_total(MODEL, payload))
+        if calibrator is not None
+        else None
+    )
     planned_counts = {r: 0 for r in ("answer", "summary", "ping", "recovery")}
 
     def call(view, role, run, logical_at, *, event_details=None):
         nonlocal session
         sequence = len(ledger) + 1
         planned_counts[role] += 1
+        calibration = None
+        if calibrator is not None:
+            body = view.split("\nCONVERSATION\n", 1)[1].rsplit("\nTASK\n", 1)[0]
+            payload = sum(
+                policy.spec.part_tokens(json.loads(line).get("text"))
+                for line in body.splitlines()
+                if line.strip()
+            )
+            calibration = {
+                "payload_tokens_estimated": payload,
+                "input_tokens_planned": calibrator.estimate_total(MODEL, payload),
+                "state_before": calibrator.to_dict(),
+                "provider_observed": invoke_override is None,
+            }
+
+        def observe_calibration(row):
+            if calibrator is not None:
+                calibrator.observe(
+                    MODEL,
+                    calibration["payload_tokens_estimated"],
+                    row.get("usage"),
+                    successful=row["ok"],
+                    provider_observed=calibration["provider_observed"],
+                )
+                calibration["state_after"] = calibrator.to_dict()
+
         if sequence <= len(saved):
             row = saved[sequence - 1]
             if (
@@ -450,6 +488,11 @@ def one_arm(
                 or not row["ok"]
             ):
                 raise RuntimeError("saved call does not match reconstructed trajectory")
+            observe_calibration(row)
+            if calibration is not None and row.get("token_calibration") != calibration:
+                raise RuntimeError(
+                    "saved token calibration does not match causal replay"
+                )
             ledger.append(row)
             return row
         dump(directory / "expected-counts.json", planned_counts)
@@ -485,6 +528,9 @@ def one_arm(
             **(event_details or {}),
             **result,
         }
+        observe_calibration(row)
+        if calibration is not None:
+            row["token_calibration"] = calibration
         if "\nCONVERSATION\n" in view:
             header, rest = view.split("\nCONVERSATION\n", 1)
             body, _ = rest.rsplit("\nTASK\n", 1)
@@ -552,7 +598,12 @@ def one_arm(
                         design[run.run_id].get("actual_prior_output_required", False),
                     )
                 prepared = prepare(
-                    req, policy, state, logical, overhead_tokens=overhead
+                    req,
+                    policy,
+                    state,
+                    logical,
+                    overhead_tokens=overhead,
+                    token_estimator=token_estimator,
                 )
                 if not prepared.admitted:
                     dump(
@@ -698,7 +749,13 @@ def one_arm(
             if arm == "compache" and position + 1 < len(fixture.runs):
                 finish = seconds(run.ended_at)
                 cold = _cold_preview(
-                    req, state, policy, answer_source, finish, overhead
+                    req,
+                    state,
+                    policy,
+                    answer_source,
+                    finish,
+                    overhead,
+                    token_estimator=token_estimator,
                 )
                 decision = end_run(
                     policy,

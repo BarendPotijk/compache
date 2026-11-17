@@ -107,7 +107,9 @@ def assess(label, full_ids):
     }
 
 
-def _cold_preview(request, state, policy, answer, now, overhead_tokens=0):
+def _cold_preview(
+    request, state, policy, answer, now, overhead_tokens=0, *, token_estimator=None
+):
     preview = Request(
         request.thread_id,
         request.run_id + ":preview",
@@ -122,6 +124,7 @@ def _cold_preview(request, state, policy, answer, now, overhead_tokens=0):
         now,
         force_cold=True,
         overhead_tokens=overhead_tokens,
+        token_estimator=token_estimator,
     )
 
 

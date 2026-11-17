@@ -682,8 +682,9 @@ class ReplayAndSolverTests(unittest.TestCase):
             protect_query_matches=False,
         )
         result = replay([t], labels, policy, profile, observation_end=END)
-        self.assertEqual(result["summary"]["expansion_round_trips"], 1)
+        self.assertEqual(result["summary"]["expansion_round_trips"], 2)
         self.assertIn("t/restored/name-r1-doc", result["runs"][1]["recovered_part_ids"])
+        self.assertIn("t/restored/name-r1-doc", result["runs"][2]["recovered_part_ids"])
 
     def test_solver_promotes_safe_compaction_on_redundant_history(self):
         ts = [
@@ -755,9 +756,12 @@ class ReplayAndSolverTests(unittest.TestCase):
         result = replay([t], labels, policy, profile, observation_end=END)
         self.assertGreater(result["summary"]["miss_runs"], 0)
         self.assertGreater(result["summary"]["expansion_cost"], 0)
-        self.assertEqual(result["summary"]["expansion_round_trips"], 1)
+        self.assertEqual(result["summary"]["expansion_round_trips"], 2)
         self.assertIn("t-r1-doc", result["runs"][1]["recovered_part_ids"])
-        self.assertFalse(result["runs"][-1]["missed_requirements"])
+        # An old recovery copy is eligible for compaction; a later recovery
+        # costs another call and does not erase the before-recovery miss.
+        self.assertIn("t-r1-doc", result["runs"][-1]["recovered_part_ids"])
+        self.assertTrue(result["runs"][-1]["missed_requirements"])
 
     def test_unknown_labels_never_become_zero_risk_negatives(self):
         t = thread()

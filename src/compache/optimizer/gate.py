@@ -125,6 +125,7 @@ class Prepared:
     policy_hash: str
     admitted: bool
     reason: str | None
+    recalled_parts: int = 0
 
     def telemetry(self):
         return {
@@ -133,6 +134,7 @@ class Prepared:
             "prefix_transition": self.prefix_transition,
             "tokens_estimated": self.tokens,
             "removed_parts": len(self.removed_part_ids),
+            "recalled_parts": self.recalled_parts,
             "policy_hash": self.policy_hash,
             "admitted": self.admitted,
             "reason": self.reason,
@@ -191,8 +193,30 @@ def terms(text: str):
     return frozenset(result)
 
 
+def _contains(text: str, value: str) -> bool:
+    return bool(value) and bool(
+        re.search(r"(?<![\w-])" + re.escape(value) + r"(?![\w-])", text, re.I)
+    )
+
+
+@lru_cache(maxsize=1024)
+def _identifiers(text: str):
+    return frozenset(
+        token.lower()
+        for token in re.findall(
+            r"(?<![\w-])[a-zA-Z0-9]+(?:[-_][a-zA-Z0-9]+)*(?![\w-])", text
+        )
+        if len(token) >= 5
+        and any(c.isalpha() for c in token)
+        and (
+            any(c.isdigit() for c in token)
+            or (token.isupper() and ("-" in token or "_" in token))
+        )
+    )
+
+
 def protected_sources(request: Request):
-    """Conservative lexical guard, not a semantic dependency classifier."""
+    """Protect plausible relevant evidence; this is not a semantic guarantee."""
     old = [
         p
         for p in request.parts
@@ -209,44 +233,134 @@ def protected_sources(request: Request):
         if p.kind == "input" and p.run_index == request.run_index
     )
     q = terms(query)
-    # Company/product words shared by most passages are not distinctive guards.
     vocab = [terms((p.text or "") + " " + p.document_id) for p in old + current]
-    common = {
-        w for w in q if len(vocab) >= 3 and sum(w in v for v in vocab) > len(vocab) / 2
+    rare = {
+        w
+        for w in q
+        if len(w) >= 5 and sum(w in v for v in vocab) <= max(1, len(vocab) / 2)
     }
-    q -= common
+    qids = _identifiers(query)
+    versions = {
+        p.version for p in old + current if p.version and _contains(query, p.version)
+    }
+    chunks = {
+        p.chunk_id for p in old + current if p.chunk_id and _contains(query, p.chunk_id)
+    }
     protected = set()
-    for p in old:
+
+    def select(p):
         duplicated = any(
             (p.document_id, p.version, p.chunk_id, p.text)
             == (c.document_id, c.version, c.chunk_id, c.text)
             for c in current
         )
-        cited = any(
-            p.document_id and p.document_id in (a.text or "")
-            for a in request.parts
-            if a.kind == "output"
-        )
-        if cited or (
-            not duplicated and q & terms((p.text or "") + " " + p.document_id)
-        ):
+        if not duplicated or _contains(query, p.part_id):
             protected.add(p.part_id)
+
+    for p, words in zip(old, vocab):
+        content = " ".join((p.text or "", p.document_id, p.chunk_id, p.part_id))
+        explicit = any(
+            _contains(query, x) for x in (p.part_id, p.chunk_id, p.document_id)
+        )
+        if explicit:
+            if (not versions or p.version in versions) and (
+                not chunks or p.chunk_id in chunks
+            ):
+                select(p)
+        elif qids and qids & _identifiers(content):
+            select(p)
+        elif not qids and len(rare & words) >= 2:
+            select(p)
+
+    outputs = [
+        p
+        for p in request.parts
+        if p.kind == "output" and p.run_index < request.run_index and p.text
+    ]
+    turns = {int(n) for n in re.findall(r"\bturn\s+(\d+)\b", query, re.I)}
+    relevant = [
+        a
+        for a in outputs
+        if a.run_index in turns
+        or (qids and qids & _identifiers(a.text or ""))
+        or (not qids and len(rare & terms(a.text or "")) >= 2)
+    ]
+    if (
+        not relevant
+        and not qids
+        and not turns
+        and outputs
+        and re.search(r"\b(?:previous|earlier|prior|above|last)\b", query, re.I)
+    ):
+        relevant = [max(outputs, key=lambda a: a.run_index)]
+    for a in relevant:
+        text = a.text or ""
+        for doc in {
+            p.document_id
+            for p in old
+            if p.document_id and _contains(text, p.document_id)
+        }:
+            candidates = [
+                p for p in old if p.document_id == doc and p.run_index <= a.run_index
+            ]
+            cited_versions = {
+                p.version
+                for p in candidates
+                if p.version and _contains(text, p.version)
+            }
+            cited_chunks = {
+                p.chunk_id
+                for p in candidates
+                if p.chunk_id and _contains(text, p.chunk_id)
+            }
+            if cited_versions:
+                candidates = [p for p in candidates if p.version in cited_versions]
+            if cited_chunks:
+                candidates = [p for p in candidates if p.chunk_id in cited_chunks]
+            # A document, version, or chunk can recur. If the citation cannot
+            # distinguish visible occurrences, retain all of its candidates.
+            for p in candidates:
+                select(p)
     return protected
+
+
+def _placeholder_for(request: Request, state: ThreadState, source: Source):
+    # Expansion aliases are not in the canonical request. Their placeholder
+    # must carry the canonical source's reopen handle, not an unusable alias.
+    original_id = next(
+        (
+            original
+            for values in state.expansions.values()
+            for original, alias in values.items()
+            if alias.part_id == source.part_id
+        ),
+        None,
+    )
+    original = next((p for p in request.parts if p.part_id == original_id), source)
+    return placeholder(request.thread_id, original)
 
 
 def _project(request: Request, state: ThreadState, removed: set[str]):
     result = []
     inserted = set()
-    for p in request.parts:
-        if p.kind == "output" and p.run_index not in inserted:
-            result.extend(state.expansions.get(p.run_index, {}).values())
-            inserted.add(p.run_index)
-        result.append(
-            replace(p, text=placeholder(request.thread_id, p))
+
+    def project(p):
+        return (
+            replace(p, text=_placeholder_for(request, state, p))
             if p.part_id in removed
             else p
         )
-    result.extend(state.expansions.get(request.run_index, {}).values())
+
+    for p in request.parts:
+        if p.kind == "output" and p.run_index not in inserted:
+            result.extend(
+                project(x) for x in state.expansions.get(p.run_index, {}).values()
+            )
+            inserted.add(p.run_index)
+        result.append(project(p))
+    result.extend(
+        project(x) for x in state.expansions.get(request.run_index, {}).values()
+    )
     return tuple(result)
 
 
@@ -259,9 +373,21 @@ def _prepare(
     force_cold=False,
     protected_ids=frozenset(),
     overhead_tokens=0,
+    token_estimator=None,
 ) -> Prepared:
     number(now, "now", -1e20)
     number(overhead_tokens, "overhead_tokens", integer=True)
+
+    def estimate(payload):
+        value = (
+            payload + overhead_tokens
+            if token_estimator is None
+            else token_estimator(payload, overhead_tokens)
+        )
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ContractError("token estimator must return a nonnegative integer")
+        return value
+
     if request.thread_id != state.thread_id:
         raise ContractError("state belongs to another thread")
     if state.last_started_at is not None and now < state.last_started_at:
@@ -303,12 +429,49 @@ def _prepare(
     )
     old_removed = set(state.removed)
     deferred_warm = False
+    recalled = 0
     if observe_only:
         # Retain previous placeholders if already visible; no new cuts on incomplete data.
         action = "observe_only"
     else:
+        originals = {p.part_id: p for p in request.parts if p.kind == "retrieval"}
+        expanded_full = {
+            original
+            for values in state.expansions.values()
+            for original, source in values.items()
+            if source.part_id not in state.removed
+            and original in originals
+            and source.text is not None
+            and source.text == originals[original].text
+        }
+        used_ids = {p.part_id for p in request.parts} | {
+            source.part_id
+            for values in state.expansions.values()
+            for source in values.values()
+        }
+        for original_id in sorted(
+            protected & state.removed & originals.keys() - expanded_full
+        ):
+            original = originals[original_id]
+            if original_id in state.expansions.get(request.run_index, {}):
+                raise ContractError(
+                    "current-run expansion already occupies recall identity"
+                )
+            alias = (
+                request.run_id
+                + "/recall/"
+                + digest([original_id, original.fingerprint])[:24]
+            )
+            if alias in used_ids:
+                raise ContractError("recall expansion identity collision")
+            state.expansions.setdefault(request.run_index, {})[original_id] = replace(
+                original, part_id=alias, run_index=request.run_index
+            )
+            used_ids.add(alias)
+            recalled += 1
         projected = _project(request, state, state.removed)
-        size = overhead_tokens + sum(spec.part_tokens(p.text) for p in projected)
+        payload = sum(spec.part_tokens(p.text) for p in projected)
+        size = estimate(payload)
         wire_bytes = sum(len(wire_part(p).encode()) for p in projected)
         threshold = active.cold_trigger if cold or not usable else active.warm_trigger
         pressure = max(
@@ -323,7 +486,17 @@ def _prepare(
             pressure > threshold * spec.context_tokens
             and active.retrieval_grace_runs is not None
         ):
-            for p in sorted(request.parts, key=lambda p: (p.run_index, p.part_id)):
+            expansion_original = {
+                source.part_id: original
+                for values in state.expansions.values()
+                for original, source in values.items()
+            }
+            candidates = list(request.parts) + [
+                source
+                for values in state.expansions.values()
+                for source in values.values()
+            ]
+            for p in sorted(candidates, key=lambda p: (p.run_index, p.part_id)):
                 if pressure <= active.target * spec.context_tokens:
                     break
                 age = request.run_index - p.run_index
@@ -331,16 +504,17 @@ def _prepare(
                     p.kind != "retrieval"
                     or age <= active.retrieval_grace_runs
                     or p.part_id in protected
+                    or expansion_original.get(p.part_id) in protected
                     or p.part_id in state.removed
                 ):
                     continue
-                saving = spec.part_tokens(p.text) - spec.part_tokens(
-                    placeholder(request.thread_id, p)
-                )
+                placeholder_text = _placeholder_for(request, state, p)
+                saving = spec.part_tokens(p.text) - spec.part_tokens(placeholder_text)
                 if saving > 0:
                     state.removed.add(p.part_id)
-                    size -= saving
-                    compacted = replace(p, text=placeholder(request.thread_id, p))
+                    payload -= saving
+                    size = estimate(payload)
+                    compacted = replace(p, text=placeholder_text)
                     wire_bytes -= len(wire_part(p).encode()) - len(
                         wire_part(compacted).encode()
                     )
@@ -368,7 +542,7 @@ def _prepare(
                     )
     projected = _project(request, state, state.removed)
     wire = tuple(wire_part(p) for p in projected)
-    size = overhead_tokens + sum(spec.part_tokens(p.text) for p in projected)
+    size = estimate(sum(spec.part_tokens(p.text) for p in projected))
     admitted = observe_only or (
         size <= (1 - active.reserve) * spec.context_tokens
         and sum(len(x.encode()) for x in wire) <= spec.byte_limit
@@ -393,8 +567,17 @@ def _prepare(
             else "rewritten"
         )
     )
+    canonical_retrievals = {
+        p.part_id: p for p in request.parts if p.kind == "retrieval"
+    }
     originals_restored = {
-        part_id for values in state.expansions.values() for part_id in values
+        part_id
+        for values in state.expansions.values()
+        for part_id, source in values.items()
+        if source.part_id not in state.removed
+        and part_id in canonical_retrievals
+        and source.text is not None
+        and source.text == canonical_retrievals[part_id].text
     }
     full = ({p.part_id for p in request.parts} - state.removed) | originals_restored
     result = Prepared(
@@ -409,6 +592,7 @@ def _prepare(
         active.hash,
         admitted,
         reason,
+        recalled,
     )
     # Admission failures do not record an unsent request or permanently cut sources.
     if admitted:
@@ -433,6 +617,7 @@ def prepare(
     force_cold=False,
     protected_ids=frozenset(),
     overhead_tokens=0,
+    token_estimator=None,
 ) -> Prepared:
     """Plan deterministically; commit explicit state only after successful admission."""
     proposed = copy.deepcopy(state)
@@ -444,6 +629,7 @@ def prepare(
         force_cold=force_cold,
         protected_ids=protected_ids,
         overhead_tokens=overhead_tokens,
+        token_estimator=token_estimator,
     )
     if result.admitted:
         state.__dict__.update(proposed.__dict__)

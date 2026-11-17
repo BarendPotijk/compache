@@ -13,6 +13,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 from compache.optimizer.contracts import digest
+from compache import __version__
 from scaled_rag_dataset import load_thread
 
 SELECTED = ["scaled-26-07", "scaled-24-07", "scaled-29-07"]
@@ -86,7 +87,11 @@ def prepare(dataset, reference, policy_path, output):
         sampling=fixture_manifest["selection"],
         comparison=fixture_manifest["split"],
         stop_rule="A denied Compache admission stops that arm without sending a model request; unexecuted turns remain in the coverage denominator. No full-thread savings claim for incomplete pairs.",
-        package_version="0.4.0",
+        package_version=__version__,
+        token_calibration={
+            "safety_margin": 0.1,
+            "scope": "Per-arm causal provider-input calibration with the plan's fixed runtime allowance; empirical safeguard, not native tokenization.",
+        },
         bind_live_output_dependencies=True,
         all_arms_external_tools_disabled=True,
         fresh_runs=[f"{a}-{i}" for a in ("opencode", "compache") for i in range(1, 4)],
