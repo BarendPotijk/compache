@@ -1,5 +1,7 @@
 # compache
 
+[Benchmark handover for agents](benchmark-handover.md) · [Illustrated HTML brief](benchmark-handover.html)
+
 A harness-agnostic optimizer for long agent conversations. It keeps a conversation inside the model's context window without rewriting the provider's cached prefix by accident, and decides at every run end whether keeping that prefix warm is worth paying for.
 
 **Status (0.9):** the [workload planner](workload-planner.md) is implemented: trace and label formats, fitting, a solver that picks the cut and ping count by replayed cost, cost replay and the runtime session. The broader architecture below is a roadmap. The earlier gate-based optimiser and the setup flow were removed; pages that describe them are kept as records. Provider adapters, a ping scheduler and framework integrations are not implemented.

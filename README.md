@@ -27,6 +27,8 @@ Two things drive the bill for a long thread: how much context every turn sends a
 - **Keeps what your agent uses.** A policy is admitted on evidence of which earlier parts later turns relied on. Where almost every turn builds on earlier ones, compache keeps the history and tunes only the pings.
 - **Deterministic at runtime.** Applying a policy calls no model. The same history always gives the same request, so the cached prefix stays stable.
 
+**Continuing the benchmark work?** Start with the [agent handover](docs/benchmark-handover.md) for the recorded traces, the original 5- and 30-minute policy fits, and the next offline experiment.
+
 ## Quickstart
 
 Python 3.11 or later, installed from source.
