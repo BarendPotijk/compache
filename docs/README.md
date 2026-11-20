@@ -4,11 +4,11 @@
 
 A harness-agnostic optimizer for long agent conversations. It keeps a conversation inside the model's context window without rewriting the provider's cached prefix by accident, and decides at every run end whether keeping that prefix warm is worth paying for.
 
-**Status:** design only, no code yet.
+**Status (0.4.1):** [RAG workload fitting, constrained search, cost replay, a deterministic retrieval gate, selective recall, empirical token calibration and retention decisions](optimizer.md) are implemented, alongside the trace contracts and coding-agent labeling skill. The broader architecture below is a roadmap. Experimental subscription execution and an OpenCode policy baseline are available; production adapters, invoice calibration, durable state and live idle-time ping scheduling remain unimplemented. See the implementation guide for the supported subset and assumptions.
 
 ## The one idea
 
-A cached prefix is cheap to read and expensive to write. So the view of the conversation sent to the model must stay byte-stable while the cache is warm, and may only be rewritten when the cache is already gone. Everything else follows from that.
+A cached prefix is cheap to read and expensive to write. The gate normally preserves and extends it while warm, and compacts at cold returns. At high context pressure it can rewrite a warm prefix under the target and admission rules described in the implementation guide.
 
 ## Two mechanisms
 
@@ -31,8 +31,22 @@ They cooperate: the planner prices a cold return at the gate's own cold plan, an
 
 ## Docs
 
+[Run the trace-fitted workload planner](workload-planner.md) · [Try both frozen cache-window fits](../examples/fitted_policy/README.md) · [Configure a workload](setup.md)
+
+[Comparison scopes and Headroom replay](comparisons.md) · [Application structure](application-structure.md)
+
 | Doc | Covers |
 |---|---|
+| [Implemented RAG optimizer](optimizer.md) | Runnable fit/solve/replay, promotion checks, pure gate/planner, economics and coverage limits |
+| [Scaled RAG workload](scaled-rag-workload.md) | Fictional 300-thread workload, sharded export, planning assumptions and audit scope |
+| [BEAM workload](beam-workload.md) | Adapter for 90 public long chats: evidence labels, fixed train/test split and declared return scenarios |
+| [Scaled RAG results](scaled-rag-results.md) | Frozen-policy admission failures, measured sample and limits on cost/coverage claims |
+| [Admission repair results](admission-fix-results.md) | Source protection, selective recall, causal token calibration and repeat evaluation |
+| [Scaled RAG results](scaled-rag-results.md) | Frozen-policy admission failures, measured sample and limits on cost/coverage claims |
+| [Live comparison](live-comparison.md) | Subscription runner, measured usage, cache scenarios and limitations |
+| [OpenCode baseline](opencode-baseline.md) | Pinned default compaction behavior and adapter boundaries |
+| [Public benchmarks](public-benchmarks.md) | RAG, memory and evidence-dependency evaluation options |
+| [Offline trace contracts](trace-contracts.md) | Implemented JSONL APIs, scoped Langfuse conversion, evidence packets, label validation |
 | [Foundations](foundations.md) | Provider assumptions, request layout, prefix stability |
 | [Compaction](compaction.md) | The gate: window, sizing, tiers, last resort, admission, projection, recovery |
 | [Retention](retention.md) | The planner: decision rule, test vectors, return curve, pings |
@@ -56,3 +70,8 @@ They cooperate: the planner prices a cold return at the gate's own cold plan, an
 | **shared part** | Eager tools plus static instructions: what every conversation of the model has cached |
 | **handle** | What a placeholder names to fetch the original: `tool:<id>`, `document:<uri>`, `source:<key>`, `answer:<n>`, `turn:<n>` |
 | **ping** | A replay of the run's last request with the answer appended, a cache point at its end and `max_tokens: 0`. It reads the prefix, caches the answer, and restarts the TTL |
+
+## Interactive exploration
+
+- [Cost explorer methodology](interactive-explorer.md): controls, deterministic accounting and pinned OpenClaw client-summary scope.
+- [Benchmark source plan](benchmark-trace-plan.md): QASPER, MuSiQue and LongMemEval, with provenance and rights constraints.

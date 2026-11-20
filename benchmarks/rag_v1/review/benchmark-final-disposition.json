@@ -1,0 +1,23 @@
+{
+  "scope": "Correction verification of affected families and generic openings; not a fresh blind review, human certification, or exhaustive proof of every semantic alternative. Six final delivery wording corrections verified against source estimates; manifest hashes for all four named files verified. Semantic sufficiency judgments remain model judgments and are not certification.",
+  "hashes": {
+    "threads.jsonl": "a10d11391ad934b8713378a26346a723f37217e21e1cd54a65e3996125b79337",
+    "ground_truth.jsonl": "105f029b69a11453d0bd3eb68349aa34887b631fdbcbc3ca39b97135233caa6d",
+    "corpus.jsonl": "18c7967c1e62c0d624705557b1418e2412934162386b4b19674d8db4a8192ac8",
+    "manifest.json": "a2068077a52b5bc73d49533f2684afa5a623176e98c53f075a42445695288c44",
+    "question-design.json": "8597f23e107b1de38975aafdf45acabfe45976c759578e89b6ca985976a3c189"
+  },
+  "dispositions": {
+    "arithmetic_007_022_037": "resolved; all compare correctly to 28 days",
+    "effective_dates_009_024_039": "resolved; runs after March 1",
+    "return_conditions_openings_and_002_017_032": "resolved; after delivery and original packaging included; prior output included as truth alternative",
+    "old_retrieval_004_019_034": "resolved; first answer only gives window, later packaging question requires earlier retrieval",
+    "source_alternatives_001_016_031_005_020_035_006_021_036_015_030_045": "resolved for flagged examples; alternative sets now include prior outputs/retrievals",
+    "format_constraint_002_017_032": "resolved; target does not repeat instruction; intervening answers respect it",
+    "ambiguous_reference_007_022_037_015_030_045": "resolved by explicit company/window or explicit selected option",
+    "intermediate_delivery_005_020_035_015_030_045": "resolved; usually and in-stock added and express recommendation bounded geographically",
+    "trace_collisions_and_tie_order": "collision check tested with synthetic root/generation ID conflict and raises ContractError; sorting uses run_index for equal start times. Malformed run_index tested and raises ContractError. No broader proof.",
+    "final_delivery_005_015_020_030_035_045": "resolved; revised answers preserve usual duration, in-stock and mainland scope, dispatch start and holiday exclusion; numerical comparisons checked"
+  },
+  "unresolved_concerns": []
+}

@@ -1,0 +1,117 @@
+{
+  "schema_version": "compache-rag-long-fixture-v1",
+  "seed": 20261116,
+  "model": "gpt-6-luna",
+  "train_thread_ids": [
+    "long-alder-1",
+    "long-alder-2",
+    "long-briar-1",
+    "long-briar-2",
+    "long-cinder-1",
+    "long-cinder-2"
+  ],
+  "heldout_thread_ids": [
+    "long-alder-heldout"
+  ],
+  "frozen_split_before_outcomes": true,
+  "controlled_length_scale": {
+    "source_distribution": "rag_workload question-family/source dependency patterns and three company profiles",
+    "source_median_turns": 5,
+    "long_turns_per_thread": 72,
+    "rationale": "A deliberate length-scale extension in both turn count and retrieval passage size. The full_canonical trace retains source dependency families and accumulates detailed company handbook content; no synthetic token padding. This separate long-scale training distribution is necessary to model full native-context behavior; short training fixtures do not cover long prompts."
+  },
+  "thread_count": 7,
+  "turn_count": 504,
+  "turns_per_thread": 72,
+  "retrieval_chunk_chars": {
+    "min": 14482,
+    "max": 17065
+  },
+  "retrieval_word_counts_by_thread": {
+    "long-alder-1": 870681,
+    "long-alder-2": 870681,
+    "long-briar-1": 863898,
+    "long-briar-2": 863898,
+    "long-cinder-1": 870681,
+    "long-cinder-2": 870681,
+    "long-alder-heldout": 870681
+  },
+  "retrieval_word_counts_per_turn": {
+    "min": 2237,
+    "max": 2584
+  },
+  "final_full_history_prompt_words": {
+    "long-alder-1": 874376,
+    "long-alder-2": 874376,
+    "long-briar-1": 867465,
+    "long-briar-2": 867465,
+    "long-cinder-1": 874376,
+    "long-cinder-2": 874376,
+    "long-alder-heldout": 874376
+  },
+  "final_prompt_token_estimate_range": {
+    "method": "word-count planning estimate only; replace with native model token counts",
+    "low": 1084331,
+    "high": 1311564
+  },
+  "per_run_retrieval_word_counts": {
+    "min": 7218,
+    "max": 12753
+  },
+  "cadence": {
+    "warm_inter_run_gap_seconds": [
+      2,
+      3
+    ],
+    "offline_medium_return_gap_seconds": 420,
+    "offline_long_return_gap_seconds": 2400,
+    "medium_gap_after_turn_by_thread": {
+      "long-alder-1": 34,
+      "long-alder-2": 35,
+      "long-briar-1": 36,
+      "long-briar-2": 37,
+      "long-cinder-1": 38,
+      "long-cinder-2": 34,
+      "long-alder-heldout": 35
+    },
+    "long_gap_after_turn_by_thread": {
+      "long-alder-1": 60,
+      "long-alder-2": 61,
+      "long-briar-1": 62,
+      "long-briar-2": 63,
+      "long-cinder-1": 64,
+      "long-cinder-2": 65,
+      "long-alder-heldout": 66
+    },
+    "note": "synthetic trace timestamps for offline retention scenarios only; run all native calls immediately, then replay measured timings in warm/medium/long scenario comparisons"
+  },
+  "question_family_counts": {
+    "constraint_carryover": 14,
+    "direct_lookup": 420,
+    "exact_quote": 7,
+    "version_supersession": 7,
+    "multi_source_comparison": 7,
+    "structured_case_lookup": 14,
+    "fresh_duplicate": 7,
+    "output_reference": 7,
+    "old_retrieval": 7,
+    "unselected_decoy": 7,
+    "topic_return": 7
+  },
+  "historical_dependency_lag_counts": {
+    "6": 14,
+    "8": 7,
+    "12": 7,
+    "27": 7,
+    "29": 7
+  },
+  "usage": "null; tokens must be measured by native run harness; word counts do not substitute for provider usage",
+  "answer_status": "output fields are deterministic scaffolding/templates and MUST be replaced by actual native model answers in OpenCode and Compache runs",
+  "sha256": {
+    "threads.jsonl": "498e84106e67dfb64c07a45f19b6aaba26b310f999e89b288a8ed07f94c16fea",
+    "labels.jsonl": "bbae1cac45e652936034f49c7b45038517b9491474cd4d3595be6880a7f2c71c",
+    "corpus.jsonl": "dfd3d5ed74c8e8fdb3ae1180a0482913f2becfbf70a9553209782afe6b1d7484",
+    "question_design.jsonl": "7cfa037a454e277af875f63d43cb41be822b0b7fd5ba08bc15d5e1a9aa7be9f8",
+    "handbook.md": "2938fdca14ae72207c3d9107b14b1461b735279bfce07088365e2b75dfe16071"
+  }
+}

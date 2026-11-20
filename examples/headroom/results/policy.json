@@ -1,0 +1,30 @@
+{
+  "model_spec": {
+    "model_id": "gpt-6-luna",
+    "context_tokens": 131072,
+    "cache_ttl_seconds": 300,
+    "cache_min_tokens": 0,
+    "cache_block_tokens": 1,
+    "read_multiplier": 0.1,
+    "write_multiplier": 1.25,
+    "output_multiplier": 4.0,
+    "ping_output_tokens": 0,
+    "expansion_output_tokens": 16,
+    "bytes_per_token": 4.0,
+    "part_overhead_tokens": 6,
+    "byte_limit": 16000000,
+    "assumption_note": "Illustrative RAG-only scenario, not verified GPT-6-luna pricing/cache/context specifications. Zero cache minimum deliberately exercises cache behavior on this small fixture; UTF-8 byte estimates, no Codex overhead.",
+    "schema_version": "compache-model-spec-v1"
+  },
+  "profile_hash": "d914e98307a41b7eac97df12cddce59995930f8fed5ee173403b28a2242984fe",
+  "retrieval_grace_runs": null,
+  "cold_trigger": 0.17,
+  "target": 0.15,
+  "warm_trigger": 0.6,
+  "reserve": 0.05,
+  "ping_lead_seconds": 45,
+  "freshness_margin_seconds": 20,
+  "max_pings": 0,
+  "protect_query_matches": true,
+  "schema_version": "compache-policy-v1"
+}

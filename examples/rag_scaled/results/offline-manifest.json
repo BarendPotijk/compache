@@ -1,0 +1,9 @@
+{
+  "policy_sha256": "8b3adb9ac949987c768bc40256dcbe560fdb66ef21f8fbafb4aaddb83f149aea",
+  "profile_sha256": "559c4b58bb45e72ca5787ba415dd56655d6321c8cc280534f9e273170bd93e4a",
+  "dataset_manifest_sha256": "37869766ec144de75329718d6f38fba4a4afc8a1eaea829a3aca074a967db120",
+  "recovery_overhead": "zero",
+  "runtime_overhead_tokens": 16000,
+  "note": "Synthetic source availability before recovery, not answer quality. Cache-only baseline uses replay cache model with full canonical input; not an OpenCode adapter. Costs are estimated input equivalents, not billing. Replay stops after admission failure; skipped runs are not assessed. Observation ends at last run per thread; future pings unobserved.",
+  "summary_postprocessing": "Failed-admission historical counters computed from runs.jsonl after replay; evaluator now computes same counters during replay."
+}

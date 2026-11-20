@@ -1,0 +1,812 @@
+{
+  "scope": "Offline causal replay using actual OpenCode answers substituted as prior output; not a generated Compache trajectory. No recovery, model calls, or calibration. Labels used only for post-projection assessment.",
+  "policy_hash": "ae2b872f13267570b0cd3af4ec927f2e8a6e5c9500df459bd50e7f47b6f7d676",
+  "planning_overhead": 16000,
+  "cases": [
+    {
+      "thread_id": "scaled-26-07",
+      "answer_ledger": "opencode-1/answers.jsonl",
+      "summary": {
+        "admitted": 96,
+        "removed_output_alternatives": 25,
+        "binding_unassessable_requirements": 0,
+        "authored_historical_requirements_assessed": 47,
+        "authored_historical_requirements_retained": 47,
+        "authored_all_missed": 0,
+        "bound_historical_requirements_assessed": 47,
+        "bound_historical_requirements_retained": 34,
+        "bound_all_missed": 13,
+        "rewrites": 27,
+        "requests_with_guarded_removed_sources": 34,
+        "guarded_removed_source_occurrences": 34,
+        "bound_misses_fully_selected_by_guard": 13,
+        "bound_misses_with_only_retrieval_alternatives": 13,
+        "skipped_after_block": 0,
+        "authored_historical_missed": 0,
+        "bound_historical_missed": 13,
+        "blocked": 0
+      },
+      "exceptions": [
+        {
+          "turn": 26,
+          "authored_missed": [],
+          "bound_missed": [
+            "req-2"
+          ],
+          "binding_unassessable": [],
+          "bound_recovery_part_sets": [
+            [
+              [
+                "scaled-26-07-r017-retrieval"
+              ]
+            ]
+          ]
+        },
+        {
+          "turn": 27,
+          "authored_missed": [],
+          "bound_missed": [
+            "req-2"
+          ],
+          "binding_unassessable": [],
+          "bound_recovery_part_sets": [
+            [
+              [
+                "scaled-26-07-r018-retrieval"
+              ]
+            ]
+          ]
+        },
+        {
+          "turn": 31,
+          "authored_missed": [],
+          "bound_missed": [
+            "req-2"
+          ],
+          "binding_unassessable": [],
+          "bound_recovery_part_sets": [
+            [
+              [
+                "scaled-26-07-r020-retrieval"
+              ]
+            ]
+          ]
+        },
+        {
+          "turn": 37,
+          "authored_missed": [],
+          "bound_missed": [
+            "req-2"
+          ],
+          "binding_unassessable": [],
+          "bound_recovery_part_sets": [
+            [
+              [
+                "scaled-26-07-r022-retrieval"
+              ]
+            ]
+          ]
+        },
+        {
+          "turn": 49,
+          "authored_missed": [],
+          "bound_missed": [
+            "req-2"
+          ],
+          "binding_unassessable": [],
+          "bound_recovery_part_sets": [
+            [
+              [
+                "scaled-26-07-r025-retrieval"
+              ]
+            ]
+          ]
+        },
+        {
+          "turn": 56,
+          "authored_missed": [],
+          "bound_missed": [
+            "req-2"
+          ],
+          "binding_unassessable": [],
+          "bound_recovery_part_sets": [
+            [
+              [
+                "scaled-26-07-r028-retrieval"
+              ]
+            ]
+          ]
+        },
+        {
+          "turn": 57,
+          "authored_missed": [],
+          "bound_missed": [
+            "req-2"
+          ],
+          "binding_unassessable": [],
+          "bound_recovery_part_sets": [
+            [
+              [
+                "scaled-26-07-r034-retrieval"
+              ]
+            ]
+          ]
+        },
+        {
+          "turn": 62,
+          "authored_missed": [],
+          "bound_missed": [
+            "req-2"
+          ],
+          "binding_unassessable": [],
+          "bound_recovery_part_sets": [
+            [
+              [
+                "scaled-26-07-r037-retrieval"
+              ]
+            ]
+          ]
+        },
+        {
+          "turn": 63,
+          "authored_missed": [],
+          "bound_missed": [
+            "req-2"
+          ],
+          "binding_unassessable": [],
+          "bound_recovery_part_sets": [
+            [
+              [
+                "scaled-26-07-r038-retrieval"
+              ]
+            ]
+          ]
+        },
+        {
+          "turn": 75,
+          "authored_missed": [],
+          "bound_missed": [
+            "req-2"
+          ],
+          "binding_unassessable": [],
+          "bound_recovery_part_sets": [
+            [
+              [
+                "scaled-26-07-r043-retrieval"
+              ]
+            ]
+          ]
+        },
+        {
+          "turn": 80,
+          "authored_missed": [],
+          "bound_missed": [
+            "req-2"
+          ],
+          "binding_unassessable": [],
+          "bound_recovery_part_sets": [
+            [
+              [
+                "scaled-26-07-r047-retrieval"
+              ]
+            ]
+          ]
+        },
+        {
+          "turn": 81,
+          "authored_missed": [],
+          "bound_missed": [
+            "req-2"
+          ],
+          "binding_unassessable": [],
+          "bound_recovery_part_sets": [
+            [
+              [
+                "scaled-26-07-r048-retrieval"
+              ]
+            ]
+          ]
+        },
+        {
+          "turn": 85,
+          "authored_missed": [],
+          "bound_missed": [
+            "req-2"
+          ],
+          "binding_unassessable": [],
+          "bound_recovery_part_sets": [
+            [
+              [
+                "scaled-26-07-r051-retrieval"
+              ]
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "thread_id": "scaled-24-07",
+      "answer_ledger": "opencode-2/answers.jsonl",
+      "summary": {
+        "admitted": 96,
+        "removed_output_alternatives": 32,
+        "binding_unassessable_requirements": 0,
+        "authored_historical_requirements_assessed": 52,
+        "authored_historical_requirements_retained": 52,
+        "authored_all_missed": 0,
+        "bound_historical_requirements_assessed": 52,
+        "bound_historical_requirements_retained": 35,
+        "bound_all_missed": 17,
+        "rewrites": 24,
+        "requests_with_guarded_removed_sources": 39,
+        "guarded_removed_source_occurrences": 39,
+        "bound_misses_fully_selected_by_guard": 17,
+        "bound_misses_with_only_retrieval_alternatives": 17,
+        "skipped_after_block": 0,
+        "authored_historical_missed": 0,
+        "bound_historical_missed": 17,
+        "blocked": 0
+      },
+      "exceptions": [
+        {
+          "turn": 29,
+          "authored_missed": [],
+          "bound_missed": [
+            "req-2"
+          ],
+          "binding_unassessable": [],
+          "bound_recovery_part_sets": [
+            [
+              [
+                "scaled-24-07-r017-retrieval"
+              ]
+            ]
+          ]
+        },
+        {
+          "turn": 33,
+          "authored_missed": [],
+          "bound_missed": [
+            "req-2"
+          ],
+          "binding_unassessable": [],
+          "bound_recovery_part_sets": [
+            [
+              [
+                "scaled-24-07-r022-retrieval"
+              ]
+            ]
+          ]
+        },
+        {
+          "turn": 40,
+          "authored_missed": [],
+          "bound_missed": [
+            "req-2"
+          ],
+          "binding_unassessable": [],
+          "bound_recovery_part_sets": [
+            [
+              [
+                "scaled-24-07-r027-retrieval"
+              ]
+            ]
+          ]
+        },
+        {
+          "turn": 51,
+          "authored_missed": [],
+          "bound_missed": [
+            "req-2"
+          ],
+          "binding_unassessable": [],
+          "bound_recovery_part_sets": [
+            [
+              [
+                "scaled-24-07-r035-retrieval"
+              ]
+            ]
+          ]
+        },
+        {
+          "turn": 52,
+          "authored_missed": [],
+          "bound_missed": [
+            "req-2"
+          ],
+          "binding_unassessable": [],
+          "bound_recovery_part_sets": [
+            [
+              [
+                "scaled-24-07-r001-retrieval"
+              ]
+            ]
+          ]
+        },
+        {
+          "turn": 53,
+          "authored_missed": [],
+          "bound_missed": [
+            "req-2"
+          ],
+          "binding_unassessable": [],
+          "bound_recovery_part_sets": [
+            [
+              [
+                "scaled-24-07-r029-retrieval"
+              ]
+            ]
+          ]
+        },
+        {
+          "turn": 57,
+          "authored_missed": [],
+          "bound_missed": [
+            "req-2"
+          ],
+          "binding_unassessable": [],
+          "bound_recovery_part_sets": [
+            [
+              [
+                "scaled-24-07-r037-retrieval"
+              ]
+            ]
+          ]
+        },
+        {
+          "turn": 63,
+          "authored_missed": [],
+          "bound_missed": [
+            "req-2"
+          ],
+          "binding_unassessable": [],
+          "bound_recovery_part_sets": [
+            [
+              [
+                "scaled-24-07-r040-retrieval"
+              ]
+            ]
+          ]
+        },
+        {
+          "turn": 64,
+          "authored_missed": [],
+          "bound_missed": [
+            "req-2"
+          ],
+          "binding_unassessable": [],
+          "bound_recovery_part_sets": [
+            [
+              [
+                "scaled-24-07-r041-retrieval"
+              ]
+            ]
+          ]
+        },
+        {
+          "turn": 65,
+          "authored_missed": [],
+          "bound_missed": [
+            "req-2"
+          ],
+          "binding_unassessable": [],
+          "bound_recovery_part_sets": [
+            [
+              [
+                "scaled-24-07-r042-retrieval"
+              ]
+            ]
+          ]
+        },
+        {
+          "turn": 75,
+          "authored_missed": [],
+          "bound_missed": [
+            "req-2"
+          ],
+          "binding_unassessable": [],
+          "bound_recovery_part_sets": [
+            [
+              [
+                "scaled-24-07-r050-retrieval"
+              ]
+            ]
+          ]
+        },
+        {
+          "turn": 76,
+          "authored_missed": [],
+          "bound_missed": [
+            "req-2"
+          ],
+          "binding_unassessable": [],
+          "bound_recovery_part_sets": [
+            [
+              [
+                "scaled-24-07-r052-retrieval"
+              ]
+            ]
+          ]
+        },
+        {
+          "turn": 77,
+          "authored_missed": [],
+          "bound_missed": [
+            "req-2"
+          ],
+          "binding_unassessable": [],
+          "bound_recovery_part_sets": [
+            [
+              [
+                "scaled-24-07-r051-retrieval"
+              ]
+            ]
+          ]
+        },
+        {
+          "turn": 81,
+          "authored_missed": [],
+          "bound_missed": [
+            "req-2"
+          ],
+          "binding_unassessable": [],
+          "bound_recovery_part_sets": [
+            [
+              [
+                "scaled-24-07-r054-retrieval"
+              ]
+            ]
+          ]
+        },
+        {
+          "turn": 82,
+          "authored_missed": [],
+          "bound_missed": [
+            "req-2"
+          ],
+          "binding_unassessable": [],
+          "bound_recovery_part_sets": [
+            [
+              [
+                "scaled-24-07-r008-retrieval"
+              ]
+            ]
+          ]
+        },
+        {
+          "turn": 87,
+          "authored_missed": [],
+          "bound_missed": [
+            "req-2"
+          ],
+          "binding_unassessable": [],
+          "bound_recovery_part_sets": [
+            [
+              [
+                "scaled-24-07-r058-retrieval"
+              ]
+            ]
+          ]
+        },
+        {
+          "turn": 89,
+          "authored_missed": [],
+          "bound_missed": [
+            "req-2"
+          ],
+          "binding_unassessable": [],
+          "bound_recovery_part_sets": [
+            [
+              [
+                "scaled-24-07-r006-retrieval"
+              ]
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "thread_id": "scaled-29-07",
+      "answer_ledger": "opencode-3/answers.jsonl",
+      "summary": {
+        "admitted": 96,
+        "removed_output_alternatives": 34,
+        "binding_unassessable_requirements": 0,
+        "authored_historical_requirements_assessed": 56,
+        "authored_historical_requirements_retained": 56,
+        "authored_all_missed": 0,
+        "bound_historical_requirements_assessed": 56,
+        "bound_historical_requirements_retained": 40,
+        "bound_all_missed": 16,
+        "rewrites": 29,
+        "requests_with_guarded_removed_sources": 41,
+        "guarded_removed_source_occurrences": 41,
+        "bound_misses_fully_selected_by_guard": 16,
+        "bound_misses_with_only_retrieval_alternatives": 16,
+        "skipped_after_block": 0,
+        "authored_historical_missed": 0,
+        "bound_historical_missed": 16,
+        "blocked": 0
+      },
+      "exceptions": [
+        {
+          "turn": 22,
+          "authored_missed": [],
+          "bound_missed": [
+            "req-2"
+          ],
+          "binding_unassessable": [],
+          "bound_recovery_part_sets": [
+            [
+              [
+                "scaled-29-07-r015-retrieval"
+              ]
+            ]
+          ]
+        },
+        {
+          "turn": 46,
+          "authored_missed": [],
+          "bound_missed": [
+            "req-2"
+          ],
+          "binding_unassessable": [],
+          "bound_recovery_part_sets": [
+            [
+              [
+                "scaled-29-07-r028-retrieval"
+              ]
+            ]
+          ]
+        },
+        {
+          "turn": 47,
+          "authored_missed": [],
+          "bound_missed": [
+            "req-2"
+          ],
+          "binding_unassessable": [],
+          "bound_recovery_part_sets": [
+            [
+              [
+                "scaled-29-07-r036-retrieval"
+              ]
+            ]
+          ]
+        },
+        {
+          "turn": 52,
+          "authored_missed": [],
+          "bound_missed": [
+            "req-2"
+          ],
+          "binding_unassessable": [],
+          "bound_recovery_part_sets": [
+            [
+              [
+                "scaled-29-07-r001-retrieval"
+              ]
+            ]
+          ]
+        },
+        {
+          "turn": 53,
+          "authored_missed": [],
+          "bound_missed": [
+            "req-2"
+          ],
+          "binding_unassessable": [],
+          "bound_recovery_part_sets": [
+            [
+              [
+                "scaled-29-07-r026-retrieval"
+              ]
+            ]
+          ]
+        },
+        {
+          "turn": 54,
+          "authored_missed": [],
+          "bound_missed": [
+            "req-2"
+          ],
+          "binding_unassessable": [],
+          "bound_recovery_part_sets": [
+            [
+              [
+                "scaled-29-07-r038-retrieval"
+              ]
+            ]
+          ]
+        },
+        {
+          "turn": 58,
+          "authored_missed": [],
+          "bound_missed": [
+            "req-2"
+          ],
+          "binding_unassessable": [],
+          "bound_recovery_part_sets": [
+            [
+              [
+                "scaled-29-07-r043-retrieval"
+              ]
+            ]
+          ]
+        },
+        {
+          "turn": 59,
+          "authored_missed": [],
+          "bound_missed": [
+            "req-2"
+          ],
+          "binding_unassessable": [],
+          "bound_recovery_part_sets": [
+            [
+              [
+                "scaled-29-07-r044-retrieval"
+              ]
+            ]
+          ]
+        },
+        {
+          "turn": 60,
+          "authored_missed": [],
+          "bound_missed": [
+            "req-2"
+          ],
+          "binding_unassessable": [],
+          "bound_recovery_part_sets": [
+            [
+              [
+                "scaled-29-07-r045-retrieval"
+              ]
+            ]
+          ]
+        },
+        {
+          "turn": 70,
+          "authored_missed": [],
+          "bound_missed": [
+            "req-2"
+          ],
+          "binding_unassessable": [],
+          "bound_recovery_part_sets": [
+            [
+              [
+                "scaled-29-07-r052-retrieval"
+              ]
+            ]
+          ]
+        },
+        {
+          "turn": 72,
+          "authored_missed": [],
+          "bound_missed": [
+            "req-2"
+          ],
+          "binding_unassessable": [],
+          "bound_recovery_part_sets": [
+            [
+              [
+                "scaled-29-07-r056-retrieval"
+              ]
+            ]
+          ]
+        },
+        {
+          "turn": 76,
+          "authored_missed": [],
+          "bound_missed": [
+            "req-2"
+          ],
+          "binding_unassessable": [],
+          "bound_recovery_part_sets": [
+            [
+              [
+                "scaled-29-07-r054-retrieval"
+              ]
+            ]
+          ]
+        },
+        {
+          "turn": 77,
+          "authored_missed": [],
+          "bound_missed": [
+            "req-2"
+          ],
+          "binding_unassessable": [],
+          "bound_recovery_part_sets": [
+            [
+              [
+                "scaled-29-07-r055-retrieval"
+              ]
+            ]
+          ]
+        },
+        {
+          "turn": 78,
+          "authored_missed": [],
+          "bound_missed": [
+            "req-2"
+          ],
+          "binding_unassessable": [],
+          "bound_recovery_part_sets": [
+            [
+              [
+                "scaled-29-07-r057-retrieval"
+              ]
+            ]
+          ]
+        },
+        {
+          "turn": 82,
+          "authored_missed": [],
+          "bound_missed": [
+            "req-2"
+          ],
+          "binding_unassessable": [],
+          "bound_recovery_part_sets": [
+            [
+              [
+                "scaled-29-07-r008-retrieval"
+              ]
+            ]
+          ]
+        },
+        {
+          "turn": 96,
+          "authored_missed": [],
+          "bound_missed": [
+            "req-2"
+          ],
+          "binding_unassessable": [],
+          "bound_recovery_part_sets": [
+            [
+              [
+                "scaled-29-07-r078-retrieval"
+              ]
+            ]
+          ]
+        }
+      ]
+    }
+  ],
+  "aggregate": {
+    "admitted": 288,
+    "authored_all_missed": 0,
+    "authored_historical_missed": 0,
+    "authored_historical_requirements_assessed": 155,
+    "authored_historical_requirements_retained": 155,
+    "binding_unassessable_requirements": 0,
+    "bound_all_missed": 46,
+    "bound_historical_missed": 46,
+    "bound_historical_requirements_assessed": 155,
+    "bound_historical_requirements_retained": 109,
+    "bound_misses_fully_selected_by_guard": 46,
+    "bound_misses_with_only_retrieval_alternatives": 46,
+    "guarded_removed_source_occurrences": 114,
+    "removed_output_alternatives": 91,
+    "requests_with_guarded_removed_sources": 114,
+    "rewrites": 80,
+    "skipped_after_block": 0,
+    "blocked": 0
+  },
+  "input_sha256": {
+    "gate": "32e142a9bf7af2973085d9b1c93fb9307fc58d634dd5cf98a42a4bdb5b7b8619",
+    "policy": "8b3adb9ac949987c768bc40256dcbe560fdb66ef21f8fbafb4aaddb83f149aea",
+    "plan": "2a8206fd65331a0dfb012cebb86b50c3420ec46f2ed4ab1eee5f273f5ebfec02",
+    "threads": "e979137c59da3d9cb1d9dd49d8ad1bafe76b7c43240b9c505ccad836ab7cf6ae",
+    "labels": "78c593cade7cd0dcc496c1b58b8b2888f4d277b40016507fc256132eb0aa457f",
+    "quality_design": "bf6a06466e9d70ef7dad4adb6836d56a7a0cc7fa5ec558d26fa155cc85a52237",
+    "opencode_1_answers": "f1feea312d6c8b8ea696030ad02160de6cc7f7b877fe746e6a503269fce96aac",
+    "opencode_2_answers": "f3c229ea9aa5b55fc956c7af730257ddcdf83ce85392b337229b7330cc4e555f",
+    "opencode_3_answers": "62884f6c44c3243c375913ee9c85548c0de7b5afd67d6b7b51de26856dac8f79"
+  },
+  "interpretation": {
+    "authored": "Authored alternatives include fictional output text even when actual answer differs; can overstate availability.",
+    "bound": "Literal live binding removes nonmatching output alternatives and can omit valid paraphrases. A miss means no listed alternative is available in the projected request, not proof of incorrect model answers.",
+    "guard_selection": "Counts use post-projection protected_sources intersected with removed IDs, without applying recovery or testing its token or admission impact.",
+    "trajectory": "Frozen actual OpenCode outputs are substituted causally; future answers are not generated by or conditioned on these projected views."
+  }
+}

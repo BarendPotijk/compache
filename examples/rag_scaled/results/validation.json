@@ -1,0 +1,20 @@
+{
+  "passed": true,
+  "dataset_shards_rehashed": 600,
+  "threads": 300,
+  "planned_turns": 23760,
+  "builder_contract_quote_visibility_checks": 23760,
+  "offline_attempts_reconciled": 15862,
+  "offline_admission_failures_reconciled": 155,
+  "known_reported_provider_invocations_audited": 382,
+  "successful_logical_calls_audited": 359,
+  "network_attempts_without_usage": 3,
+  "tests": {
+    "python3.11.13": 115,
+    "python3.14.3": 115,
+    "ruff_E9_F": "passed"
+  },
+  "cross_python_regeneration_shards_matched": 6,
+  "core_policy_and_profile": "unchanged from selected0.4.0",
+  "no_api_calls": true
+}

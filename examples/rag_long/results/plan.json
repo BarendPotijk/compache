@@ -1,0 +1,43 @@
+{
+  "schema": "compache-native-comparison-v1",
+  "model": "gpt-6-luna",
+  "reasoning_effort": "low",
+  "replicates": 3,
+  "arms": [
+    "opencode",
+    "compache"
+  ],
+  "planned_answers_per_arm": 72,
+  "heldout_thread_id": "long-alder-heldout",
+  "train_thread_ids": [
+    "long-alder-1",
+    "long-alder-2",
+    "long-briar-1",
+    "long-briar-2",
+    "long-cinder-1",
+    "long-cinder-2"
+  ],
+  "context_tokens": 828400,
+  "overhead_tokens_for_planning_only": 16000,
+  "opencode_commit": "810c0eba1a7348036f8bdf61e6632d0c36c6876c",
+  "opencode_output_token_max": 32000,
+  "source_hashes": {
+    "threads.jsonl": "498e84106e67dfb64c07a45f19b6aaba26b310f999e89b288a8ed07f94c16fea",
+    "labels.jsonl": "bbae1cac45e652936034f49c7b45038517b9491474cd4d3595be6880a7f2c71c",
+    "manifest.json": "117e4d55271cc916486c6cc023303466665abe2ccf3c25a60218e65729d34137"
+  },
+  "policy_hash": "1a7320f83d63de7c220697f3eb564b009d8a9b0d711e95a0597d36c1e64b3fb9",
+  "profile_hash": "d1689b1811fb682b41f3e95e849d7436813cf99424ec141c0140649420803876",
+  "live_timing": "All calls immediate, no idle sleeps. Three replicas of each arm launched concurrently.",
+  "cache_scenarios_seconds": [
+    300,
+    1800
+  ],
+  "cache_scenario_scope": "Counterfactual message-prefix cache at 300/1800 seconds using real measured input/output totals, SHA256 source-prefix matches and explicit 128-token framing guard. Not measured native cache savings.",
+  "runtime": "Fresh ephemeral subscription thread per request, documented developerInstructions snapshot with quoted evidence; small fixed user task. All actual model usage is measured; native cache behavior is not the target cache model.",
+  "baseline": "OpenCode source-derived compaction adapter, not native executable",
+  "frozen_at": "2026-11-16T14:51:02.791834+00:00",
+  "transport": "codex",
+  "context_basis": "Full installed Codex usable window 828400; requested maximum 872000. API Luna full context 1050000 unavailable through this subscription surface.",
+  "workaround": "User authorized subscription workaround; thread/start developerInstructions snapshot avoids turn/start text-size limitation. No API requests."
+}

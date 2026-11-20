@@ -1,0 +1,322 @@
+{
+  "all/all": {
+    "replayed_runs": 23760,
+    "rewrites": 6610,
+    "rewrite_target_attained": 6607,
+    "cold_rewrites": 5599,
+    "warm_rewrites": 1011,
+    "emergency_rewrites": 0,
+    "warm_deferrals": 1,
+    "admission_failures": 0,
+    "historical_requirements_on_failed_admission": 0,
+    "historical_retained_on_failed_admission": 0,
+    "historical_requirements": 12498,
+    "historical_missed": 0,
+    "unknown_runs": 647,
+    "unknown_requirements": 647,
+    "planned_runs": 23760,
+    "skipped_runs": 0,
+    "cost_input_equivalents": 2159374319.1999993,
+    "pings_sent": 1726,
+    "unobserved_future_pings": 168,
+    "cache_only_full_cost_input_equivalents": 13770182128.199999,
+    "cache_only_admitted_prefix_cost_input_equivalents": 13770182128.199999,
+    "threads": 300
+  },
+  "train/all": {
+    "replayed_runs": 10560,
+    "rewrites": 2727,
+    "rewrite_target_attained": 2727,
+    "cold_rewrites": 2337,
+    "warm_rewrites": 390,
+    "emergency_rewrites": 0,
+    "warm_deferrals": 0,
+    "admission_failures": 0,
+    "historical_requirements_on_failed_admission": 0,
+    "historical_retained_on_failed_admission": 0,
+    "historical_requirements": 5313,
+    "historical_missed": 0,
+    "unknown_runs": 304,
+    "unknown_requirements": 304,
+    "planned_runs": 10560,
+    "skipped_runs": 0,
+    "cost_input_equivalents": 915339978.0000002,
+    "pings_sent": 498,
+    "unobserved_future_pings": 75,
+    "cache_only_full_cost_input_equivalents": 4630971251.999998,
+    "cache_only_admitted_prefix_cost_input_equivalents": 4630971251.999998,
+    "threads": 160
+  },
+  "all/family:mixed": {
+    "historical_requirements": 1713,
+    "historical_missed": 0
+  },
+  "train/family:mixed": {
+    "historical_requirements": 717,
+    "historical_missed": 0
+  },
+  "all/lag:1-5": {
+    "historical_requirements": 4588,
+    "historical_missed": 0
+  },
+  "train/lag:1-5": {
+    "historical_requirements": 2177,
+    "historical_missed": 0
+  },
+  "all/position:1-50": {
+    "historical_requirements": 6396,
+    "historical_missed": 0
+  },
+  "train/position:1-50": {
+    "historical_requirements": 3264,
+    "historical_missed": 0
+  },
+  "all/family:version": {
+    "historical_requirements": 1851,
+    "historical_missed": 0
+  },
+  "train/family:version": {
+    "historical_requirements": 760,
+    "historical_missed": 0
+  },
+  "all/family:arithmetic": {
+    "historical_requirements": 1850,
+    "historical_missed": 0
+  },
+  "train/family:arithmetic": {
+    "historical_requirements": 789,
+    "historical_missed": 0
+  },
+  "all/lag:6-20": {
+    "historical_requirements": 4106,
+    "historical_missed": 0
+  },
+  "train/lag:6-20": {
+    "historical_requirements": 1789,
+    "historical_missed": 0
+  },
+  "all/family:input": {
+    "historical_requirements": 1798,
+    "historical_missed": 0
+  },
+  "train/family:input": {
+    "historical_requirements": 767,
+    "historical_missed": 0
+  },
+  "all/family:correction": {
+    "historical_requirements": 1742,
+    "historical_missed": 0
+  },
+  "train/family:correction": {
+    "historical_requirements": 723,
+    "historical_missed": 0
+  },
+  "all/family:prior_output": {
+    "historical_requirements": 1759,
+    "historical_missed": 0
+  },
+  "train/family:prior_output": {
+    "historical_requirements": 781,
+    "historical_missed": 0
+  },
+  "all/family:history": {
+    "historical_requirements": 1785,
+    "historical_missed": 0
+  },
+  "train/family:history": {
+    "historical_requirements": 776,
+    "historical_missed": 0
+  },
+  "all/lag:21-50": {
+    "historical_requirements": 2936,
+    "historical_missed": 0
+  },
+  "train/lag:21-50": {
+    "historical_requirements": 1107,
+    "historical_missed": 0
+  },
+  "all/position:51-80": {
+    "historical_requirements": 3302,
+    "historical_missed": 0
+  },
+  "train/position:51-80": {
+    "historical_requirements": 1437,
+    "historical_missed": 0
+  },
+  "all/lag:51+": {
+    "historical_requirements": 868,
+    "historical_missed": 0
+  },
+  "train/lag:51+": {
+    "historical_requirements": 240,
+    "historical_missed": 0
+  },
+  "all/position:81+": {
+    "historical_requirements": 2800,
+    "historical_missed": 0
+  },
+  "train/position:81+": {
+    "historical_requirements": 612,
+    "historical_missed": 0
+  },
+  "validation/all": {
+    "replayed_runs": 5280,
+    "rewrites": 1474,
+    "rewrite_target_attained": 1474,
+    "cold_rewrites": 1247,
+    "warm_rewrites": 227,
+    "emergency_rewrites": 0,
+    "warm_deferrals": 0,
+    "admission_failures": 0,
+    "historical_requirements_on_failed_admission": 0,
+    "historical_retained_on_failed_admission": 0,
+    "historical_requirements": 2868,
+    "historical_missed": 0,
+    "unknown_runs": 151,
+    "unknown_requirements": 151,
+    "planned_runs": 5280,
+    "skipped_runs": 0,
+    "cost_input_equivalents": 480861487.00000006,
+    "pings_sent": 616,
+    "unobserved_future_pings": 39,
+    "cache_only_full_cost_input_equivalents": 3885750441.8,
+    "cache_only_admitted_prefix_cost_input_equivalents": 3885750441.8,
+    "threads": 40
+  },
+  "validation/family:mixed": {
+    "historical_requirements": 389,
+    "historical_missed": 0
+  },
+  "validation/lag:1-5": {
+    "historical_requirements": 808,
+    "historical_missed": 0
+  },
+  "validation/position:1-50": {
+    "historical_requirements": 934,
+    "historical_missed": 0
+  },
+  "validation/family:version": {
+    "historical_requirements": 399,
+    "historical_missed": 0
+  },
+  "validation/family:correction": {
+    "historical_requirements": 383,
+    "historical_missed": 0
+  },
+  "validation/family:arithmetic": {
+    "historical_requirements": 410,
+    "historical_missed": 0
+  },
+  "validation/family:input": {
+    "historical_requirements": 428,
+    "historical_missed": 0
+  },
+  "validation/lag:6-20": {
+    "historical_requirements": 818,
+    "historical_missed": 0
+  },
+  "validation/family:history": {
+    "historical_requirements": 430,
+    "historical_missed": 0
+  },
+  "validation/family:prior_output": {
+    "historical_requirements": 429,
+    "historical_missed": 0
+  },
+  "validation/lag:21-50": {
+    "historical_requirements": 877,
+    "historical_missed": 0
+  },
+  "validation/position:51-80": {
+    "historical_requirements": 698,
+    "historical_missed": 0
+  },
+  "validation/lag:51+": {
+    "historical_requirements": 365,
+    "historical_missed": 0
+  },
+  "validation/position:81+": {
+    "historical_requirements": 1236,
+    "historical_missed": 0
+  },
+  "heldout/all": {
+    "replayed_runs": 7920,
+    "rewrites": 2409,
+    "rewrite_target_attained": 2406,
+    "cold_rewrites": 2015,
+    "warm_rewrites": 394,
+    "emergency_rewrites": 0,
+    "warm_deferrals": 1,
+    "admission_failures": 0,
+    "historical_requirements_on_failed_admission": 0,
+    "historical_retained_on_failed_admission": 0,
+    "historical_requirements": 4317,
+    "historical_missed": 0,
+    "unknown_runs": 192,
+    "unknown_requirements": 192,
+    "planned_runs": 7920,
+    "skipped_runs": 0,
+    "cost_input_equivalents": 763172854.1999998,
+    "pings_sent": 612,
+    "unobserved_future_pings": 54,
+    "cache_only_full_cost_input_equivalents": 5253460434.399998,
+    "cache_only_admitted_prefix_cost_input_equivalents": 5253460434.399998,
+    "threads": 100
+  },
+  "heldout/family:prior_output": {
+    "historical_requirements": 549,
+    "historical_missed": 0
+  },
+  "heldout/lag:1-5": {
+    "historical_requirements": 1603,
+    "historical_missed": 0
+  },
+  "heldout/position:1-50": {
+    "historical_requirements": 2198,
+    "historical_missed": 0
+  },
+  "heldout/family:mixed": {
+    "historical_requirements": 607,
+    "historical_missed": 0
+  },
+  "heldout/family:version": {
+    "historical_requirements": 692,
+    "historical_missed": 0
+  },
+  "heldout/family:correction": {
+    "historical_requirements": 636,
+    "historical_missed": 0
+  },
+  "heldout/family:arithmetic": {
+    "historical_requirements": 651,
+    "historical_missed": 0
+  },
+  "heldout/family:history": {
+    "historical_requirements": 579,
+    "historical_missed": 0
+  },
+  "heldout/lag:6-20": {
+    "historical_requirements": 1499,
+    "historical_missed": 0
+  },
+  "heldout/family:input": {
+    "historical_requirements": 603,
+    "historical_missed": 0
+  },
+  "heldout/lag:51+": {
+    "historical_requirements": 263,
+    "historical_missed": 0
+  },
+  "heldout/position:51-80": {
+    "historical_requirements": 1167,
+    "historical_missed": 0
+  },
+  "heldout/lag:21-50": {
+    "historical_requirements": 952,
+    "historical_missed": 0
+  },
+  "heldout/position:81+": {
+    "historical_requirements": 952,
+    "historical_missed": 0
+  }
+}

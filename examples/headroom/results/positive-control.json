@@ -1,0 +1,13 @@
+{
+  "scope": "Synthetic structured-output plumbing control; excluded from workload scores.",
+  "input_sha256": "e7897ce0d929e142ceb8a5b85169a44dcfd2fcff4f9af3b3db38cb47254901b2",
+  "output_sha256": "624e8798bcebee2a585351d8c551ab2015fb94d27d9ec68663ef9e1ad7d7092f",
+  "compression_seconds_measured": 0.2565964169916697,
+  "native_tokens_before": 8622,
+  "native_tokens_after": 2260,
+  "transforms": [
+    "router:protected:user_message",
+    "router:smart_crusher:0.23"
+  ],
+  "lossless_verified_by_headroom": true
+}

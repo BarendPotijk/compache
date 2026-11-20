@@ -1,9 +1,25 @@
 
-why # secrets
+# secrets
+.env
+.env.*
+!.env.example
 *.env
+
+# Python build and local environments
+__pycache__/
+*.py[cod]
+.venv/
+dist/
+build/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
 
 # data
 *.db
+# Large deterministic long-context fixtures are regenerated from the builder.
+examples/rag_long/*.jsonl
+examples/rag_long/handbook.md
 
 # logs
 *.log
