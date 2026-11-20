@@ -1,0 +1,66 @@
+{
+  "schema_version": "compache-docchat-domains-v1",
+  "note": "Declared assumptions. The intent mix and personas shape what is asked; which turns really need history is measured afterwards, not taken from this file.",
+  "domains": {
+    "finance": {
+      "experience": "Working through a company's annual report",
+      "assistant": "You are an assistant that answers questions about a company's annual report (Form 10-K).",
+      "top_k": 6,
+      "mix": {"lookup": 0.28, "follow_up": 0.20, "compare": 0.20, "reuse_output": 0.14, "recall": 0.08, "user_context": 0.04, "synthesis": 0.06},
+      "personas": [
+        {"who": "an equity analyst starting coverage of this company", "goal": "understand what drives revenue and margins and what changed this year"},
+        {"who": "a credit analyst at a lender", "goal": "judge liquidity, debt and the risks to repayment"},
+        {"who": "a procurement manager vetting this company as a supplier", "goal": "find out how stable the business is and where it depends on a few customers or suppliers"},
+        {"who": "a business student writing a case study", "goal": "describe the business model, the competition and the main risks in plain terms"}
+      ]
+    },
+    "legal": {
+      "experience": "Reviewing a commercial contract",
+      "assistant": "You are an assistant that answers questions about a commercial contract.",
+      "top_k": 6,
+      "mix": {"lookup": 0.26, "follow_up": 0.24, "recall": 0.18, "compare": 0.14, "reuse_output": 0.08, "user_context": 0.05, "synthesis": 0.05},
+      "personas": [
+        {"who": "an in-house lawyer reviewing this agreement before renewal", "goal": "list the obligations, the termination rights and anything unusual"},
+        {"who": "a founder who has to sign a similar agreement", "goal": "understand what each side commits to and where the risk sits"},
+        {"who": "a contract manager preparing a compliance checklist", "goal": "extract deadlines, notice periods, payment terms and reporting duties"},
+        {"who": "a paralegal summarising the agreement for a partner", "goal": "produce an accurate clause-by-clause overview"}
+      ]
+    },
+    "healthcare": {
+      "experience": "Asking about a medicine from its official label",
+      "assistant": "You are an assistant that answers questions about a medicine from its official prescribing information. You give information from the label, not personal medical advice.",
+      "top_k": 6,
+      "mix": {"lookup": 0.34, "follow_up": 0.20, "user_context": 0.22, "compare": 0.10, "recall": 0.08, "reuse_output": 0.03, "synthesis": 0.03},
+      "personas": [
+        {"who": "a community pharmacist checking details before counselling a patient", "goal": "confirm dosing, interactions and what to warn the patient about"},
+        {"who": "an adult who has just been prescribed this medicine", "goal": "understand how to take it, what side effects to expect and when to call a doctor"},
+        {"who": "a nurse on a hospital ward", "goal": "check administration, monitoring and adjustments for particular patients"},
+        {"who": "a relative caring for an older patient on this medicine", "goal": "know the practical do's and don'ts and the warning signs"}
+      ]
+    },
+    "support": {
+      "experience": "Getting help from product documentation",
+      "assistant": "You are a support assistant that answers questions from the product documentation.",
+      "top_k": 6,
+      "mix": {"lookup": 0.28, "follow_up": 0.24, "user_context": 0.22, "reuse_output": 0.12, "recall": 0.08, "compare": 0.04, "synthesis": 0.02},
+      "personas": [
+        {"who": "a platform engineer running a production cluster", "goal": "set this up correctly and avoid outages"},
+        {"who": "a developer new to the product", "goal": "get a first working setup and understand the concepts involved"},
+        {"who": "an on-call engineer in the middle of an incident", "goal": "find out why something is failing and how to fix it"},
+        {"who": "a team lead planning a migration", "goal": "understand the options, their limits and what has to change"}
+      ]
+    },
+    "hr": {
+      "experience": "Asking an internal handbook about policies and how things work",
+      "assistant": "You are an assistant that answers staff questions from the organisation's handbook.",
+      "top_k": 6,
+      "mix": {"lookup": 0.50, "follow_up": 0.20, "user_context": 0.16, "recall": 0.06, "compare": 0.04, "reuse_output": 0.02, "synthesis": 0.02},
+      "personas": [
+        {"who": "a new employee in their first month", "goal": "find out how things work here and what is expected"},
+        {"who": "an employee planning time away", "goal": "understand the rules and the steps to take"},
+        {"who": "a new supervisor", "goal": "learn what the handbook asks of people who manage others"},
+        {"who": "a long-serving employee who rarely reads the handbook", "goal": "check a few specific rules before making a request"}
+      ]
+    }
+  }
+}
