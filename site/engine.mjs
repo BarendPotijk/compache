@@ -3,9 +3,9 @@ export const DEFAULTS = Object.freeze({
   seed: 42, companies: 1, threads: 100, maxTurns: 160, lengthDistribution: 'lognormal', plannedTurns: 8, plannedTurnsP95: 20,
   continuationProbability: 0.99, tokenMedian: 25000, tokenP95: 45000,
   companyVariation: 0, gapMedianMinutes: 4, gapP95Minutes: 60,
-  dependencyProbability: 0.25, dependencyLookback: 24, inputDependencyProbability: 0.25, retrievalDependencyProbability: 0.25, outputDependencyProbability: 0.25, inputDependencyLookback: 24, retrievalDependencyLookback: 24, outputDependencyLookback: 24, retentionRequirement: 0.95, retrievalRetentionRuns: 0, inputTokens: 200, outputTokens: 500, ttlMinutes: 30,
+  dependencyProbability: 0.25, dependencyLookback: 24, inputDependencyProbability: 0.25, retrievalDependencyProbability: 0.25, outputDependencyProbability: 0.25, inputDependencyLookback: 24, retrievalDependencyLookback: 24, outputDependencyLookback: 24, retentionRequirement: 0.8, retrievalRetentionRuns: 0, inputTokens: 200, outputTokens: 500, ttlMinutes: 30,
   target: 0.20, warmTrigger: 0.5, maxPings: 12, keepWarm: true, pingLeadMinutes: 0.75,
-  pingOutputTokens: 16, safetyReserve: 32000, systemTokens: 2048,
+  pingOutputTokens: 16, recoveryOutputTokens: 32, toolClearing: false, clearedTokens: 12, safetyReserve: 32000, systemTokens: 2048,
   cacheMinTokens: 1024, cacheBlockTokens: 1, tailTokens: 20000,
   summaryTokens: 4000, summaryInputCap: 40000, toolSummaryTokens: 500, summarySystemTokens: 2048, recordTokens: 1500, flushOutputTokens: 256,
   model: Object.freeze({context: 1050000, maxInput: 922000, inputRate: 0.1,
@@ -26,12 +26,13 @@ export function configure(overrides = {}) {
     if(Object.hasOwn(overrides,'dependencyProbability') && !Object.hasOwn(overrides,pk)) c[pk]=overrides.dependencyProbability;
     if(Object.hasOwn(overrides,'dependencyLookback') && !Object.hasOwn(overrides,lk)) c[lk]=overrides.dependencyLookback;
   }
-  for (const [k,min,max] of [['companies',1,200],['threads',1,200],['maxTurns',1,160],['plannedTurns',1,160],['plannedTurnsP95',1,320],['dependencyLookback',1,160],['inputDependencyLookback',1,160],['retrievalDependencyLookback',1,160],['outputDependencyLookback',1,160],['retrievalRetentionRuns',0,160],['retentionRequirement',0.75,1],['maxPings',0,12],['target',0.01,0.45],['seed',0,4294967295],['tokenMedian',0,500000],['tokenP95',0,1000000],['gapMedianMinutes',0.001,100000],['gapP95Minutes',0.001,1000000],['companyVariation',0,2],['continuationProbability',0,1],['dependencyProbability',0,1],['inputDependencyProbability',0,1],['retrievalDependencyProbability',0,1],['outputDependencyProbability',0,1],['ttlMinutes',0.01,100000],['warmTrigger',0.23,1],['pingLeadMinutes',0,100000],['inputTokens',1,100000],['outputTokens',0,200000],['pingOutputTokens',0,10000],['safetyReserve',0,1000000],['systemTokens',0,1000000],['cacheMinTokens',0,1000000],['cacheBlockTokens',1,100000],['tailTokens',0,1000000],['summaryTokens',1,100000],['summaryInputCap',1,1000000],['toolSummaryTokens',1,100000],['summarySystemTokens',0,100000],['recordTokens',0,100000],['flushOutputTokens',0,100000]]) finite(c[k],k,min,max);
-  for (const k of ['companies','threads','maxTurns','plannedTurns','plannedTurnsP95','dependencyLookback','inputDependencyLookback','retrievalDependencyLookback','outputDependencyLookback','retrievalRetentionRuns','maxPings','seed','inputTokens','outputTokens','pingOutputTokens','safetyReserve','systemTokens','cacheMinTokens','cacheBlockTokens','tailTokens','summaryTokens','summaryInputCap','toolSummaryTokens','summarySystemTokens','recordTokens','flushOutputTokens']) if (!Number.isInteger(c[k])) throw new RangeError(`${k} must be an integer`);
+  for (const [k,min,max] of [['companies',1,200],['threads',1,200],['maxTurns',1,160],['plannedTurns',1,160],['plannedTurnsP95',1,320],['dependencyLookback',1,160],['inputDependencyLookback',1,160],['retrievalDependencyLookback',1,160],['outputDependencyLookback',1,160],['retrievalRetentionRuns',0,160],['retentionRequirement',0.75,1],['maxPings',0,12],['target',0.01,0.45],['seed',0,4294967295],['tokenMedian',0,500000],['tokenP95',0,1000000],['gapMedianMinutes',0.001,100000],['gapP95Minutes',0.001,1000000],['companyVariation',0,2],['continuationProbability',0,1],['dependencyProbability',0,1],['inputDependencyProbability',0,1],['retrievalDependencyProbability',0,1],['outputDependencyProbability',0,1],['ttlMinutes',0.01,100000],['warmTrigger',0.23,1],['pingLeadMinutes',0,100000],['inputTokens',1,100000],['outputTokens',0,200000],['pingOutputTokens',0,10000],['recoveryOutputTokens',0,10000],['clearedTokens',0,10000],['safetyReserve',0,1000000],['systemTokens',0,1000000],['cacheMinTokens',0,1000000],['cacheBlockTokens',1,100000],['tailTokens',0,1000000],['summaryTokens',1,100000],['summaryInputCap',1,1000000],['toolSummaryTokens',1,100000],['summarySystemTokens',0,100000],['recordTokens',0,100000],['flushOutputTokens',0,100000]]) finite(c[k],k,min,max);
+  for (const k of ['companies','threads','maxTurns','plannedTurns','plannedTurnsP95','dependencyLookback','inputDependencyLookback','retrievalDependencyLookback','outputDependencyLookback','retrievalRetentionRuns','maxPings','seed','inputTokens','outputTokens','pingOutputTokens','recoveryOutputTokens','clearedTokens','safetyReserve','systemTokens','cacheMinTokens','cacheBlockTokens','tailTokens','summaryTokens','summaryInputCap','toolSummaryTokens','summarySystemTokens','recordTokens','flushOutputTokens']) if (!Number.isInteger(c[k])) throw new RangeError(`${k} must be an integer`);
   if (!['fixed','geometric','lognormal'].includes(c.lengthDistribution)) throw new RangeError('invalid lengthDistribution');
   if ((c.lengthDistribution==='lognormal' && c.plannedTurnsP95 < c.plannedTurns) || c.tokenP95 < c.tokenMedian || c.gapP95Minutes < c.gapMedianMinutes) throw new RangeError('p95 must be at least the median');
   if (c.target + 0.02 >= c.warmTrigger || c.warmTrigger > 1 - c.safetyReserve/c.model.context) throw new RangeError('require cold trigger below warm trigger and warm trigger within reserve');
   if (typeof c.keepWarm !== 'boolean') throw new TypeError('keepWarm must be boolean');
+  if (typeof c.toolClearing !== 'boolean') throw new TypeError('toolClearing must be boolean');
   for (const [k,min,max] of [['context',1,10000000],['maxInput',1,10000000],['inputRate',0,100000],['cachedRate',0,100000],['outputRate',0,100000],['writeMultiplier',0,100],['longThreshold',0,10000000],['longInputMultiplier',0,100],['longOutputMultiplier',0,100]]) finite(c.model[k],`model.${k}`,min,max);
   return c;
 }
@@ -149,10 +150,10 @@ function admitted(input,output,c,arm,role){const reserve=arm==='compache'?c.safe
 export function runArm(workload, config, arm, {collectDecisions=true,collectLedger=true}={}) {
   const c=configure(config); if(!['compache','openclaw'].includes(arm)) throw new RangeError('invalid arm');
   const ledger=[], curves=[], decisions=[], roles={}, cacheBreakdown=collectLedger?{cached:0,newContext:0,firstRequest:0,expiredPrefix:0,changedPrefix:0}:null, total={inputTokens:0,cachedTokens:0,freshTokens:0,outputTokens:0,inputCost:0,cachedCost:0,outputCost:0,cost:0,calls:0};
-  let completedThreads=0,completedRuns=0,attemptedRuns=0,compactions=0,recalls=0,required=0,covered=0,failedCalls=0,pings=0,totalRemovedTokens=0,totalRecallTokens=0;
+  let completedThreads=0,completedRuns=0,attemptedRuns=0,compactions=0,clearings=0,recalls=0,required=0,covered=0,failedCalls=0,pings=0,totalRemovedTokens=0,totalRecallTokens=0;
   const pre=Object.fromEntries(['input','retrieval','output'].map(kind=>[kind,{expectedRequired:0,expectedRetained:0,observedRequired:0,observedRetained:0}]));
   for(const thread of workload.threads) {
-    let history=[],snapshots=[],expiredSnapshots=[],seenBlocks=new Set(),callIndex=0,threadCost=0,summaryIndex=0,failed=false;
+    let history=[],snapshots=[],expiredSnapshots=[],seenBlocks=new Set(),cleared=new Set(),callIndex=0,threadCost=0,summaryIndex=0,failed=false;
     const system=block('system',c.systemTokens,'system',-1);
     function expireSnapshots(time) {
       const stillLive=[]; for(const snapshot of snapshots) {if(time-snapshot.time<c.ttlMinutes)stillLive.push(snapshot);else if(collectLedger)expiredSnapshots.push(snapshot);}
@@ -191,7 +192,7 @@ export function runArm(workload, config, arm, {collectDecisions=true,collectLedg
       const turn=thread.turns[i], input=block(`i${i}`,turn.inputTokens,'input',i), retrieval=block(`r${i}`,turn.retrievalTokens,'retrieval',i), output=block(`o${i}`,turn.outputTokens,'output',i);
       attemptedRuns++;
       const protectedSources=new Set(turn.dependencies.filter(d=>d.kind==='retrieval').map(d=>`r${d.turn}`));
-      let decision=null;
+      let decision=null, added=[];
       if(arm==='compache') {
         // Evaluate availability before current dependencies are recovered. The
         // expectation integrates over the configured age law, not future labels.
@@ -202,9 +203,7 @@ export function runArm(workload, config, arm, {collectDecisions=true,collectLedg
             let n=kind==='retrieval'?0:limit; if(kind==='retrieval')for(let age=1;age<=limit;age++) if(present.has(`${prefix}${i-age}`)) n++;
             pre[kind].expectedRequired+=p; pre[kind].expectedRetained+=p*n/limit;
           }
-          for(const d of turn.dependencies) {if(d.kind==='retrieval' && thread.turns[d.turn]?.retrievalTokens===0)continue;const prefix=d.kind==='input'?'i':d.kind==='retrieval'?'r':'o';pre[d.kind].observedRequired++;if(d.kind!=='retrieval'||present.has(`${prefix}${d.turn}`))pre[d.kind].observedRetained++;}
         }
-        let added=[];
         for(const source of protectedSources) if(!history.some(b=>b.source===source)) {
           const sourceTurn=thread.turns[Number(source.slice(1))];
           added.push(block(`recall-${i}-${source}`,sourceTurn.retrievalTokens,'retrieval',i,source)); recalls++;
@@ -226,9 +225,20 @@ export function runArm(workload, config, arm, {collectDecisions=true,collectLedg
         }
         const removedTokens=sum(removed); totalRemovedTokens+=removedTokens;
         if(collectDecisions) {const beforeBlocks=before.slice(-16), afterBlocks=view.slice(-16); decision={thread:thread.id,turn:i,beforeTokens:sum(before),afterTokens:sum(view),cacheState:warm?'warm':'cold',triggerTokens:threshold,targetTokens:c.target*c.model.context,removedTokens,removedSources:Object.freeze(removed.slice()),protectedSources:Object.freeze([...protectedSources,retrieval.source]),recallTokens,plannedPings:0,actualPings:0,beforeBlocks:Object.freeze(beforeBlocks),afterBlocks:Object.freeze(afterBlocks),beforeByKind:byKind(before),afterByKind:byKind(view),beforeOmittedCount:before.length-beforeBlocks.length,afterOmittedCount:view.length-afterBlocks.length,beforeOmittedTokens:sum(before)-sum(beforeBlocks),afterOmittedTokens:sum(view)-sum(afterBlocks),planner:null,admitted:null};}
-        history.push(input,retrieval,...added);
+        history.push(input,retrieval);
       } else {
-        let view=[system,...history,input,retrieval];
+        if(c.toolClearing) {
+          // Anthropic server-side clearing with OpenClaw's derived parameters: above 30% of the
+          // window, clear all but the three newest tool results, if that frees at least 5%.
+          const results=history.filter(b=>b.kind==='retrieval'), old=results.slice(0,Math.max(0,results.length-2));
+          if(c.systemTokens+sum(history)+input.tokens+retrieval.tokens>=Math.max(50000,Math.floor(c.model.context*.3)) && sum(old)-old.length*c.clearedTokens>=Math.max(12500,Math.floor(c.model.context*.05))) {
+            const gone=new Set(old); for(const b of old)cleared.add(b.source);
+            history=history.map(b=>gone.has(b)?block(`cleared-${b.id}`,c.clearedTokens,'cleared',b.turn,'cleared'):b); clearings++;
+          }
+        }
+        // A cleared result that this run needs is fetched again. A summarized one is not: the summary stands in for it.
+        for(const source of protectedSources) if(cleared.has(source)) {added.push(block(`refetch-${i}-${source}`,thread.turns[Number(source.slice(1))].retrievalTokens,'retrieval',i,source)); cleared.delete(source); recalls++; totalRecallTokens+=added.at(-1).tokens;}
+        let view=[system,...history,input,retrieval,...added];
         const threshold=Math.min(.75*c.model.context,c.model.context-Math.min(20000,.25*c.model.context));
         if(sum(view)>=threshold && history.length) {
           // Retain complete newest turns until the tail target is met. The
@@ -243,7 +253,7 @@ export function runArm(workload, config, arm, {collectDecisions=true,collectLedg
             if(budget<=0)break;
           }
           // Flush and summary have separate system identities; neither is an answer snapshot.
-          const flush=[block('openclaw-flush-system',c.systemTokens,'system',-1),...history,input,retrieval];
+          const flush=[block('openclaw-flush-system',c.systemTokens,'system',-1),...history,input,retrieval,...added];
           const summary=[block('openclaw-summary-system',c.summarySystemTokens,'system',-1),...projected];
           if(!request(flush,'flush',turn.time,c.flushOutputTokens,i) || !request(summary,'summary',turn.time,c.summaryTokens,i)){failed=true;break;}
           const sequence=++summaryIndex;
@@ -251,9 +261,16 @@ export function runArm(workload, config, arm, {collectDecisions=true,collectLedg
         }
         history.push(input,retrieval);
       }
+      const sourceOf=d=>`${d.kind==='input'?'i':d.kind==='retrieval'?'r':'o'}${d.turn}`, needs=turn.dependencies.filter(d=>d.kind!=='retrieval'||thread.turns[d.turn]?.retrievalTokens!==0);
+      for(const d of needs) {pre[d.kind].observedRequired++; if(history.some(b=>b.source===sourceOf(d)))pre[d.kind].observedRetained++;}
+      if(added.length) {
+        // The model asks for the missing sources in one short reply; the answer call then carries them.
+        if(!request([system,...history],'recovery',turn.time,c.recoveryOutputTokens,i)){if(decision){decision.admitted=false;decisions.push(Object.freeze(decision));}failed=true;break;}
+        history.push(block(`reopen-${i}`,c.recoveryOutputTokens,'recovery',i,'recovery'),...added);
+      }
       const view=[system,...history];
-      required+=turn.dependencies.filter(d=>d.kind!=='retrieval'||thread.turns[d.turn]?.retrievalTokens!==0).length;
-      for(const d of turn.dependencies.filter(d=>d.kind!=='retrieval'||thread.turns[d.turn]?.retrievalTokens!==0)) if(view.some(b=>b.source===`${d.kind==='input'?'i':d.kind==='retrieval'?'r':'o'}${d.turn}`)) covered++;
+      required+=needs.length;
+      for(const d of needs) if(view.some(b=>b.source===sourceOf(d))) covered++;
       const row=request(view,'answer',turn.time,turn.outputTokens,i);
       if(!row){if(decision){decision.admitted=false;if(collectLedger)Object.assign(ledger.at(-1),{beforeTokens:decision.beforeTokens,afterTokens:decision.afterTokens,cacheState:decision.cacheState,triggerTokens:decision.triggerTokens,targetTokens:decision.targetTokens,removedTokens:decision.removedTokens,recallTokens:decision.recallTokens});decisions.push(Object.freeze(decision));}failed=true;break;}
       if(decision)decision.admitted=true;
@@ -272,16 +289,17 @@ export function runArm(workload, config, arm, {collectDecisions=true,collectLedg
   const expectedRequired=Object.values(pre).reduce((n,x)=>n+x.expectedRequired,0), expectedRetained=Object.values(pre).reduce((n,x)=>n+x.expectedRetained,0), observedRequired=Object.values(pre).reduce((n,x)=>n+x.observedRequired,0), observedRetained=Object.values(pre).reduce((n,x)=>n+x.observedRetained,0);
   const byKindRetention=Object.fromEntries(Object.entries(pre).map(([kind,row])=>[kind,{...row,expected:row.expectedRequired?row.expectedRetained/row.expectedRequired:null,observed:row.observedRequired?row.observedRetained/row.observedRequired:null}]));
   const retention={expected:expectedRequired?expectedRetained/expectedRequired:null,observed:observedRequired?observedRetained/observedRequired:null,expectedRequired,expectedRetained,observedRequired,observedRetained,byKind:byKindRetention};
-  return {totals:total,byRole:roles,ledger,decisions,retention,cacheBreakdown,removedTokens:totalRemovedTokens,recallTokens:totalRecallTokens,completedThreads,plannedThreads:workload.threads.length,completedRuns,plannedRuns:workload.totalRuns,attemptedRuns,failedCalls,complete:completedThreads===workload.threads.length,compactions,recalls,pings,rawSourceAvailability:required?covered/required:null,dependencyCoverage:required?covered/required:null,dependencies:{required,covered},curve:curves};
+  return {totals:total,byRole:roles,ledger,decisions,retention,cacheBreakdown,removedTokens:totalRemovedTokens,recallTokens:totalRecallTokens,completedThreads,plannedThreads:workload.threads.length,completedRuns,plannedRuns:workload.totalRuns,attemptedRuns,failedCalls,complete:completedThreads===workload.threads.length,compactions,clearings,recalls,pings,rawSourceAvailability:required?covered/required:null,dependencyCoverage:required?covered/required:null,dependencies:{required,covered},curve:curves};
 }
 export function simulate(overrides={}) {
-  const base=configure(overrides), workload=generateWorkload(base), candidates=[];
+  // The policy is fitted on one set of threads and both arms are costed on a second set drawn the same way.
+  const base=configure(overrides), fitted=generateWorkload(base), workload=generateWorkload({...base,seed:(base.seed+1)>>>0}), candidates=[];
   const horizons=[...new Set([0,.75,.9,.95,1].map(f=>Math.ceil(base.retrievalDependencyLookback*f)))];
   const targets=[.10,.15,.20,.25,.35,.45], warmTriggers=[.50,.55,.60];
   for(const target of targets) for(const warmTrigger of warmTriggers) for(const retrievalRetentionRuns of horizons) {
     const policy={target,warmTrigger,retrievalRetentionRuns};
     if(target+.02>=warmTrigger || warmTrigger>1-base.safetyReserve/base.model.context) {candidates.push({...policy,cost:null,retention:null,complete:false,feasible:false,completedRuns:0});continue;}
-    const result=runArm(workload,{...base,...policy},'compache',{collectDecisions:false,collectLedger:false});
+    const result=runArm(fitted,{...base,...policy},'compache',{collectDecisions:false,collectLedger:false});
     const retention=result.retention.expected;
     // No modeled dependencies means the constraint is vacuous; report null, not 100%.
     const feasible=result.complete && (retention===null || retention+1e-12>=base.retentionRequirement);
@@ -296,8 +314,8 @@ export function simulate(overrides={}) {
   const selected={target:pick.target,warmTrigger:pick.warmTrigger,retrievalRetentionRuns:pick.retrievalRetentionRuns};
   const config=configure({...base,...selected});
   const compache=runArm(workload,config,'compache'), openclaw=runArm(workload,config,'openclaw');
-  const optimization={feasible:feasible.length>0,retentionRequirement:base.retentionRequirement,retention:compache.retention.expected,candidateCount:candidates.length,selected:feasible.length?selected:null,diagnosticPolicy:feasible.length?null:selected,candidates};
+  const optimization={feasible:feasible.length>0,retentionRequirement:base.retentionRequirement,retention:compache.retention.expected,fittedRetention:pick.retention??null,fittedThreads:fitted.threads.length,fittedRuns:fitted.totalRuns,candidateCount:candidates.length,selected:feasible.length?selected:null,diagnosticPolicy:feasible.length?null:selected,candidates};
   const savings=optimization.feasible&&compache.complete&&openclaw.complete ? {absolute:openclaw.totals.cost-compache.totals.cost,percent:openclaw.totals.cost?100*(openclaw.totals.cost-compache.totals.cost)/openclaw.totals.cost:null} : null;
-  const warnings=['Synthetic scenario projection: no actual Compache, OpenClaw or provider execution.', 'Policy is the lowest-cost feasible option in a finite grid fitted to this seeded scenario, not a global optimum or provider proof.', 'Answer cache breakdown distinguishes first requests, prior cached prefixes with up to 16 expired snapshots, new blocks, and previously-seen blocks outside matching prefixes; it is diagnostic, not proof of a specific cause.', 'Retention constraint uses modeled pre-recall source availability averaged over configured dependency rates and uniform ages; observed pre-recall retention and post-recall source availability are separate. A zero expected denominator is reported as null and imposes no constraint.', 'Pricing and token counts are assumptions; cache and long-context rules vary by provider. TTL is modeled as a hard cutoff, though providers may retain cache entries longer.', 'OpenClaw client-summary Chat Completions is approximate: summary input uses a token proxy for character limits; one flush per compaction is modeled, but the independent 2 MB flush trigger is omitted. Native Responses compaction, retries, quality and other hosts are excluded.', 'Raw source availability tracks whether modeled dependency blocks remain verbatim; summaries may preserve facts and answer quality is not measured.', 'Keep-warm uses the configured gap distribution and an expected-value approximation, not a fitted Python policy. The cold preview assumes no future query or dependencies; call duration is modeled as zero and pings can occur after abandonment.', 'Incomplete arms or no feasible policy suppress full-workload savings; observed partial costs are not comparable totals.'];
+  const warnings=['A model of token counts and list prices: neither Compache, OpenClaw nor a provider is run, and answer quality is not measured.', 'The policy is the cheapest feasible point of a finite grid on the fitting threads. Costs are reported on a second set of threads drawn with the next seed.', 'When a run needs a source that was archived or cleared, one extra call asks for it and the answer call carries it. Both arms pay this, and both are assumed to know what the run needs. A source that OpenClaw summarized is not fetched again.', 'The floor is on the expected share of needed sources left in the request before fetching back, averaged over the configured dependency rates and uniform ages. A zero denominator is reported as null and imposes no constraint.', 'Prices and token counts are assumptions. A cache entry is modeled as living exactly its documented default lifetime; providers may keep entries longer or evict them earlier.', 'OpenClaw follows its documented defaults at the pinned revision. Claude presets: server-side tool-result clearing above 30% of the window, keeping the newest three, with the client summary at 75% behind it. OpenAI presets: the client-side summary path; the default OpenAI compact endpoint, retries and summary quality are not modeled. No keep-warm requests.', 'Keep-warm planning uses the configured return distribution and an expected-value approximation, not the package\'s fitted policy. Call duration is zero and pings can be sent after a user has left for good.', 'An incomplete arm or no feasible policy suppresses the savings figure; partial costs are not comparable totals.'];
   return {config,workload,compache,openclaw,optimization,savings,curves:{compache:compache.curve,openclaw:openclaw.curve},warnings};
 }
