@@ -27,8 +27,6 @@ Two things drive the bill for a long thread: how much context every turn sends a
 - **Keeps what your agent uses.** A policy is admitted on evidence of which earlier parts later turns relied on. Where almost every turn builds on earlier ones, compache keeps the history and tunes only the pings.
 - **Deterministic at runtime.** Applying a policy calls no model. The same history always gives the same request, so the cached prefix stays stable.
 
-**Continuing the benchmark work?** Start with the [agent handover](docs/benchmark-handover.md) for the recorded traces, the original 5- and 30-minute policy fits, and the next offline experiment.
-
 ## Quickstart
 
 Python 3.11 or later, installed from source.
@@ -100,4 +98,4 @@ Modeled cost on held-out conversations against keeping the full history, across 
 
 On DocChat, Claude Sonnet 5.5 answered 24 of 30 held-out turns correctly from the fitted policy's view and 25 from the full history, on a fifth of the tokens. On BEAM and LongDS the solver's choice was the cheapest candidate on the held-out conversations in 16 of 18 cases and within 0.03% in the other two. The LongDS conversion is not in the repository yet.
 
-[Docs](docs/README.md) · [Methodology](https://barendpotijk.github.io/compache/methodology.html) · [Other tools compared](docs/comparisons.md) · [Issues](https://github.com/BarendPotijk/compache/issues)
+[Docs](docs/README.md) · [Benchmark handover](docs/benchmark-handover.md) · [Methodology](https://barendpotijk.github.io/compache/methodology.html) · [Other tools compared](docs/comparisons.md) · [Issues](https://github.com/BarendPotijk/compache/issues)
