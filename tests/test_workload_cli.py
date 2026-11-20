@@ -12,7 +12,8 @@ from test_optimizer import END, labels_for, thread
 
 from compache.cli import main
 from compache.optimizer.contracts import ModelSpec
-from compache.traces import write_threads
+from compache.optimizer.retention import recipe_grid
+from compache.traces import Thread, write_threads
 
 
 class WorkloadCLITests(unittest.TestCase):
@@ -181,6 +182,8 @@ class WorkloadCLITests(unittest.TestCase):
         )
         self.assertEqual(fit["training_threads"], 1)
         self.assertEqual(fit["retention_floor"], 0.95)
+        self.assertEqual(fit["candidate_recipes"], 1)
+        self.assertEqual(fit["recipe_selection"]["select"], "supplied")
         policy = json.loads(artifact.read_text())
         self.assertEqual(policy["demand"]["by_position"]["1"]["calls_per_run"], [2])
         self.assertIsNotNone(policy["header_traffic"])
@@ -218,6 +221,70 @@ class WorkloadCLITests(unittest.TestCase):
             "training thread",
             self.call(["planner", "replay", *paths["train"], *params], 1)["error"],
         )
+
+    def test_fit_without_recipes_searches_the_grid(self):
+        data = thread(tid="train", n=5).to_dict()
+        for run in data["runs"]:
+            run["output"]["text"] = "An observed final answer. " * 40
+        t = Thread.from_dict(data)
+        docs, labels = self.base / "train.jsonl", self.base / "train-labels.jsonl"
+        write_threads([t], docs)
+        labels.write_text(
+            "".join(json.dumps(row) + "\n" for row in labels_for(t, need_old=True))
+        )
+        common = [
+            "planner",
+            "fit",
+            "--threads",
+            docs,
+            "--labels",
+            labels,
+            "--model-spec",
+            self.spec_path,
+            "--observation-end",
+            END,
+        ]
+        fit = self.call([*common, "--output", self.base / "grid.json"])
+        self.assertEqual(fit["candidate_recipes"], len(recipe_grid(5)))
+        self.assertEqual(
+            fit["recipe_selection"],
+            {
+                "select": "cheapest",
+                "unknowns": "excluded",
+                "max_unknown_change_rate": None,
+            },
+        )
+        self.assertEqual(fit["eligible_recipes"], 1)
+        (admitted,) = fit["admitted"]
+        self.assertIsNone(admitted["recipe"]["retrieval_runs"])
+        self.assertEqual(admitted["coverage_lower_bound"], 1)
+        self.assertLess(admitted["compact_fraction"], 1)
+        rows = json.loads((self.base / "grid.json").read_text())["recipes"]
+        self.assertEqual(sum(row["eligible"] for row in rows), 1)
+        every = self.call(
+            [*common, "--select", "supplied", "--output", self.base / "all.json"]
+        )
+        self.assertGreater(every["eligible_recipes"], 1)
+        strict = self.call(
+            [
+                *common,
+                "--unknowns",
+                "worst_case",
+                "--max-unknown-change-rate",
+                "0",
+                "--output",
+                self.base / "strict.json",
+            ]
+        )
+        self.assertEqual(
+            strict["recipe_selection"],
+            {
+                "select": "cheapest",
+                "unknowns": "worst_case",
+                "max_unknown_change_rate": 0,
+            },
+        )
+        self.assertEqual(strict["eligible_recipes"], 1)
 
 
 if __name__ == "__main__":

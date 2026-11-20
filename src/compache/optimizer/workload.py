@@ -22,15 +22,11 @@ from .retention import (
     RetentionRecipe,
     fit_recipes,
     matched_prefix_tokens,
+    recipe_grid,
     render_recipe,
 )
 from .shared_prefix import SharedPrefix, SharedPrefixCatalog, SharedReuse, _wire
 from .usage import response_usage
-
-DEFAULT_RECIPES = (
-    RetentionRecipe(10, 10, 3, True),
-    RetentionRecipe(None, None, 10, True),
-)
 
 
 def fit_workload(
@@ -39,9 +35,11 @@ def fit_workload(
     spec,
     *,
     observation_end,
-    recipes=DEFAULT_RECIPES,
+    recipes=None,
     retention_floor=0.95,
-    max_unknown_change_rate=0.0,
+    max_unknown_change_rate=None,
+    unknowns="excluded",
+    select=None,
     horizon_seconds=86400,
     calls_per_run=None,
     next_endpoint_reuse_fraction=None,
@@ -49,8 +47,17 @@ def fit_workload(
     tokenize=None,
     count_tokens=None,
 ):
-    """Fit external demand and assess checkpoint recipes on training threads only."""
+    """Fit external demand and assess checkpoint recipes on training threads only.
+
+    Without `recipes` the candidates are `recipe_grid` up to the longest training
+    thread, and the cheapest passing one is admitted. A supplied list is admitted
+    in its own order. `select` overrides either default.
+    """
     threads = list(threads)
+    if recipes is None:
+        recipes = recipe_grid(max((len(t.runs) for t in threads), default=1))
+        select = select or "cheapest"
+    select = select or "supplied"
     forecasts = fit_distribution(
         threads,
         spec,
@@ -66,6 +73,8 @@ def fit_workload(
         recipes,
         retention_floor=retention_floor,
         max_unknown_change_rate=max_unknown_change_rate,
+        unknowns=unknowns,
+        select=select,
     )
     traffic = None
     if header is not None:
@@ -79,6 +88,11 @@ def fit_workload(
         "demand": forecasts,
         "recipes": scores,
         "retention_floor": retention_floor,
+        "recipe_selection": {
+            "select": select,
+            "unknowns": unknowns,
+            "max_unknown_change_rate": max_unknown_change_rate,
+        },
         "training_threads": sorted(digest(t.thread_id) for t in threads),
     }
 

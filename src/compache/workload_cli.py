@@ -86,7 +86,17 @@ def register_planner(groups):
         type=Path,
         help="JSON object mapping nonterminal training run IDs to the reusable fraction of their published prefix on the next foreground input",
     )
-    fit.add_argument("--max-unknown-change-rate", type=float, default=0.0)
+    fit.add_argument(
+        "--unknowns",
+        choices=("excluded", "worst_case"),
+        default="excluded",
+        help="Apply the retention floor to assessed requirements only (default), or also count every unassessable requirement on a changed turn as lost",
+    )
+    fit.add_argument(
+        "--max-unknown-change-rate",
+        type=float,
+        help="Optional cap on the share of unassessable turns a cut may change; 0 rejects any such change",
+    )
     fit.add_argument(
         "--horizon-seconds",
         type=float,
@@ -96,7 +106,12 @@ def register_planner(groups):
     fit.add_argument(
         "--recipes",
         type=Path,
-        help="JSON list of per-part historical retention recipes",
+        help="JSON list of per-part historical retention recipes; default: a grid of dialogue and retrieval windows",
+    )
+    fit.add_argument(
+        "--select",
+        choices=("cheapest", "supplied"),
+        help="Admit the cheapest passing recipe (default for the grid), or every compatible recipe in the supplied order (default with --recipes)",
     )
     replay.add_argument(
         "--policy", type=Path, required=True, help="Output of planner fit"
@@ -346,6 +361,8 @@ def run_planner(args):
             horizon_seconds=args.horizon_seconds,
             retention_floor=args.retention_floor,
             max_unknown_change_rate=args.max_unknown_change_rate,
+            unknowns=args.unknowns,
+            select=args.select,
             calls_per_run=counts,
             **options,
         )
@@ -355,8 +372,23 @@ def run_planner(args):
         return {
             "output": str(args.output),
             "training_threads": len(threads),
+            "candidate_recipes": len(result["recipes"]),
             "eligible_recipes": sum(row["eligible"] for row in result["recipes"]),
+            "admitted": [
+                {
+                    key: row[key]
+                    for key in (
+                        "recipe",
+                        "coverage",
+                        "coverage_lower_bound",
+                        "compact_fraction",
+                    )
+                }
+                for row in result["recipes"]
+                if row["eligible"]
+            ],
             "retention_floor": result["retention_floor"],
+            "recipe_selection": result["recipe_selection"],
         }
 
     result = replay_workload(
