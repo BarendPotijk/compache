@@ -41,6 +41,8 @@ Necessity values are inferred, tested, unknown. Authored synthetic task truth is
 
 `complete` means the supplied, visible evidence was assessed, not that causal necessity or exhaustive latent requirements were proved. Missing visible text requires partial/unassessable plus coverage notes. If the target answer is absent, task requirements can still be partial; never fabricate claims. Unknown visibility or truncated candidate coverage must be reported, and those cases must not become negative reuse examples.
 
+The validator requires at least one task requirement for a complete label with a visible question and at least one claim for a visible answer. It also checks the historical flag against the supplied alternatives: `no` needs an all-current sufficient alternative; `yes` needs nonempty alternatives that each contain historical evidence. Do not use empty arrays to label a nonempty turn as fully assessed.
+
 Host envelope (outside model output): input SHA256; normalizer/selector, prompt and schema versions; code revision; backend and model identifier; reasoning/settings; response/request IDs; timestamp; attempt number; status; token usage; priced/unpriced cost coverage; human review or disagreement if any. Cache by every input/configuration component that can change labels. Freeze accepted labels for reproducible downstream fits.
 
 Do not compute token-weighted dependency recall from counts of whole documents or coarse edges. It requires a pinned tokenizer, exact supported spans, overlap unions and a stated denominator. The starter supports part/requirement-level checks only. Preserve unknowns and report both macro company/thread results and volume-weighted totals when population evaluation is added.

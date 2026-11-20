@@ -1,76 +1,57 @@
 # compache
 
-compache fits a context-compaction and cache keep-warm policy to your own traces, then applies it deterministically on every model request.
+Fit context-compaction and prompt-cache policies to your RAG workload.
 
-**Status:** the offline trace and dependency-label contracts are implemented, with a reproducible standard-RAG benchmark and coding-agent skill. The fitters, solver, runtime gate, retention planner and OpenAI annotation worker remain design work. The full design is in [docs](docs/README.md).
+**[Try the calculator ↗](https://barendpotijk.github.io/compache/)** · [Quickstart](#quickstart) · [How it works](#how-it-works) · [Comparisons](docs/comparisons.md) · [Implementation](https://github.com/BarendPotijk/compache/pull/2)
 
-## Try the first milestone
+Compache uses historical threads, dependency labels and return timing to choose what context to retain and whether keeping the cache warm is worth paying for. The retention requirement defaults to 95% of assessed historical dependencies. It is not an answer-accuracy guarantee.
 
-Requires Python 3.11 or newer; the package has no runtime dependencies.
+**Experimental.** The calculator is live. The Python implementation is in [PR #2](https://github.com/BarendPotijk/compache/pull/2), based on [PR #1](https://github.com/BarendPotijk/compache/pull/1). Production provider adapters and a live ping scheduler are not shipped.
+
+## Quickstart
+
+Python 3.11+. Use the implementation branch while the PRs are open:
 
 ```sh
-python3 -m pip install -e .
-compache traces validate benchmarks/rag_v1/threads.jsonl
-compache dependencies prepare --threads benchmarks/rag_v1/threads.jsonl --thread-id rag-001 --run-id rag-001-run-03 --output /tmp/compache-packet.json
-python3 -m unittest discover -s tests -v
+git clone --branch codex/rag-optimizer https://github.com/BarendPotijk/compache.git
+cd compache
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install .
+compache traces validate examples/rag_workload/threads.jsonl
+python scripts/run_rag_optimizer.py --output ./work/evaluation
 ```
 
-The [benchmark](benchmarks/rag_v1/README.md) contains 45 fictional threads, 207 runs and 15 question families across three companies. It exercises earlier user constraints, retrieved context, prior answers, alternative evidence, version changes and missing content. Timing is simulated; token usage is unknown. Its 45 final-run expectations are authored test cases, not measured causal necessity or production workload frequencies.
+Validation reports **45 threads / 207 runs**. Evaluation fits on training threads and writes a policy, workload profile and held-out cost ledger. No API key or model call is needed. The fixture combines fabricated questions, sources and return timing with captured agent answers; its token prices are illustrative.
 
-Use the [dependency-labeling skill](skills/compache-label-dependencies/SKILL.md) to annotate prepared packets with your coding agent. Its scripts call the same package functions and validator as the CLI. The [contract documentation](docs/trace-contracts.md) describes the supported offline Langfuse envelope, source identities and coverage rules. These commands need no API keys and make no network requests.
+For your own traces: [normalize → label dependencies → fit and evaluate → integrate](https://github.com/BarendPotijk/compache/blob/codex/rag-optimizer/docs/optimizer.md). A [coding-agent skill](https://github.com/BarendPotijk/compache/blob/codex/rag-optimizer/skills/compache-label-dependencies/SKILL.md) prepares and labels dependency evidence.
 
-## Planned runtime architecture
+## How it works
 
-![Architecture. Offline, two fitters turn traces into a profile and a solver turns that into a policy. Online, the gate and the planner read the policy.](docs/assets/architecture.svg)
+![Threads and labels feed offline fitting; a frozen policy drives the runtime gate and planner](docs/assets/workflow.svg)
 
-- **Offline:** two fitters describe your workload, and the solver combines that with the provider's prices into one policy file.
-- **Online:** the gate decides how and when to compact, and the planner decides when to ping. Neither calls a model, so the same inputs always give the same request.
+- **Fit offline.** Estimate return timing and dependency lookback, select a policy under the retention requirement, then evaluate separate threads.
+- **Prepare each request.** Preserve warm prefixes, compact eligible historical retrievals and keep recovery handles. Inputs, answers and current retrievals remain protected by the supported RAG contract.
+- **Plan at run end.** Compare expected keep-warm benefit with ping and cold-return cost. The application owns execution and cancellation.
 
-## One request through the layers
+Policies are versioned artifacts. Runtime decisions do not consult evaluation labels or future answers. [Application structure](docs/application-structure.md) · [Runtime contract](https://github.com/BarendPotijk/compache/blob/codex/rag-optimizer/docs/optimizer.md#gate-and-source-recovery)
 
-![Sequence diagram. Before every request the integration calls prepare, the gate returns a recipe and a view, and the rewritten request is sent. After the response it calls observe. At run end the planner decides whether to ping.](docs/assets/request-sequence.svg)
+## Compare approaches
 
-- **Prepare:** the gate decides the view before the request leaves.
-- **Observe:** the bill comes back, and the runtime calibrates and records it.
-- **End of run:** the planner decides, and pings repeat while the thread is idle.
+| Baseline | Available comparison | Evidence |
+|---|---|---|
+| OpenClaw | Interactive client-summary scenario | Deterministic cost estimate |
+| OpenCode | Pinned compaction policy and subscription experiments | Captured usage, repriced cache assumptions |
+| Headroom | Native lossless-library replay; append-only and cold-refresh variants | Actual compression, modeled cost; full proxy not evaluated |
 
-The blue arrows are the two decisions compache outputs. The order the layers get built in is in the [build plan](docs/design.md#build-plan).
+[Scopes, results and reproduction](docs/comparisons.md). Headroom also has cache-aware cost gating and trace-based learning components; those capabilities are not unique to Compache.
 
-## Open design choices
+The initial Headroom complete-text diagnostic covers **11 threads / 49 runs** and finds **0% modeled cost difference**. It exercises short prose traces in a roomy window with a conservative Compache policy. One incomplete held-out thread is reported separately. This does not establish long-thread performance or answer quality.
 
-Already settled: [statistical fitters, no shipped return curve, Python 3.11 and up](docs/design.md#decided).
+## Explore your workload
 
-**Gate and planner**
+[Open the calculator](https://barendpotijk.github.io/compache/) to set token growth, dependencies, thread survival and return timing. It shows cost per run, context growth, cache hit rate and keep-warm payoff against OpenClaw. Headroom comparisons use actual payloads through the separate replay command.
 
-1. **Prompts and answers.** Do they always stay verbatim, or may a fitted policy reduce old ones? Proposed: verbatim in the first version, with their reuse reported.
-2. **Reference defaults.** Ship the current thresholds as they are, or derive them again from public or synthetic threads first?
-3. **The `compact` action.** Keep it, or let the planner only ping or lapse? Its useful band is narrow.
-4. **Request-scoped block.** Which single position holds from the first request on?
-5. **Preserved thinking.** Replacing a result an earlier response read may be rejected on models that bind thinking blocks to unedited history. How does a rewritten view avoid that?
-6. **Unbounded tool results.** A turn reading large documents on a small window can loop, with the model expanding what the shed just replaced. Where are results bounded, and what guards the shed?
-7. **Fork carry.** What does a cold plan build on when the stored digest no longer matches? The safe answer is nothing.
-8. **Unknown model.** Observe only, assume a default window, or fail? Proposed: observe only.
-9. **Citations and protected evidence.** Core, or optional?
-10. **Three compaction rules to confirm.**
-    - Tier 2 stops at the target and never keeps one more turn past it.
-    - Tiers 1 and 2 never touch the running turn. Only the allowance, the last resort and admission do.
-    - A capability can be unloaded on a cold start where only tier 1 fires.
+Costs are scenario estimates, not provider billing savings. The calculator and initial Headroom replay assume zero extra recovery-call overhead. Source availability and answer quality are separate; incomplete comparisons do not produce a savings percentage.
 
-**Fitting and solving**
-
-11. **Miss ceiling.** What share of turns may need an expansion before the solver rejects a policy? To be set from the first real traces.
-12. **Profile scope.** One profile per application, or one per agent or segment inside it? Proposed: per application first.
-13. **Evaluation dataset.** Which threads do we judge the defaults and the solver against?
-
-**Integration**
-
-14. **First targets.** Proposed: Anthropic then OpenAI, Langfuse then MLflow, LangChain then Hermes then opencode.
-15. **Hosts that aren't Python.** Proposed: a local service with a thin plugin, a proxy as the fallback, and no TypeScript port.
-16. **Built-ins that can't be switched off.** When a host places its own cache breakpoints, does compache stand down to audit, or run beside them?
-17. **State and pings.** Which stores ship first, and do pings run in-process or go to the host's own queue? Proposed: in-memory and SQLite, in-process by default.
-18. **Own telemetry.** Is the runtime's content-free log on by default? Proposed: yes, kept local.
-
-**Project**
-
-19. **Licence.** Needed before the first release.
-20. **Development interpreter.** `.python-version` and the package floor now use Python 3.11.
+[Docs](docs/README.md) · [Methodology](https://barendpotijk.github.io/compache/methodology.html) · [Benchmark source plan](https://barendpotijk.github.io/compache/benchmarks.html) · [Issues](https://github.com/BarendPotijk/compache/issues) · [Earlier calculator README](docs/design/calculator-readme.md) · [Original design README](docs/design/README.md)

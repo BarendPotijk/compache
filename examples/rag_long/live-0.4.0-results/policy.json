@@ -1,0 +1,30 @@
+{
+  "model_spec": {
+    "model_id": "gpt-6-luna",
+    "context_tokens": 828400,
+    "cache_ttl_seconds": 300,
+    "cache_min_tokens": 1024,
+    "cache_block_tokens": 128,
+    "read_multiplier": 0.1,
+    "write_multiplier": 1,
+    "output_multiplier": 5,
+    "ping_output_tokens": 3,
+    "expansion_output_tokens": 16,
+    "bytes_per_token": 4.0,
+    "part_overhead_tokens": 6,
+    "byte_limit": 16000000,
+    "assumption_note": "Native Codex runtime budget; 300s planning TTL. Standard credit ratios, no cache-write surcharge. UTF-8 estimates only for policy planning; live cost uses actual reported counters.",
+    "schema_version": "compache-model-spec-v1"
+  },
+  "profile_hash": "d1689b1811fb682b41f3e95e849d7436813cf99424ec141c0140649420803876",
+  "retrieval_grace_runs": 0,
+  "cold_trigger": 0.22,
+  "target": 0.2,
+  "warm_trigger": 0.5,
+  "reserve": 0.0386286817962337,
+  "ping_lead_seconds": 45,
+  "freshness_margin_seconds": 20,
+  "max_pings": 3,
+  "protect_query_matches": true,
+  "schema_version": "compache-policy-v1"
+}

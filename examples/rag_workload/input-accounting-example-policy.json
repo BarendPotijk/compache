@@ -1,0 +1,110 @@
+{
+  "header_traffic": null,
+  "schema_version": "compache-workload-planner-v1",
+  "model_spec": {
+    "model_id": "test",
+    "context_tokens": 1600,
+    "cache_ttl_seconds": 300,
+    "cache_min_tokens": 128,
+    "cache_block_tokens": 128,
+    "read_multiplier": 0.1,
+    "write_multiplier": 1.25,
+    "output_multiplier": 4.0,
+    "ping_output_tokens": 0,
+    "expansion_output_tokens": 16,
+    "bytes_per_token": 4.0,
+    "part_overhead_tokens": 6,
+    "byte_limit": 16000000,
+    "assumption_note": "Caller-supplied illustrative economics; not verified provider prices or billing.",
+    "schema_version": "compache-model-spec-v1"
+  },
+  "demand": {
+    "schema_version": "compache-thread-demand-v1",
+    "model_id": "test",
+    "token_ruler": [
+      4.0,
+      6
+    ],
+    "observation_end": "2026-01-10T00:00:00+00:00",
+    "horizon_seconds": 86400,
+    "training_threads": 1,
+    "training_runs": 2,
+    "reported_output_runs": 0,
+    "by_position": {
+      "1": {
+        "response": [
+          [
+            7,
+            13,
+            30.0
+          ]
+        ],
+        "returns": [
+          [
+            280.0,
+            27,
+            27
+          ]
+        ],
+        "no_return": 0,
+        "censored": 0
+      },
+      "2": {
+        "response": [
+          [
+            7,
+            13,
+            30.0
+          ]
+        ],
+        "returns": [],
+        "no_return": 1,
+        "censored": 0
+      }
+    }
+  },
+  "recipes": [
+    {
+      "recipe": {
+        "input_runs": null,
+        "output_runs": null,
+        "retrieval_runs": 0,
+        "protect_query_matches": false
+      },
+      "turns": 2,
+      "historical_required": 1,
+      "historical_retained": 1,
+      "direct_required": 1,
+      "direct_retained": 1,
+      "unknown_requirements": 0,
+      "unknown_runs": 0,
+      "unknown_changed_runs": 0,
+      "changed_runs": 1,
+      "canonical_tokens": 94,
+      "projected_tokens": 110,
+      "retention_floor": 0.95,
+      "max_unknown_change_rate": 0.0,
+      "coverage": 1.0,
+      "unknown_change_rate": 0.0,
+      "eligible": true,
+      "compact_fraction": 1.1702127659574468,
+      "individual_eligible": true,
+      "joint_envelope": {
+        "recipe": {
+          "input_runs": null,
+          "output_runs": null,
+          "retrieval_runs": 0,
+          "protect_query_matches": false
+        },
+        "coverage": 1.0,
+        "historical_required": 1,
+        "historical_retained": 1,
+        "unknown_change_rate": 0.0
+      }
+    }
+  ],
+  "retention_floor": 0.95,
+  "training_threads": [
+    "02b43e7b74029c6cddbc1252df198f6f0c832ea9d629288170ab828d71accfbf"
+  ]
+}

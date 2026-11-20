@@ -1,0 +1,306 @@
+{
+  "package_version": "0.4.0",
+  "fresh_compache_runs": 3,
+  "historical_opencode_runs_reused": 3,
+  "fresh_answers": 216,
+  "fresh_provider_invocations": 235,
+  "model": "gpt-6-luna",
+  "reasoning_effort": "low",
+  "context_tokens": 828400,
+  "runs": {
+    "opencode-1": {
+      "answers": 72,
+      "logical_calls": 73,
+      "provider_invocations": 73,
+      "extra_codex_invocations": 0,
+      "extra_codex_usage": {
+        "input_tokens": 0,
+        "cached_input_tokens": 0,
+        "output_tokens": 0
+      },
+      "calls_by_role": {
+        "answer": 72,
+        "summary": 1
+      },
+      "actions": {
+        "baseline": 72
+      },
+      "rewrites": 0,
+      "rewrites_reaching_estimated_target": 0,
+      "historical_requirements_retained": null,
+      "historical_requirements_assessed": null,
+      "reported_input_tokens": 25923725,
+      "reported_output_tokens": 5546,
+      "max_single_input_tokens": 799519,
+      "wall_seconds": 512.7421617559739,
+      "started_at_utc": "2026-11-16T15:05:04.936740+00:00",
+      "ended_at_utc": "2026-11-16T15:17:15.561982+00:00"
+    },
+    "opencode-2": {
+      "answers": 72,
+      "logical_calls": 73,
+      "provider_invocations": 75,
+      "extra_codex_invocations": 2,
+      "extra_codex_usage": {
+        "input_tokens": 900186,
+        "cached_input_tokens": 18688,
+        "output_tokens": 45
+      },
+      "calls_by_role": {
+        "answer": 72,
+        "summary": 1
+      },
+      "actions": {
+        "baseline": 72
+      },
+      "rewrites": 0,
+      "rewrites_reaching_estimated_target": 0,
+      "historical_requirements_retained": null,
+      "historical_requirements_assessed": null,
+      "reported_input_tokens": 26819774,
+      "reported_output_tokens": 4796,
+      "max_single_input_tokens": 799405,
+      "wall_seconds": 493.0348759169865,
+      "started_at_utc": "2026-11-16T15:05:04.938577+00:00",
+      "ended_at_utc": "2026-11-16T15:16:13.801586+00:00"
+    },
+    "opencode-3": {
+      "answers": 72,
+      "logical_calls": 73,
+      "provider_invocations": 74,
+      "extra_codex_invocations": 1,
+      "extra_codex_usage": {
+        "input_tokens": 128005,
+        "cached_input_tokens": 6144,
+        "output_tokens": 28
+      },
+      "calls_by_role": {
+        "answer": 72,
+        "summary": 1
+      },
+      "actions": {
+        "baseline": 72
+      },
+      "rewrites": 0,
+      "rewrites_reaching_estimated_target": 0,
+      "historical_requirements_retained": null,
+      "historical_requirements_assessed": null,
+      "reported_input_tokens": 26238863,
+      "reported_output_tokens": 5351,
+      "max_single_input_tokens": 814596,
+      "wall_seconds": 457.6760013719977,
+      "started_at_utc": "2026-11-16T15:05:04.937305+00:00",
+      "ended_at_utc": "2026-11-16T15:18:12.060481+00:00"
+    },
+    "compache-1": {
+      "answers": 72,
+      "logical_calls": 72,
+      "provider_invocations": 80,
+      "extra_codex_invocations": 8,
+      "extra_codex_usage": {
+        "input_tokens": 1684702,
+        "cached_input_tokens": 291328,
+        "output_tokens": 351
+      },
+      "calls_by_role": {
+        "answer": 72
+      },
+      "actions": {
+        "planned_cold": 3,
+        "applied_warm": 60,
+        "replaced_warm": 3,
+        "deferred_warm": 6
+      },
+      "rewrites": 5,
+      "rewrites_reaching_estimated_target": 4,
+      "historical_requirements_retained": 5,
+      "historical_requirements_assessed": 5,
+      "reported_input_tokens": 19090191,
+      "reported_output_tokens": 5384,
+      "max_single_input_tokens": 408563,
+      "wall_seconds": 456.9889955890103,
+      "started_at_utc": "2026-11-16T16:05:15.262428+00:00",
+      "ended_at_utc": "2026-11-16T16:12:54.793422+00:00"
+    },
+    "compache-2": {
+      "answers": 72,
+      "logical_calls": 72,
+      "provider_invocations": 78,
+      "extra_codex_invocations": 6,
+      "extra_codex_usage": {
+        "input_tokens": 1302411,
+        "cached_input_tokens": 428544,
+        "output_tokens": 139
+      },
+      "calls_by_role": {
+        "answer": 72
+      },
+      "actions": {
+        "planned_cold": 3,
+        "applied_warm": 61,
+        "replaced_warm": 3,
+        "deferred_warm": 5
+      },
+      "rewrites": 5,
+      "rewrites_reaching_estimated_target": 4,
+      "historical_requirements_retained": 5,
+      "historical_requirements_assessed": 5,
+      "reported_input_tokens": 18697402,
+      "reported_output_tokens": 4790,
+      "max_single_input_tokens": 408451,
+      "wall_seconds": 811.3442863359815,
+      "started_at_utc": "2026-11-16T16:05:15.262412+00:00",
+      "ended_at_utc": "2026-11-16T16:18:49.212234+00:00"
+    },
+    "compache-3": {
+      "answers": 72,
+      "logical_calls": 72,
+      "provider_invocations": 77,
+      "extra_codex_invocations": 5,
+      "extra_codex_usage": {
+        "input_tokens": 1331129,
+        "cached_input_tokens": 24576,
+        "output_tokens": 162
+      },
+      "calls_by_role": {
+        "answer": 72
+      },
+      "actions": {
+        "planned_cold": 3,
+        "applied_warm": 60,
+        "replaced_warm": 3,
+        "deferred_warm": 6
+      },
+      "rewrites": 5,
+      "rewrites_reaching_estimated_target": 4,
+      "historical_requirements_retained": 5,
+      "historical_requirements_assessed": 5,
+      "reported_input_tokens": 18725954,
+      "reported_output_tokens": 5018,
+      "max_single_input_tokens": 408439,
+      "wall_seconds": 442.68644783198397,
+      "started_at_utc": "2026-11-16T16:05:15.261773+00:00",
+      "ended_at_utc": "2026-11-16T16:12:40.536396+00:00"
+    }
+  },
+  "slowest_fresh_call": {
+    "replicate": 2,
+    "run_index": 57,
+    "wall_seconds": 309.8589785840013,
+    "started_at_utc": "2026-11-16T16:11:22.755981+00:00",
+    "ended_at_utc": "2026-11-16T16:16:32.610975+00:00",
+    "ok": true
+  },
+  "modeled_costs_credits": {
+    "300": {
+      "paired_savings": [
+        {
+          "replicate": 1,
+          "opencode": 12.109837500000003,
+          "compache": 9.5391775,
+          "savings": 2.5706600000000037,
+          "savings_percent": 21.227865361529442
+        },
+        {
+          "replicate": 2,
+          "opencode": 12.320841,
+          "compache": 9.429619999999996,
+          "savings": 2.8912210000000034,
+          "savings_percent": 23.466101055926323
+        },
+        {
+          "replicate": 3,
+          "opencode": 12.115052999999993,
+          "compache": 9.440489999999997,
+          "savings": 2.6745629999999956,
+          "savings_percent": 22.07636235681344
+        }
+      ],
+      "opencode": 36.545731499999995,
+      "compache": 28.40928749999999,
+      "aggregate_savings": 8.136444000000004,
+      "savings_percent": 22.26373276999533,
+      "previous_compache": 100.2590065,
+      "reduction_vs_previous_compache_percent": 71.66410431166601,
+      "all_cold_cost": {
+        "opencode": 197.6520675,
+        "compache": 141.4737675
+      },
+      "all_cold_token_savings": 56.17829999999998,
+      "cache_discount": {
+        "opencode": 161.106336,
+        "compache": 113.06448000000002
+      },
+      "cache_counts": {
+        "opencode": {
+          "warm": 204,
+          "first": 3,
+          "expiry": 6,
+          "rewrite": 3
+        },
+        "compache": {
+          "warm": 198,
+          "first": 3,
+          "expiry": 0,
+          "rewrite": 15
+        }
+      }
+    },
+    "1800": {
+      "paired_savings": [
+        {
+          "replicate": 1,
+          "opencode": 10.6632135,
+          "compache": 9.5391775,
+          "savings": 1.1240360000000003,
+          "savings_percent": 10.541250065001515
+        },
+        {
+          "replicate": 2,
+          "opencode": 10.873928999999999,
+          "compache": 9.429619999999996,
+          "savings": 1.4443090000000023,
+          "savings_percent": 13.282310377417422
+        },
+        {
+          "replicate": 3,
+          "opencode": 10.675341,
+          "compache": 9.440489999999997,
+          "savings": 1.2348510000000026,
+          "savings_percent": 11.567321362380861
+        }
+      ],
+      "opencode": 32.2124835,
+      "compache": 28.40928749999999,
+      "aggregate_savings": 3.803196000000007,
+      "savings_percent": 11.806590448078948,
+      "previous_compache": 100.2590065,
+      "reduction_vs_previous_compache_percent": 71.66410431166601,
+      "all_cold_cost": {
+        "opencode": 197.6520675,
+        "compache": 141.4737675
+      },
+      "all_cold_token_savings": 56.17829999999998,
+      "cache_discount": {
+        "opencode": 165.439584,
+        "compache": 113.06448000000002
+      },
+      "cache_counts": {
+        "opencode": {
+          "warm": 207,
+          "first": 3,
+          "expiry": 3,
+          "rewrite": 3
+        },
+        "compache": {
+          "warm": 198,
+          "first": 3,
+          "expiry": 0,
+          "rewrite": 15
+        }
+      }
+    }
+  },
+  "quality_scope": "Previously used diagnostic conversation, not fresh heldout. Historical requirements are sparse and concentrated before the original OpenCode summary.",
+  "cost_scope": "Fixed trajectories repriced at frozen standard credit rates. Not an invoice or observed persistent-session cache savings. Runtime input and internal invocations included; controller/platform overhead unavailable. Rejected retries are reported separately."
+}

@@ -17,6 +17,9 @@ build/
 
 # data
 *.db
+# Large deterministic long-context fixtures are regenerated from the builder.
+examples/rag_long/*.jsonl
+examples/rag_long/handbook.md
 
 # logs
 *.log

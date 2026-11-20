@@ -1,0 +1,51 @@
+{
+  "reason": "Compache3 turn16 returned one complete JSON answer followed by quote/brace delimiters. Preserve exact decoded answer and original raw text/usage; no model retry for that turn.",
+  "decoder_change": "Allow only an answer-only JSON object followed by either } or quote+}; malformed tools remain rejected.",
+  "code_sha256": "fbb391a29e4667af600a81586bed1411ad82d594624c69450c145dbcbdc7ff5f",
+  "policy_changed": false,
+  "completed_model_calls_repeated": false,
+  "timing": "Protocol pause before resume; no artificial cache TTL sleeps. Logical cadence is a separate cost assumption.",
+  "updated_at_utc": "2026-11-16T16:53:08.488240+00:00",
+  "network_timeouts": {
+    "attempts": [
+      {
+        "arm": "opencode",
+        "replicate": 1,
+        "sequence": 67,
+        "run_index": 64,
+        "status": "network_timeout",
+        "reported_usage": null,
+        "model_invocations": null,
+        "wall_seconds": 900.0066176670007,
+        "raw_events_preserved": true,
+        "note": "Provider usage was not reported; do not treat this attempt or internal connection retries as zero cost."
+      },
+      {
+        "arm": "opencode",
+        "replicate": 2,
+        "sequence": 68,
+        "run_index": 65,
+        "status": "network_timeout",
+        "reported_usage": null,
+        "model_invocations": null,
+        "wall_seconds": 900.0008148340057,
+        "raw_events_preserved": true,
+        "note": "Provider usage was not reported; do not treat this attempt or internal connection retries as zero cost."
+      },
+      {
+        "arm": "opencode",
+        "replicate": 3,
+        "sequence": 67,
+        "run_index": 61,
+        "status": "network_timeout",
+        "reported_usage": null,
+        "model_invocations": null,
+        "wall_seconds": 900.0066948340027,
+        "raw_events_preserved": true,
+        "note": "Provider usage was not reported; do not treat this attempt or internal connection retries as zero cost."
+      }
+    ],
+    "resume": "Reconstruct existing trajectories, check prompt hashes, continue from last completed answer. No successful model calls repeated.",
+    "resumed_at_utc": "2026-11-16T20:41:44.313117+00:00"
+  }
+}

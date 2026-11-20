@@ -1,0 +1,42 @@
+[
+  {
+    "arm": "compache",
+    "ttl_seconds": 300,
+    "modeled_credits_by_role": {
+      "answer": 67.47553749999997,
+      "codex_overhead": 11.941188000000002,
+      "ping": 0.5404774999999999,
+      "recovery": 0.634815
+    }
+  },
+  {
+    "arm": "compache",
+    "ttl_seconds": 1800,
+    "modeled_credits_by_role": {
+      "answer": 66.68756949999998,
+      "codex_overhead": 11.941188000000002,
+      "ping": 0.5404774999999999,
+      "recovery": 0.634815
+    }
+  },
+  {
+    "arm": "opencode",
+    "ttl_seconds": 300,
+    "modeled_credits_by_role": {
+      "answer": 119.54893799999992,
+      "summary": 0.751465,
+      "codex_overhead": 4.983302999999999,
+      "recovery": 0.027927999999999998
+    }
+  },
+  {
+    "arm": "opencode",
+    "ttl_seconds": 1800,
+    "modeled_credits_by_role": {
+      "answer": 68.46868200000002,
+      "summary": 0.751465,
+      "codex_overhead": 3.070407,
+      "recovery": 0.027927999999999998
+    }
+  }
+]

@@ -1,0 +1,463 @@
+{
+  "schema": "compache-scaled-live-report-v1",
+  "all_arms_completed": false,
+  "planned_answers": 576,
+  "completed_answers": 341,
+  "runs": {
+    "opencode-1": {
+      "thread_id": "scaled-26-07",
+      "complete": true,
+      "planned_answers": 96,
+      "completed_answers": 96,
+      "unanswered_turns": 0,
+      "stop": null,
+      "calls_by_role": {
+        "answer": 96,
+        "summary": 4
+      },
+      "reported_provider_invocations": 105,
+      "internal_codex_invocations": 5,
+      "reported_usage": {
+        "input_tokens": 39749411,
+        "cached_input_tokens": 2046464,
+        "output_tokens": 9537
+      },
+      "wall_seconds": 676.8284506239797,
+      "max_reported_input_tokens": 799028,
+      "rewrites": 0,
+      "missing_authored_requirements_before_recovery": null,
+      "live_bound_historical_assessed": null,
+      "live_bound_historical_retained": null,
+      "unsupported_output_alternatives_removed": null,
+      "historical_requirements_on_unanswered_turns": 0
+    },
+    "opencode-2": {
+      "thread_id": "scaled-24-07",
+      "complete": true,
+      "planned_answers": 96,
+      "completed_answers": 96,
+      "unanswered_turns": 0,
+      "stop": null,
+      "calls_by_role": {
+        "answer": 96,
+        "summary": 5
+      },
+      "reported_provider_invocations": 110,
+      "internal_codex_invocations": 9,
+      "reported_usage": {
+        "input_tokens": 40794116,
+        "cached_input_tokens": 2393600,
+        "output_tokens": 11429
+      },
+      "wall_seconds": 726.6871167509453,
+      "max_reported_input_tokens": 806634,
+      "rewrites": 0,
+      "missing_authored_requirements_before_recovery": null,
+      "live_bound_historical_assessed": null,
+      "live_bound_historical_retained": null,
+      "unsupported_output_alternatives_removed": null,
+      "historical_requirements_on_unanswered_turns": 0
+    },
+    "opencode-3": {
+      "thread_id": "scaled-29-07",
+      "complete": true,
+      "planned_answers": 96,
+      "completed_answers": 96,
+      "unanswered_turns": 0,
+      "stop": null,
+      "calls_by_role": {
+        "answer": 96,
+        "summary": 5,
+        "recovery": 4
+      },
+      "reported_provider_invocations": 113,
+      "internal_codex_invocations": 8,
+      "reported_usage": {
+        "input_tokens": 39752311,
+        "cached_input_tokens": 2052736,
+        "output_tokens": 10648
+      },
+      "wall_seconds": 718.0430459599957,
+      "max_reported_input_tokens": 805927,
+      "rewrites": 0,
+      "missing_authored_requirements_before_recovery": null,
+      "live_bound_historical_assessed": null,
+      "live_bound_historical_retained": null,
+      "unsupported_output_alternatives_removed": null,
+      "historical_requirements_on_unanswered_turns": 0
+    },
+    "compache-1": {
+      "thread_id": "scaled-26-07",
+      "complete": false,
+      "planned_answers": 96,
+      "completed_answers": 19,
+      "unanswered_turns": 77,
+      "stop": {
+        "status": "blocked_by_admission",
+        "thread_id": "scaled-26-07",
+        "run_id": "scaled-26-07-run-020",
+        "run_index": 20,
+        "planned_answers": 96,
+        "completed_answers": 19,
+        "completed_calls": 19,
+        "counts": {
+          "answer": 19,
+          "summary": 0,
+          "ping": 0,
+          "recovery": 0
+        },
+        "telemetry": {
+          "window": "warm",
+          "action": "applied_warm",
+          "prefix_transition": "extended",
+          "tokens_estimated": 797556,
+          "removed_parts": 0,
+          "policy_hash": "ae2b872f13267570b0cd3af4ec927f2e8a6e5c9500df459bd50e7f47b6f7d676",
+          "admitted": false,
+          "reason": "protected_or_current_context_exceeds_estimated_limit"
+        },
+        "assessment": {
+          "assessable": true,
+          "missed_requirements": [],
+          "restore_alternatives": [],
+          "historical_requirements_assessed": 1,
+          "historical_requirements_retained": 1
+        },
+        "live_output_binding": {
+          "output_alternatives_removed": 0,
+          "unassessable_requirements": []
+        },
+        "model_call_sent_for_blocked_run": false
+      },
+      "calls_by_role": {
+        "answer": 19
+      },
+      "reported_provider_invocations": 19,
+      "internal_codex_invocations": 0,
+      "reported_usage": {
+        "input_tokens": 8059150,
+        "cached_input_tokens": 110592,
+        "output_tokens": 1373
+      },
+      "wall_seconds": 130.44829837299767,
+      "max_reported_input_tokens": 798187,
+      "rewrites": 0,
+      "missing_authored_requirements_before_recovery": 0,
+      "live_bound_historical_assessed": 5,
+      "live_bound_historical_retained": 5,
+      "unsupported_output_alternatives_removed": 4,
+      "historical_requirements_on_unanswered_turns": 42
+    },
+    "compache-2": {
+      "thread_id": "scaled-24-07",
+      "complete": false,
+      "planned_answers": 96,
+      "completed_answers": 18,
+      "unanswered_turns": 78,
+      "stop": {
+        "status": "blocked_by_admission",
+        "thread_id": "scaled-24-07",
+        "run_id": "scaled-24-07-run-019",
+        "run_index": 19,
+        "planned_answers": 96,
+        "completed_answers": 18,
+        "completed_calls": 18,
+        "counts": {
+          "answer": 18,
+          "summary": 0,
+          "ping": 0,
+          "recovery": 0
+        },
+        "telemetry": {
+          "window": "warm",
+          "action": "applied_warm",
+          "prefix_transition": "extended",
+          "tokens_estimated": 805284,
+          "removed_parts": 0,
+          "policy_hash": "ae2b872f13267570b0cd3af4ec927f2e8a6e5c9500df459bd50e7f47b6f7d676",
+          "admitted": false,
+          "reason": "protected_or_current_context_exceeds_estimated_limit"
+        },
+        "assessment": {
+          "assessable": true,
+          "missed_requirements": [],
+          "restore_alternatives": [],
+          "historical_requirements_assessed": 1,
+          "historical_requirements_retained": 1
+        },
+        "live_output_binding": {
+          "output_alternatives_removed": 0,
+          "unassessable_requirements": []
+        },
+        "model_call_sent_for_blocked_run": false
+      },
+      "calls_by_role": {
+        "answer": 18
+      },
+      "reported_provider_invocations": 19,
+      "internal_codex_invocations": 1,
+      "reported_usage": {
+        "input_tokens": 7905388,
+        "cached_input_tokens": 277504,
+        "output_tokens": 1188
+      },
+      "wall_seconds": 124.08660833101021,
+      "max_reported_input_tokens": 805291,
+      "rewrites": 0,
+      "missing_authored_requirements_before_recovery": 0,
+      "live_bound_historical_assessed": 3,
+      "live_bound_historical_retained": 3,
+      "unsupported_output_alternatives_removed": 6,
+      "historical_requirements_on_unanswered_turns": 49
+    },
+    "compache-3": {
+      "thread_id": "scaled-29-07",
+      "complete": false,
+      "planned_answers": 96,
+      "completed_answers": 16,
+      "unanswered_turns": 80,
+      "stop": {
+        "status": "blocked_by_admission",
+        "thread_id": "scaled-29-07",
+        "run_id": "scaled-29-07-run-017",
+        "run_index": 17,
+        "planned_answers": 96,
+        "completed_answers": 16,
+        "completed_calls": 16,
+        "counts": {
+          "answer": 16,
+          "summary": 0,
+          "ping": 0,
+          "recovery": 0
+        },
+        "telemetry": {
+          "window": "cold",
+          "action": "planned_cold",
+          "prefix_transition": "extended",
+          "tokens_estimated": 807650,
+          "removed_parts": 0,
+          "policy_hash": "ae2b872f13267570b0cd3af4ec927f2e8a6e5c9500df459bd50e7f47b6f7d676",
+          "admitted": false,
+          "reason": "protected_or_current_context_exceeds_estimated_limit"
+        },
+        "assessment": {
+          "assessable": true,
+          "missed_requirements": [],
+          "restore_alternatives": [],
+          "historical_requirements_assessed": 1,
+          "historical_requirements_retained": 1
+        },
+        "live_output_binding": {
+          "output_alternatives_removed": 0,
+          "unassessable_requirements": []
+        },
+        "model_call_sent_for_blocked_run": false
+      },
+      "calls_by_role": {
+        "answer": 16
+      },
+      "reported_provider_invocations": 16,
+      "internal_codex_invocations": 0,
+      "reported_usage": {
+        "input_tokens": 6902717,
+        "cached_input_tokens": 79872,
+        "output_tokens": 1242
+      },
+      "wall_seconds": 113.61962554200727,
+      "max_reported_input_tokens": 804285,
+      "rewrites": 0,
+      "missing_authored_requirements_before_recovery": 0,
+      "live_bound_historical_assessed": 4,
+      "live_bound_historical_retained": 4,
+      "unsupported_output_alternatives_removed": 3,
+      "historical_requirements_on_unanswered_turns": 52
+    }
+  },
+  "all_attempt_usage_available": false,
+  "unreported_transport_attempts": [
+    {
+      "arm": "opencode",
+      "replicate": 1,
+      "sequence": 67,
+      "run_index": 64,
+      "status": "network_timeout",
+      "reported_usage": null,
+      "model_invocations": null,
+      "wall_seconds": 900.0066176670007,
+      "raw_events_preserved": true,
+      "note": "Provider usage was not reported; do not treat this attempt or internal connection retries as zero cost."
+    },
+    {
+      "arm": "opencode",
+      "replicate": 2,
+      "sequence": 68,
+      "run_index": 65,
+      "status": "network_timeout",
+      "reported_usage": null,
+      "model_invocations": null,
+      "wall_seconds": 900.0008148340057,
+      "raw_events_preserved": true,
+      "note": "Provider usage was not reported; do not treat this attempt or internal connection retries as zero cost."
+    },
+    {
+      "arm": "opencode",
+      "replicate": 3,
+      "sequence": 67,
+      "run_index": 61,
+      "status": "network_timeout",
+      "reported_usage": null,
+      "model_invocations": null,
+      "wall_seconds": 900.0066948340027,
+      "raw_events_preserved": true,
+      "note": "Provider usage was not reported; do not treat this attempt or internal connection retries as zero cost."
+    }
+  ],
+  "matched_answer_counts_per_pair": {
+    "1": 19,
+    "2": 18,
+    "3": 16
+  },
+  "full_thread_savings_available": false,
+  "limitations": [
+    "Three distinct paired unseen-company cases, not three repeats of one conversation.",
+    "A stopped arm does not receive credit for unexecuted work. Prefix costs are diagnostic, not full-thread savings.",
+    "Provider token counts and wall time are observed; TTL costs use assumed return times and prefix reuse.",
+    "Runtime scaffolding and reported internal Codex invocations are counted. Controller/platform overhead is unavailable.",
+    "Three preserved network-timeout attempts have no reported token usage; recorded successful-call costs exclude that unknown overhead.",
+    "Internal invocation wall seconds are allocated to the final invocation of their logical call; zero entries are not measured zero latency.",
+    "Literal factual screening can reject valid paraphrases and cannot establish semantic answer quality.",
+    "Authored dependency availability is not observed causal source use; prior-output checks use each arm's actual answer."
+  ],
+  "recorded_trajectory_costs": [
+    {
+      "arm": "compache",
+      "ttl_seconds": 300,
+      "replicates": 3,
+      "complete": true,
+      "scenario_cost": 20.525915,
+      "observed_cost": 56.162747,
+      "cost_unit": "credits",
+      "answer_counts": {
+        "warm": 39,
+        "first": 3,
+        "expiry": 11,
+        "rewrite": 0
+      },
+      "answer_warm_fraction": 0.7358490566037735
+    },
+    {
+      "arm": "compache",
+      "ttl_seconds": 1800,
+      "replicates": 3,
+      "complete": true,
+      "scenario_cost": 11.970875000000003,
+      "observed_cost": 56.162747,
+      "cost_unit": "credits",
+      "answer_counts": {
+        "warm": 49,
+        "first": 3,
+        "expiry": 1,
+        "rewrite": 0
+      },
+      "answer_warm_fraction": 0.9245283018867925
+    },
+    {
+      "arm": "opencode",
+      "ttl_seconds": 300,
+      "replicates": 3,
+      "complete": true,
+      "scenario_cost": 125.31163400000001,
+      "observed_cost": 286.52597,
+      "cost_unit": "credits",
+      "answer_counts": {
+        "warm": 210,
+        "first": 2,
+        "expiry": 66,
+        "rewrite": 10
+      },
+      "answer_warm_fraction": 0.7291666666666666
+    },
+    {
+      "arm": "opencode",
+      "ttl_seconds": 1800,
+      "replicates": 3,
+      "complete": true,
+      "scenario_cost": 72.318482,
+      "observed_cost": 286.52597,
+      "cost_unit": "credits",
+      "answer_counts": {
+        "warm": 264,
+        "first": 2,
+        "expiry": 12,
+        "rewrite": 10
+      },
+      "answer_warm_fraction": 0.9166666666666666
+    }
+  ],
+  "same_completed_prefix_costs": [
+    {
+      "arm": "compache",
+      "ttl_seconds": 300,
+      "replicates": 3,
+      "complete": true,
+      "scenario_cost": 20.525915,
+      "observed_cost": 56.162747,
+      "cost_unit": "credits",
+      "answer_counts": {
+        "warm": 39,
+        "first": 3,
+        "expiry": 11,
+        "rewrite": 0
+      },
+      "answer_warm_fraction": 0.7358490566037735
+    },
+    {
+      "arm": "compache",
+      "ttl_seconds": 1800,
+      "replicates": 3,
+      "complete": true,
+      "scenario_cost": 11.970875000000003,
+      "observed_cost": 56.162747,
+      "cost_unit": "credits",
+      "answer_counts": {
+        "warm": 49,
+        "first": 3,
+        "expiry": 1,
+        "rewrite": 0
+      },
+      "answer_warm_fraction": 0.9245283018867925
+    },
+    {
+      "arm": "opencode",
+      "ttl_seconds": 300,
+      "replicates": 3,
+      "complete": true,
+      "scenario_cost": 20.493900500000002,
+      "observed_cost": 56.1428285,
+      "cost_unit": "credits",
+      "answer_counts": {
+        "warm": 40,
+        "first": 2,
+        "expiry": 11,
+        "rewrite": 0
+      },
+      "answer_warm_fraction": 0.7547169811320755
+    },
+    {
+      "arm": "opencode",
+      "ttl_seconds": 1800,
+      "replicates": 3,
+      "complete": true,
+      "scenario_cost": 11.939436500000001,
+      "observed_cost": 56.1428285,
+      "cost_unit": "credits",
+      "answer_counts": {
+        "warm": 50,
+        "first": 2,
+        "expiry": 1,
+        "rewrite": 0
+      },
+      "answer_warm_fraction": 0.9433962264150944
+    }
+  ]
+}

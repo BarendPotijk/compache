@@ -85,6 +85,11 @@ def validate_label(label, packet):
     parts = {p['part_id']: p for p in packet['request_parts']}
     output = packet['target_output'].get('text')
     question = packet['target_question'].get('text')
+    if label['status'] == 'complete':
+        if question:
+            check(bool(label['task_requirements']), 'complete assessment needs task requirements')
+        if output:
+            check(bool(label['claims']), 'complete assessment needs observed-answer claims')
     if packet['request_coverage'] != 'complete' or output is None:
         check(label['status'] != 'complete', 'missing content cannot yield complete coverage')
     if label['status'] != 'complete':
@@ -112,6 +117,11 @@ def validate_label(label, packet):
     for req in label['task_requirements']:
         exact(req['question_quote'], question, 'task/' + req['requirement_id'])
         requirement(req, 'task/' + req['requirement_id'])
+        current_alternative = any(alt['sources'] and all(s['part_id'] in parts and parts[s['part_id']]['origin_run_index'] == packet['target_run_index'] for s in alt['sources']) for alt in req['alternatives'])
+        if req['historical_context_needed'] == 'no':
+            check(current_alternative, 'task/' + req['requirement_id'] + ': no history requires a sufficient current-source alternative')
+        elif req['historical_context_needed'] == 'yes':
+            check(bool(req['alternatives']) and not current_alternative, 'task/' + req['requirement_id'] + ': history needed conflicts with sufficient alternatives')
     claim_ids = [c['claim_id'] for c in label['claims']]
     check(len(claim_ids) == len(set(claim_ids)), 'duplicate claim IDs')
     for claim in label['claims']:

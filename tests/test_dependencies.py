@@ -14,7 +14,8 @@ class DependencyTests(unittest.TestCase):
     def test_quotes_necessity_and_coverage(self):
         packet=build_packet(sample(),'r')
         req={'requirement_id':'a','description':'evidence','source_kind':'retrieval','necessity':'inferred','alternatives':[{'sources':[{'part_id':'p','quote':'Evidence'}]}],'evidence_note':'note'}
-        label={'schema_version':'compache-dependency-label-v1','thread_id':'t','target_run_id':'r','status':'complete','coverage_notes':[],'task_requirements':[], 'claims':[{'claim_id':'c','target_quote':'Answer','relation':'supported','requirements':[req]}], 'historical_dependencies':[], 'unresolved':[]}
+        task={**req,'question_quote':packet['target_question']['text'],'fulfillment':'fulfilled','historical_context_needed':'no'}
+        label={'schema_version':'compache-dependency-label-v1','thread_id':'t','target_run_id':'r','status':'complete','coverage_notes':[],'task_requirements':[task], 'claims':[{'claim_id':'c','target_quote':'Answer','relation':'supported','requirements':[req]}], 'historical_dependencies':[], 'unresolved':[]}
         self.assertEqual(validate_label(label,packet),[])
         req['alternatives'][0]['sources'][0]['quote']='invented'
         req['necessity']='tested'; packet['request_coverage']='partial'
@@ -24,3 +25,10 @@ class DependencyTests(unittest.TestCase):
         self.assertTrue(any('complete coverage' in e for e in errors))
         req['alternatives'][0]['sources'][0]['part_id']='foreign'
         self.assertTrue(any('absent, future' in e for e in validate_label(label,packet)))
+
+    def test_empty_complete_assessment_is_rejected(self):
+        p=build_packet(sample(),'r')
+        row={'schema_version':'compache-dependency-label-v1','thread_id':'t','target_run_id':'r','status':'complete','coverage_notes':[],'task_requirements':[],'claims':[],'historical_dependencies':[],'unresolved':[]}
+        errors=validate_label(row,p)
+        self.assertTrue(any('needs task' in e for e in errors))
+        self.assertTrue(any('needs observed-answer' in e for e in errors))

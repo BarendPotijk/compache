@@ -1,0 +1,1499 @@
+{
+  "schema": "compache-scaled-live-report-v1",
+  "all_arms_completed": true,
+  "fresh_runs": [
+    "compache-1",
+    "compache-2",
+    "compache-3"
+  ],
+  "reused_runs": [
+    "opencode-1",
+    "opencode-2",
+    "opencode-3"
+  ],
+  "planned_answers": 576,
+  "completed_answers": 576,
+  "all_attempt_usage_available": false,
+  "unreported_transport_attempts": [
+    {
+      "arm": "opencode",
+      "replicate": 1,
+      "sequence": 67,
+      "run_index": 64,
+      "status": "network_timeout",
+      "reported_usage": null,
+      "model_invocations": null,
+      "wall_seconds": 900.0066176670007,
+      "raw_events_preserved": true,
+      "note": "Provider usage was not reported; do not treat this attempt or internal connection retries as zero cost."
+    },
+    {
+      "arm": "opencode",
+      "replicate": 2,
+      "sequence": 68,
+      "run_index": 65,
+      "status": "network_timeout",
+      "reported_usage": null,
+      "model_invocations": null,
+      "wall_seconds": 900.0008148340057,
+      "raw_events_preserved": true,
+      "note": "Provider usage was not reported; do not treat this attempt or internal connection retries as zero cost."
+    },
+    {
+      "arm": "opencode",
+      "replicate": 3,
+      "sequence": 67,
+      "run_index": 61,
+      "status": "network_timeout",
+      "reported_usage": null,
+      "model_invocations": null,
+      "wall_seconds": 900.0066948340027,
+      "raw_events_preserved": true,
+      "note": "Provider usage was not reported; do not treat this attempt or internal connection retries as zero cost."
+    }
+  ],
+  "runs": {
+    "opencode-1": {
+      "thread_id": "scaled-26-07",
+      "complete": true,
+      "planned_answers": 96,
+      "completed_answers": 96,
+      "unanswered_turns": 0,
+      "stop": null,
+      "calls_by_role": {
+        "answer": 96,
+        "summary": 4
+      },
+      "reported_provider_invocations": 105,
+      "internal_codex_invocations": 5,
+      "reported_usage": {
+        "input_tokens": 39749411,
+        "cached_input_tokens": 2046464,
+        "output_tokens": 9537
+      },
+      "token_calibration_audit": null,
+      "wall_seconds": 676.8284506239797,
+      "max_reported_input_tokens": 799028,
+      "rewrites": 0,
+      "deterministic_recalled_parts": null,
+      "missing_authored_requirements_before_recovery": null,
+      "live_bound_historical_assessed": null,
+      "live_bound_historical_retained": null,
+      "unsupported_output_alternatives_removed": null,
+      "historical_requirements_on_unanswered_turns": 0
+    },
+    "opencode-2": {
+      "thread_id": "scaled-24-07",
+      "complete": true,
+      "planned_answers": 96,
+      "completed_answers": 96,
+      "unanswered_turns": 0,
+      "stop": null,
+      "calls_by_role": {
+        "answer": 96,
+        "summary": 5
+      },
+      "reported_provider_invocations": 110,
+      "internal_codex_invocations": 9,
+      "reported_usage": {
+        "input_tokens": 40794116,
+        "cached_input_tokens": 2393600,
+        "output_tokens": 11429
+      },
+      "token_calibration_audit": null,
+      "wall_seconds": 726.6871167509453,
+      "max_reported_input_tokens": 806634,
+      "rewrites": 0,
+      "deterministic_recalled_parts": null,
+      "missing_authored_requirements_before_recovery": null,
+      "live_bound_historical_assessed": null,
+      "live_bound_historical_retained": null,
+      "unsupported_output_alternatives_removed": null,
+      "historical_requirements_on_unanswered_turns": 0
+    },
+    "opencode-3": {
+      "thread_id": "scaled-29-07",
+      "complete": true,
+      "planned_answers": 96,
+      "completed_answers": 96,
+      "unanswered_turns": 0,
+      "stop": null,
+      "calls_by_role": {
+        "answer": 96,
+        "summary": 5,
+        "recovery": 4
+      },
+      "reported_provider_invocations": 113,
+      "internal_codex_invocations": 8,
+      "reported_usage": {
+        "input_tokens": 39752311,
+        "cached_input_tokens": 2052736,
+        "output_tokens": 10648
+      },
+      "token_calibration_audit": null,
+      "wall_seconds": 718.0430459599957,
+      "max_reported_input_tokens": 805927,
+      "rewrites": 0,
+      "deterministic_recalled_parts": null,
+      "missing_authored_requirements_before_recovery": null,
+      "live_bound_historical_assessed": null,
+      "live_bound_historical_retained": null,
+      "unsupported_output_alternatives_removed": null,
+      "historical_requirements_on_unanswered_turns": 0
+    },
+    "compache-1": {
+      "thread_id": "scaled-26-07",
+      "complete": true,
+      "planned_answers": 96,
+      "completed_answers": 96,
+      "unanswered_turns": 0,
+      "stop": null,
+      "calls_by_role": {
+        "answer": 96,
+        "ping": 8,
+        "recovery": 7
+      },
+      "reported_provider_invocations": 138,
+      "internal_codex_invocations": 27,
+      "reported_usage": {
+        "input_tokens": 29295507,
+        "cached_input_tokens": 5553024,
+        "output_tokens": 8899
+      },
+      "token_calibration_audit": {
+        "calls_audited": 111,
+        "state": {
+          "schema_version": "compache-token-calibration-v1",
+          "fixed_overhead": 16000,
+          "safety_margin": {
+            "numerator": 1,
+            "denominator": 10
+          },
+          "models": {
+            "gpt-6-luna": {
+              "ratio_numerator": 52543,
+              "ratio_denominator": 47517,
+              "observations": 111
+            }
+          }
+        },
+        "underestimated_calls": 0,
+        "minimum_estimate_minus_reported_input": 8714,
+        "scope": "Each logical request estimate versus its final reported provider invocation; internal invocations counted separately in costs."
+      },
+      "wall_seconds": 508.95681267391774,
+      "max_reported_input_tokens": 709978,
+      "rewrites": 36,
+      "deterministic_recalled_parts": 72,
+      "missing_authored_requirements_before_recovery": 0,
+      "live_bound_historical_assessed": 47,
+      "live_bound_historical_retained": 47,
+      "unsupported_output_alternatives_removed": 25,
+      "historical_requirements_on_unanswered_turns": 0
+    },
+    "compache-2": {
+      "thread_id": "scaled-24-07",
+      "complete": true,
+      "planned_answers": 96,
+      "completed_answers": 96,
+      "unanswered_turns": 0,
+      "stop": null,
+      "calls_by_role": {
+        "answer": 96,
+        "ping": 3,
+        "recovery": 3
+      },
+      "reported_provider_invocations": 120,
+      "internal_codex_invocations": 18,
+      "reported_usage": {
+        "input_tokens": 25674044,
+        "cached_input_tokens": 3809920,
+        "output_tokens": 8951
+      },
+      "token_calibration_audit": {
+        "calls_audited": 102,
+        "state": {
+          "schema_version": "compache-token-calibration-v1",
+          "fixed_overhead": 16000,
+          "safety_margin": {
+            "numerator": 1,
+            "denominator": 10
+          },
+          "models": {
+            "gpt-6-luna": {
+              "ratio_numerator": 108769,
+              "ratio_denominator": 99474,
+              "observations": 102
+            }
+          }
+        },
+        "underestimated_calls": 0,
+        "minimum_estimate_minus_reported_input": 8667,
+        "scope": "Each logical request estimate versus its final reported provider invocation; internal invocations counted separately in costs."
+      },
+      "wall_seconds": 476.12762879009824,
+      "max_reported_input_tokens": 471896,
+      "rewrites": 29,
+      "deterministic_recalled_parts": 55,
+      "missing_authored_requirements_before_recovery": 0,
+      "live_bound_historical_assessed": 52,
+      "live_bound_historical_retained": 52,
+      "unsupported_output_alternatives_removed": 32,
+      "historical_requirements_on_unanswered_turns": 0
+    },
+    "compache-3": {
+      "thread_id": "scaled-29-07",
+      "complete": true,
+      "planned_answers": 96,
+      "completed_answers": 96,
+      "unanswered_turns": 0,
+      "stop": null,
+      "calls_by_role": {
+        "answer": 96,
+        "recovery": 1,
+        "ping": 2
+      },
+      "reported_provider_invocations": 107,
+      "internal_codex_invocations": 8,
+      "reported_usage": {
+        "input_tokens": 20996496,
+        "cached_input_tokens": 1703552,
+        "output_tokens": 7031
+      },
+      "token_calibration_audit": {
+        "calls_audited": 99,
+        "state": {
+          "schema_version": "compache-token-calibration-v1",
+          "fixed_overhead": 16000,
+          "safety_margin": {
+            "numerator": 1,
+            "denominator": 10
+          },
+          "models": {
+            "gpt-6-luna": {
+              "ratio_numerator": 116645,
+              "ratio_denominator": 107681,
+              "observations": 99
+            }
+          }
+        },
+        "underestimated_calls": 0,
+        "minimum_estimate_minus_reported_input": 8265,
+        "scope": "Each logical request estimate versus its final reported provider invocation; internal invocations counted separately in costs."
+      },
+      "wall_seconds": 471.96771670799353,
+      "max_reported_input_tokens": 368250,
+      "rewrites": 33,
+      "deterministic_recalled_parts": 42,
+      "missing_authored_requirements_before_recovery": 0,
+      "live_bound_historical_assessed": 56,
+      "live_bound_historical_retained": 56,
+      "unsupported_output_alternatives_removed": 34,
+      "historical_requirements_on_unanswered_turns": 0
+    }
+  },
+  "recorded_trajectory_costs": {
+    "replicates": [
+      {
+        "arm": "compache",
+        "replicate": 1,
+        "ttl_seconds": 300,
+        "complete": true,
+        "scenario_cost": 29.957333000000006,
+        "observed_cost": 60.855701000000025,
+        "cost_unit": "credits",
+        "answer_counts": {
+          "warm": 68,
+          "first": 1,
+          "expiry": 1,
+          "rewrite": 26
+        },
+        "answer_warm_fraction": 0.7083333333333334,
+        "by_role": {
+          "answer": {
+            "scenario_cost": 23.01868350000001,
+            "observed_cost": 45.61631550000001,
+            "complete": true
+          },
+          "codex_overhead": {
+            "scenario_cost": 6.218163,
+            "observed_cost": 10.296243,
+            "complete": true
+          },
+          "ping": {
+            "scenario_cost": 0.33623649999999994,
+            "observed_cost": 3.1940605,
+            "complete": true
+          },
+          "recovery": {
+            "scenario_cost": 0.38425,
+            "observed_cost": 1.749082,
+            "complete": true
+          },
+          "summary": {
+            "scenario_cost": 0.0,
+            "observed_cost": 0.0,
+            "complete": true
+          }
+        }
+      },
+      {
+        "arm": "compache",
+        "replicate": 1,
+        "ttl_seconds": 1800,
+        "complete": true,
+        "scenario_cost": 29.676821000000004,
+        "observed_cost": 60.855701000000025,
+        "cost_unit": "credits",
+        "answer_counts": {
+          "warm": 69,
+          "first": 1,
+          "expiry": 0,
+          "rewrite": 26
+        },
+        "answer_warm_fraction": 0.71875,
+        "by_role": {
+          "answer": {
+            "scenario_cost": 22.738171500000007,
+            "observed_cost": 45.61631550000001,
+            "complete": true
+          },
+          "codex_overhead": {
+            "scenario_cost": 6.218163,
+            "observed_cost": 10.296243,
+            "complete": true
+          },
+          "ping": {
+            "scenario_cost": 0.33623649999999994,
+            "observed_cost": 3.1940605,
+            "complete": true
+          },
+          "recovery": {
+            "scenario_cost": 0.38425,
+            "observed_cost": 1.749082,
+            "complete": true
+          },
+          "summary": {
+            "scenario_cost": 0.0,
+            "observed_cost": 0.0,
+            "complete": true
+          }
+        }
+      },
+      {
+        "arm": "compache",
+        "replicate": 2,
+        "ttl_seconds": 300,
+        "complete": true,
+        "scenario_cost": 25.79082149999999,
+        "observed_cost": 55.7246775,
+        "cost_unit": "credits",
+        "answer_counts": {
+          "warm": 73,
+          "first": 1,
+          "expiry": 1,
+          "rewrite": 21
+        },
+        "answer_warm_fraction": 0.7604166666666666,
+        "by_role": {
+          "answer": {
+            "scenario_cost": 21.238727499999992,
+            "observed_cost": 45.57069550000002,
+            "complete": true
+          },
+          "codex_overhead": {
+            "scenario_cost": 4.2367004999999995,
+            "observed_cost": 8.117500499999998,
+            "complete": true
+          },
+          "ping": {
+            "scenario_cost": 0.1006415,
+            "observed_cost": 0.9424655000000001,
+            "complete": true
+          },
+          "recovery": {
+            "scenario_cost": 0.214752,
+            "observed_cost": 1.094016,
+            "complete": true
+          },
+          "summary": {
+            "scenario_cost": 0.0,
+            "observed_cost": 0.0,
+            "complete": true
+          }
+        }
+      },
+      {
+        "arm": "compache",
+        "replicate": 2,
+        "ttl_seconds": 1800,
+        "complete": true,
+        "scenario_cost": 25.527589499999994,
+        "observed_cost": 55.7246775,
+        "cost_unit": "credits",
+        "answer_counts": {
+          "warm": 74,
+          "first": 1,
+          "expiry": 0,
+          "rewrite": 21
+        },
+        "answer_warm_fraction": 0.7708333333333334,
+        "by_role": {
+          "answer": {
+            "scenario_cost": 20.97549549999999,
+            "observed_cost": 45.57069550000002,
+            "complete": true
+          },
+          "codex_overhead": {
+            "scenario_cost": 4.2367004999999995,
+            "observed_cost": 8.117500499999998,
+            "complete": true
+          },
+          "ping": {
+            "scenario_cost": 0.1006415,
+            "observed_cost": 0.9424655000000001,
+            "complete": true
+          },
+          "recovery": {
+            "scenario_cost": 0.214752,
+            "observed_cost": 1.094016,
+            "complete": true
+          },
+          "summary": {
+            "scenario_cost": 0.0,
+            "observed_cost": 0.0,
+            "complete": true
+          }
+        }
+      },
+      {
+        "arm": "compache",
+        "replicate": 3,
+        "ttl_seconds": 300,
+        "complete": true,
+        "scenario_cost": 24.8438635,
+        "observed_cost": 48.746135499999994,
+        "cost_unit": "credits",
+        "answer_counts": {
+          "warm": 64,
+          "first": 1,
+          "expiry": 1,
+          "rewrite": 30
+        },
+        "answer_warm_fraction": 0.6666666666666666,
+        "by_role": {
+          "answer": {
+            "scenario_cost": 23.218126500000004,
+            "observed_cost": 45.3751185,
+            "complete": true
+          },
+          "codex_overhead": {
+            "scenario_cost": 1.4863245000000003,
+            "observed_cost": 2.3307405,
+            "complete": true
+          },
+          "ping": {
+            "scenario_cost": 0.10359950000000001,
+            "observed_cost": 1.0044635,
+            "complete": true
+          },
+          "recovery": {
+            "scenario_cost": 0.035813,
+            "observed_cost": 0.035813,
+            "complete": true
+          },
+          "summary": {
+            "scenario_cost": 0.0,
+            "observed_cost": 0.0,
+            "complete": true
+          }
+        }
+      },
+      {
+        "arm": "compache",
+        "replicate": 3,
+        "ttl_seconds": 1800,
+        "complete": true,
+        "scenario_cost": 24.599639500000002,
+        "observed_cost": 48.746135499999994,
+        "cost_unit": "credits",
+        "answer_counts": {
+          "warm": 65,
+          "first": 1,
+          "expiry": 0,
+          "rewrite": 30
+        },
+        "answer_warm_fraction": 0.6770833333333334,
+        "by_role": {
+          "answer": {
+            "scenario_cost": 22.973902500000005,
+            "observed_cost": 45.3751185,
+            "complete": true
+          },
+          "codex_overhead": {
+            "scenario_cost": 1.4863245000000003,
+            "observed_cost": 2.3307405,
+            "complete": true
+          },
+          "ping": {
+            "scenario_cost": 0.10359950000000001,
+            "observed_cost": 1.0044635,
+            "complete": true
+          },
+          "recovery": {
+            "scenario_cost": 0.035813,
+            "observed_cost": 0.035813,
+            "complete": true
+          },
+          "summary": {
+            "scenario_cost": 0.0,
+            "observed_cost": 0.0,
+            "complete": true
+          }
+        }
+      },
+      {
+        "arm": "opencode",
+        "replicate": 1,
+        "ttl_seconds": 300,
+        "complete": true,
+        "scenario_cost": 43.305380000000014,
+        "observed_cost": 94.88819600000005,
+        "cost_unit": "credits",
+        "answer_counts": {
+          "warm": 64,
+          "first": 1,
+          "expiry": 27,
+          "rewrite": 4
+        },
+        "answer_warm_fraction": 0.6666666666666666,
+        "by_role": {
+          "answer": {
+            "scenario_cost": 41.27924550000001,
+            "observed_cost": 92.06775750000006,
+            "complete": true
+          },
+          "codex_overhead": {
+            "scenario_cost": 1.812412,
+            "observed_cost": 2.662012,
+            "complete": true
+          },
+          "ping": {
+            "scenario_cost": 0.0,
+            "observed_cost": 0.0,
+            "complete": true
+          },
+          "recovery": {
+            "scenario_cost": 0.0,
+            "observed_cost": 0.0,
+            "complete": true
+          },
+          "summary": {
+            "scenario_cost": 0.21372249999999998,
+            "observed_cost": 0.15842650000000003,
+            "complete": true
+          }
+        }
+      },
+      {
+        "arm": "opencode",
+        "replicate": 1,
+        "ttl_seconds": 1800,
+        "complete": true,
+        "scenario_cost": 20.138948,
+        "observed_cost": 94.88819600000005,
+        "cost_unit": "credits",
+        "answer_counts": {
+          "warm": 89,
+          "first": 1,
+          "expiry": 2,
+          "rewrite": 4
+        },
+        "answer_warm_fraction": 0.9270833333333334,
+        "by_role": {
+          "answer": {
+            "scenario_cost": 19.1617095,
+            "observed_cost": 92.06775750000006,
+            "complete": true
+          },
+          "codex_overhead": {
+            "scenario_cost": 0.763516,
+            "observed_cost": 2.662012,
+            "complete": true
+          },
+          "ping": {
+            "scenario_cost": 0.0,
+            "observed_cost": 0.0,
+            "complete": true
+          },
+          "recovery": {
+            "scenario_cost": 0.0,
+            "observed_cost": 0.0,
+            "complete": true
+          },
+          "summary": {
+            "scenario_cost": 0.21372249999999998,
+            "observed_cost": 0.15842650000000003,
+            "complete": true
+          }
+        }
+      },
+      {
+        "arm": "opencode",
+        "replicate": 2,
+        "ttl_seconds": 300,
+        "complete": true,
+        "scenario_cost": 38.3897205,
+        "observed_cost": 96.74255249999996,
+        "cost_unit": "credits",
+        "answer_counts": {
+          "warm": 76,
+          "first": 1,
+          "expiry": 17,
+          "rewrite": 2
+        },
+        "answer_warm_fraction": 0.7916666666666666,
+        "by_role": {
+          "answer": {
+            "scenario_cost": 36.53842250000001,
+            "observed_cost": 92.58869449999997,
+            "complete": true
+          },
+          "codex_overhead": {
+            "scenario_cost": 1.5677105,
+            "observed_cost": 3.9393905000000005,
+            "complete": true
+          },
+          "ping": {
+            "scenario_cost": 0.0,
+            "observed_cost": 0.0,
+            "complete": true
+          },
+          "recovery": {
+            "scenario_cost": 0.0,
+            "observed_cost": 0.0,
+            "complete": true
+          },
+          "summary": {
+            "scenario_cost": 0.2835875,
+            "observed_cost": 0.2144675,
+            "complete": true
+          }
+        }
+      },
+      {
+        "arm": "opencode",
+        "replicate": 2,
+        "ttl_seconds": 1800,
+        "complete": true,
+        "scenario_cost": 23.438200500000004,
+        "observed_cost": 96.74255249999996,
+        "cost_unit": "credits",
+        "answer_counts": {
+          "warm": 90,
+          "first": 1,
+          "expiry": 3,
+          "rewrite": 2
+        },
+        "answer_warm_fraction": 0.9375,
+        "by_role": {
+          "answer": {
+            "scenario_cost": 22.2061025,
+            "observed_cost": 92.58869449999997,
+            "complete": true
+          },
+          "codex_overhead": {
+            "scenario_cost": 0.9485105,
+            "observed_cost": 3.9393905000000005,
+            "complete": true
+          },
+          "ping": {
+            "scenario_cost": 0.0,
+            "observed_cost": 0.0,
+            "complete": true
+          },
+          "recovery": {
+            "scenario_cost": 0.0,
+            "observed_cost": 0.0,
+            "complete": true
+          },
+          "summary": {
+            "scenario_cost": 0.2835875,
+            "observed_cost": 0.2144675,
+            "complete": true
+          }
+        }
+      },
+      {
+        "arm": "opencode",
+        "replicate": 3,
+        "ttl_seconds": 300,
+        "complete": true,
+        "scenario_cost": 43.616533499999996,
+        "observed_cost": 94.89522149999998,
+        "cost_unit": "credits",
+        "answer_counts": {
+          "warm": 70,
+          "first": 0,
+          "expiry": 22,
+          "rewrite": 4
+        },
+        "answer_warm_fraction": 0.7291666666666666,
+        "by_role": {
+          "answer": {
+            "scenario_cost": 41.731269999999995,
+            "observed_cost": 91.17943,
+            "complete": true
+          },
+          "codex_overhead": {
+            "scenario_cost": 1.6031805,
+            "observed_cost": 3.3611324999999996,
+            "complete": true
+          },
+          "ping": {
+            "scenario_cost": 0.0,
+            "observed_cost": 0.0,
+            "complete": true
+          },
+          "recovery": {
+            "scenario_cost": 0.027927999999999998,
+            "observed_cost": 0.169624,
+            "complete": true
+          },
+          "summary": {
+            "scenario_cost": 0.254155,
+            "observed_cost": 0.185035,
+            "complete": true
+          }
+        }
+      },
+      {
+        "arm": "opencode",
+        "replicate": 3,
+        "ttl_seconds": 1800,
+        "complete": true,
+        "scenario_cost": 28.741333500000003,
+        "observed_cost": 94.89522149999998,
+        "cost_unit": "credits",
+        "answer_counts": {
+          "warm": 85,
+          "first": 0,
+          "expiry": 7,
+          "rewrite": 4
+        },
+        "answer_warm_fraction": 0.8854166666666666,
+        "by_role": {
+          "answer": {
+            "scenario_cost": 27.100870000000004,
+            "observed_cost": 91.17943,
+            "complete": true
+          },
+          "codex_overhead": {
+            "scenario_cost": 1.3583805,
+            "observed_cost": 3.3611324999999996,
+            "complete": true
+          },
+          "ping": {
+            "scenario_cost": 0.0,
+            "observed_cost": 0.0,
+            "complete": true
+          },
+          "recovery": {
+            "scenario_cost": 0.027927999999999998,
+            "observed_cost": 0.169624,
+            "complete": true
+          },
+          "summary": {
+            "scenario_cost": 0.254155,
+            "observed_cost": 0.185035,
+            "complete": true
+          }
+        }
+      }
+    ],
+    "aggregates": [
+      {
+        "arm": "compache",
+        "ttl_seconds": 300,
+        "replicates": 3,
+        "complete": true,
+        "scenario_cost": 80.592018,
+        "observed_cost": 165.32651400000003,
+        "cost_unit": "credits",
+        "answer_counts": {
+          "warm": 205,
+          "first": 3,
+          "expiry": 3,
+          "rewrite": 77
+        },
+        "answer_warm_fraction": 0.7118055555555556
+      },
+      {
+        "arm": "compache",
+        "ttl_seconds": 1800,
+        "replicates": 3,
+        "complete": true,
+        "scenario_cost": 79.80405,
+        "observed_cost": 165.32651400000003,
+        "cost_unit": "credits",
+        "answer_counts": {
+          "warm": 208,
+          "first": 3,
+          "expiry": 0,
+          "rewrite": 77
+        },
+        "answer_warm_fraction": 0.7222222222222222
+      },
+      {
+        "arm": "opencode",
+        "ttl_seconds": 300,
+        "replicates": 3,
+        "complete": true,
+        "scenario_cost": 125.31163400000001,
+        "observed_cost": 286.52597,
+        "cost_unit": "credits",
+        "answer_counts": {
+          "warm": 210,
+          "first": 2,
+          "expiry": 66,
+          "rewrite": 10
+        },
+        "answer_warm_fraction": 0.7291666666666666
+      },
+      {
+        "arm": "opencode",
+        "ttl_seconds": 1800,
+        "replicates": 3,
+        "complete": true,
+        "scenario_cost": 72.318482,
+        "observed_cost": 286.52597,
+        "cost_unit": "credits",
+        "answer_counts": {
+          "warm": 264,
+          "first": 2,
+          "expiry": 12,
+          "rewrite": 10
+        },
+        "answer_warm_fraction": 0.9166666666666666
+      }
+    ],
+    "assumptions": {
+      "model": "intended ordered message-boundary prefix projection; not native snapshot cache or exact billing",
+      "capacity": "whole prior observed input minus 128 guard tokens, rounded down to 128; guard may not cover harness differences",
+      "cadence": "logical_at is assumed return timing, not proof of physical cache state",
+      "trajectory": "identical observed calls and token counts for all TTLs; no policy reoptimization or quality claim",
+      "recovery": "included",
+      "pricing": "Codex credits per million: input 2.5, cached input 0.25, output 12.5; no cache-write charge"
+    }
+  },
+  "same_completed_prefix_costs": {
+    "replicates": [
+      {
+        "arm": "compache",
+        "replicate": 1,
+        "ttl_seconds": 300,
+        "complete": true,
+        "scenario_cost": 29.957333000000006,
+        "observed_cost": 60.855701000000025,
+        "cost_unit": "credits",
+        "answer_counts": {
+          "warm": 68,
+          "first": 1,
+          "expiry": 1,
+          "rewrite": 26
+        },
+        "answer_warm_fraction": 0.7083333333333334,
+        "by_role": {
+          "answer": {
+            "scenario_cost": 23.01868350000001,
+            "observed_cost": 45.61631550000001,
+            "complete": true
+          },
+          "codex_overhead": {
+            "scenario_cost": 6.218163,
+            "observed_cost": 10.296243,
+            "complete": true
+          },
+          "ping": {
+            "scenario_cost": 0.33623649999999994,
+            "observed_cost": 3.1940605,
+            "complete": true
+          },
+          "recovery": {
+            "scenario_cost": 0.38425,
+            "observed_cost": 1.749082,
+            "complete": true
+          },
+          "summary": {
+            "scenario_cost": 0.0,
+            "observed_cost": 0.0,
+            "complete": true
+          }
+        }
+      },
+      {
+        "arm": "compache",
+        "replicate": 1,
+        "ttl_seconds": 1800,
+        "complete": true,
+        "scenario_cost": 29.676821000000004,
+        "observed_cost": 60.855701000000025,
+        "cost_unit": "credits",
+        "answer_counts": {
+          "warm": 69,
+          "first": 1,
+          "expiry": 0,
+          "rewrite": 26
+        },
+        "answer_warm_fraction": 0.71875,
+        "by_role": {
+          "answer": {
+            "scenario_cost": 22.738171500000007,
+            "observed_cost": 45.61631550000001,
+            "complete": true
+          },
+          "codex_overhead": {
+            "scenario_cost": 6.218163,
+            "observed_cost": 10.296243,
+            "complete": true
+          },
+          "ping": {
+            "scenario_cost": 0.33623649999999994,
+            "observed_cost": 3.1940605,
+            "complete": true
+          },
+          "recovery": {
+            "scenario_cost": 0.38425,
+            "observed_cost": 1.749082,
+            "complete": true
+          },
+          "summary": {
+            "scenario_cost": 0.0,
+            "observed_cost": 0.0,
+            "complete": true
+          }
+        }
+      },
+      {
+        "arm": "compache",
+        "replicate": 2,
+        "ttl_seconds": 300,
+        "complete": true,
+        "scenario_cost": 25.79082149999999,
+        "observed_cost": 55.7246775,
+        "cost_unit": "credits",
+        "answer_counts": {
+          "warm": 73,
+          "first": 1,
+          "expiry": 1,
+          "rewrite": 21
+        },
+        "answer_warm_fraction": 0.7604166666666666,
+        "by_role": {
+          "answer": {
+            "scenario_cost": 21.238727499999992,
+            "observed_cost": 45.57069550000002,
+            "complete": true
+          },
+          "codex_overhead": {
+            "scenario_cost": 4.2367004999999995,
+            "observed_cost": 8.117500499999998,
+            "complete": true
+          },
+          "ping": {
+            "scenario_cost": 0.1006415,
+            "observed_cost": 0.9424655000000001,
+            "complete": true
+          },
+          "recovery": {
+            "scenario_cost": 0.214752,
+            "observed_cost": 1.094016,
+            "complete": true
+          },
+          "summary": {
+            "scenario_cost": 0.0,
+            "observed_cost": 0.0,
+            "complete": true
+          }
+        }
+      },
+      {
+        "arm": "compache",
+        "replicate": 2,
+        "ttl_seconds": 1800,
+        "complete": true,
+        "scenario_cost": 25.527589499999994,
+        "observed_cost": 55.7246775,
+        "cost_unit": "credits",
+        "answer_counts": {
+          "warm": 74,
+          "first": 1,
+          "expiry": 0,
+          "rewrite": 21
+        },
+        "answer_warm_fraction": 0.7708333333333334,
+        "by_role": {
+          "answer": {
+            "scenario_cost": 20.97549549999999,
+            "observed_cost": 45.57069550000002,
+            "complete": true
+          },
+          "codex_overhead": {
+            "scenario_cost": 4.2367004999999995,
+            "observed_cost": 8.117500499999998,
+            "complete": true
+          },
+          "ping": {
+            "scenario_cost": 0.1006415,
+            "observed_cost": 0.9424655000000001,
+            "complete": true
+          },
+          "recovery": {
+            "scenario_cost": 0.214752,
+            "observed_cost": 1.094016,
+            "complete": true
+          },
+          "summary": {
+            "scenario_cost": 0.0,
+            "observed_cost": 0.0,
+            "complete": true
+          }
+        }
+      },
+      {
+        "arm": "compache",
+        "replicate": 3,
+        "ttl_seconds": 300,
+        "complete": true,
+        "scenario_cost": 24.8438635,
+        "observed_cost": 48.746135499999994,
+        "cost_unit": "credits",
+        "answer_counts": {
+          "warm": 64,
+          "first": 1,
+          "expiry": 1,
+          "rewrite": 30
+        },
+        "answer_warm_fraction": 0.6666666666666666,
+        "by_role": {
+          "answer": {
+            "scenario_cost": 23.218126500000004,
+            "observed_cost": 45.3751185,
+            "complete": true
+          },
+          "codex_overhead": {
+            "scenario_cost": 1.4863245000000003,
+            "observed_cost": 2.3307405,
+            "complete": true
+          },
+          "ping": {
+            "scenario_cost": 0.10359950000000001,
+            "observed_cost": 1.0044635,
+            "complete": true
+          },
+          "recovery": {
+            "scenario_cost": 0.035813,
+            "observed_cost": 0.035813,
+            "complete": true
+          },
+          "summary": {
+            "scenario_cost": 0.0,
+            "observed_cost": 0.0,
+            "complete": true
+          }
+        }
+      },
+      {
+        "arm": "compache",
+        "replicate": 3,
+        "ttl_seconds": 1800,
+        "complete": true,
+        "scenario_cost": 24.599639500000002,
+        "observed_cost": 48.746135499999994,
+        "cost_unit": "credits",
+        "answer_counts": {
+          "warm": 65,
+          "first": 1,
+          "expiry": 0,
+          "rewrite": 30
+        },
+        "answer_warm_fraction": 0.6770833333333334,
+        "by_role": {
+          "answer": {
+            "scenario_cost": 22.973902500000005,
+            "observed_cost": 45.3751185,
+            "complete": true
+          },
+          "codex_overhead": {
+            "scenario_cost": 1.4863245000000003,
+            "observed_cost": 2.3307405,
+            "complete": true
+          },
+          "ping": {
+            "scenario_cost": 0.10359950000000001,
+            "observed_cost": 1.0044635,
+            "complete": true
+          },
+          "recovery": {
+            "scenario_cost": 0.035813,
+            "observed_cost": 0.035813,
+            "complete": true
+          },
+          "summary": {
+            "scenario_cost": 0.0,
+            "observed_cost": 0.0,
+            "complete": true
+          }
+        }
+      },
+      {
+        "arm": "opencode",
+        "replicate": 1,
+        "ttl_seconds": 300,
+        "complete": true,
+        "scenario_cost": 43.305380000000014,
+        "observed_cost": 94.88819600000005,
+        "cost_unit": "credits",
+        "answer_counts": {
+          "warm": 64,
+          "first": 1,
+          "expiry": 27,
+          "rewrite": 4
+        },
+        "answer_warm_fraction": 0.6666666666666666,
+        "by_role": {
+          "answer": {
+            "scenario_cost": 41.27924550000001,
+            "observed_cost": 92.06775750000006,
+            "complete": true
+          },
+          "codex_overhead": {
+            "scenario_cost": 1.812412,
+            "observed_cost": 2.662012,
+            "complete": true
+          },
+          "ping": {
+            "scenario_cost": 0.0,
+            "observed_cost": 0.0,
+            "complete": true
+          },
+          "recovery": {
+            "scenario_cost": 0.0,
+            "observed_cost": 0.0,
+            "complete": true
+          },
+          "summary": {
+            "scenario_cost": 0.21372249999999998,
+            "observed_cost": 0.15842650000000003,
+            "complete": true
+          }
+        }
+      },
+      {
+        "arm": "opencode",
+        "replicate": 1,
+        "ttl_seconds": 1800,
+        "complete": true,
+        "scenario_cost": 20.138948,
+        "observed_cost": 94.88819600000005,
+        "cost_unit": "credits",
+        "answer_counts": {
+          "warm": 89,
+          "first": 1,
+          "expiry": 2,
+          "rewrite": 4
+        },
+        "answer_warm_fraction": 0.9270833333333334,
+        "by_role": {
+          "answer": {
+            "scenario_cost": 19.1617095,
+            "observed_cost": 92.06775750000006,
+            "complete": true
+          },
+          "codex_overhead": {
+            "scenario_cost": 0.763516,
+            "observed_cost": 2.662012,
+            "complete": true
+          },
+          "ping": {
+            "scenario_cost": 0.0,
+            "observed_cost": 0.0,
+            "complete": true
+          },
+          "recovery": {
+            "scenario_cost": 0.0,
+            "observed_cost": 0.0,
+            "complete": true
+          },
+          "summary": {
+            "scenario_cost": 0.21372249999999998,
+            "observed_cost": 0.15842650000000003,
+            "complete": true
+          }
+        }
+      },
+      {
+        "arm": "opencode",
+        "replicate": 2,
+        "ttl_seconds": 300,
+        "complete": true,
+        "scenario_cost": 38.3897205,
+        "observed_cost": 96.74255249999996,
+        "cost_unit": "credits",
+        "answer_counts": {
+          "warm": 76,
+          "first": 1,
+          "expiry": 17,
+          "rewrite": 2
+        },
+        "answer_warm_fraction": 0.7916666666666666,
+        "by_role": {
+          "answer": {
+            "scenario_cost": 36.53842250000001,
+            "observed_cost": 92.58869449999997,
+            "complete": true
+          },
+          "codex_overhead": {
+            "scenario_cost": 1.5677105,
+            "observed_cost": 3.9393905000000005,
+            "complete": true
+          },
+          "ping": {
+            "scenario_cost": 0.0,
+            "observed_cost": 0.0,
+            "complete": true
+          },
+          "recovery": {
+            "scenario_cost": 0.0,
+            "observed_cost": 0.0,
+            "complete": true
+          },
+          "summary": {
+            "scenario_cost": 0.2835875,
+            "observed_cost": 0.2144675,
+            "complete": true
+          }
+        }
+      },
+      {
+        "arm": "opencode",
+        "replicate": 2,
+        "ttl_seconds": 1800,
+        "complete": true,
+        "scenario_cost": 23.438200500000004,
+        "observed_cost": 96.74255249999996,
+        "cost_unit": "credits",
+        "answer_counts": {
+          "warm": 90,
+          "first": 1,
+          "expiry": 3,
+          "rewrite": 2
+        },
+        "answer_warm_fraction": 0.9375,
+        "by_role": {
+          "answer": {
+            "scenario_cost": 22.2061025,
+            "observed_cost": 92.58869449999997,
+            "complete": true
+          },
+          "codex_overhead": {
+            "scenario_cost": 0.9485105,
+            "observed_cost": 3.9393905000000005,
+            "complete": true
+          },
+          "ping": {
+            "scenario_cost": 0.0,
+            "observed_cost": 0.0,
+            "complete": true
+          },
+          "recovery": {
+            "scenario_cost": 0.0,
+            "observed_cost": 0.0,
+            "complete": true
+          },
+          "summary": {
+            "scenario_cost": 0.2835875,
+            "observed_cost": 0.2144675,
+            "complete": true
+          }
+        }
+      },
+      {
+        "arm": "opencode",
+        "replicate": 3,
+        "ttl_seconds": 300,
+        "complete": true,
+        "scenario_cost": 43.616533499999996,
+        "observed_cost": 94.89522149999998,
+        "cost_unit": "credits",
+        "answer_counts": {
+          "warm": 70,
+          "first": 0,
+          "expiry": 22,
+          "rewrite": 4
+        },
+        "answer_warm_fraction": 0.7291666666666666,
+        "by_role": {
+          "answer": {
+            "scenario_cost": 41.731269999999995,
+            "observed_cost": 91.17943,
+            "complete": true
+          },
+          "codex_overhead": {
+            "scenario_cost": 1.6031805,
+            "observed_cost": 3.3611324999999996,
+            "complete": true
+          },
+          "ping": {
+            "scenario_cost": 0.0,
+            "observed_cost": 0.0,
+            "complete": true
+          },
+          "recovery": {
+            "scenario_cost": 0.027927999999999998,
+            "observed_cost": 0.169624,
+            "complete": true
+          },
+          "summary": {
+            "scenario_cost": 0.254155,
+            "observed_cost": 0.185035,
+            "complete": true
+          }
+        }
+      },
+      {
+        "arm": "opencode",
+        "replicate": 3,
+        "ttl_seconds": 1800,
+        "complete": true,
+        "scenario_cost": 28.741333500000003,
+        "observed_cost": 94.89522149999998,
+        "cost_unit": "credits",
+        "answer_counts": {
+          "warm": 85,
+          "first": 0,
+          "expiry": 7,
+          "rewrite": 4
+        },
+        "answer_warm_fraction": 0.8854166666666666,
+        "by_role": {
+          "answer": {
+            "scenario_cost": 27.100870000000004,
+            "observed_cost": 91.17943,
+            "complete": true
+          },
+          "codex_overhead": {
+            "scenario_cost": 1.3583805,
+            "observed_cost": 3.3611324999999996,
+            "complete": true
+          },
+          "ping": {
+            "scenario_cost": 0.0,
+            "observed_cost": 0.0,
+            "complete": true
+          },
+          "recovery": {
+            "scenario_cost": 0.027927999999999998,
+            "observed_cost": 0.169624,
+            "complete": true
+          },
+          "summary": {
+            "scenario_cost": 0.254155,
+            "observed_cost": 0.185035,
+            "complete": true
+          }
+        }
+      }
+    ],
+    "aggregates": [
+      {
+        "arm": "compache",
+        "ttl_seconds": 300,
+        "replicates": 3,
+        "complete": true,
+        "scenario_cost": 80.592018,
+        "observed_cost": 165.32651400000003,
+        "cost_unit": "credits",
+        "answer_counts": {
+          "warm": 205,
+          "first": 3,
+          "expiry": 3,
+          "rewrite": 77
+        },
+        "answer_warm_fraction": 0.7118055555555556
+      },
+      {
+        "arm": "compache",
+        "ttl_seconds": 1800,
+        "replicates": 3,
+        "complete": true,
+        "scenario_cost": 79.80405,
+        "observed_cost": 165.32651400000003,
+        "cost_unit": "credits",
+        "answer_counts": {
+          "warm": 208,
+          "first": 3,
+          "expiry": 0,
+          "rewrite": 77
+        },
+        "answer_warm_fraction": 0.7222222222222222
+      },
+      {
+        "arm": "opencode",
+        "ttl_seconds": 300,
+        "replicates": 3,
+        "complete": true,
+        "scenario_cost": 125.31163400000001,
+        "observed_cost": 286.52597,
+        "cost_unit": "credits",
+        "answer_counts": {
+          "warm": 210,
+          "first": 2,
+          "expiry": 66,
+          "rewrite": 10
+        },
+        "answer_warm_fraction": 0.7291666666666666
+      },
+      {
+        "arm": "opencode",
+        "ttl_seconds": 1800,
+        "replicates": 3,
+        "complete": true,
+        "scenario_cost": 72.318482,
+        "observed_cost": 286.52597,
+        "cost_unit": "credits",
+        "answer_counts": {
+          "warm": 264,
+          "first": 2,
+          "expiry": 12,
+          "rewrite": 10
+        },
+        "answer_warm_fraction": 0.9166666666666666
+      }
+    ],
+    "assumptions": {
+      "model": "intended ordered message-boundary prefix projection; not native snapshot cache or exact billing",
+      "capacity": "whole prior observed input minus 128 guard tokens, rounded down to 128; guard may not cover harness differences",
+      "cadence": "logical_at is assumed return timing, not proof of physical cache state",
+      "trajectory": "identical observed calls and token counts for all TTLs; no policy reoptimization or quality claim",
+      "recovery": "included",
+      "pricing": "Codex credits per million: input 2.5, cached input 0.25, output 12.5; no cache-write charge"
+    }
+  },
+  "matched_answer_counts_per_pair": {
+    "1": 96,
+    "2": 96,
+    "3": 96
+  },
+  "full_thread_savings_available": false,
+  "limitations": [
+    "Three distinct paired unseen-company cases, not three repeats of one conversation.",
+    "A stopped arm does not receive credit for unexecuted work. Prefix costs are diagnostic, not full-thread savings.",
+    "Provider token counts and wall time are observed; TTL costs use assumed return times and prefix reuse.",
+    "Runtime scaffolding and reported internal Codex invocations are counted. Controller/platform overhead is unavailable.",
+    "Three preserved network-timeout attempts have no reported token usage; recorded successful-call costs exclude that unknown overhead.",
+    "Internal invocation wall seconds are allocated to the final invocation of their logical call; zero entries are not measured zero latency.",
+    "Literal factual screening can reject valid paraphrases and cannot establish semantic answer quality.",
+    "Authored dependency availability is not observed causal source use; prior-output checks use each arm's actual answer."
+  ]
+}

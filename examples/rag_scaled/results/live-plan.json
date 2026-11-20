@@ -1,0 +1,63 @@
+{
+  "schema": "compache-scaled-live-comparison-v1",
+  "model": "gpt-6-luna",
+  "reasoning_effort": "low",
+  "replicates": 3,
+  "arms": [
+    "opencode",
+    "compache"
+  ],
+  "planned_answers_per_arm": 96,
+  "train_thread_ids": [
+    "long-alder-1",
+    "long-alder-2",
+    "long-briar-1",
+    "long-briar-2",
+    "long-cinder-1",
+    "long-cinder-2"
+  ],
+  "context_tokens": 828400,
+  "overhead_tokens_for_planning_only": 16000,
+  "opencode_commit": "810c0eba1a7348036f8bdf61e6632d0c36c6876c",
+  "opencode_output_token_max": 32000,
+  "source_hashes": {
+    "threads.jsonl": "e979137c59da3d9cb1d9dd49d8ad1bafe76b7c43240b9c505ccad836ab7cf6ae",
+    "labels.jsonl": "78c593cade7cd0dcc496c1b58b8b2888f4d277b40016507fc256132eb0aa457f",
+    "manifest.json": "e8d8e7273be4084cf54a08051fa3fc63520fb3067c2cbb0e74c36b6adefb6375"
+  },
+  "policy_hash": "ae2b872f13267570b0cd3af4ec927f2e8a6e5c9500df459bd50e7f47b6f7d676",
+  "profile_hash": "d1689b1811fb682b41f3e95e849d7436813cf99424ec141c0140649420803876",
+  "live_timing": "Six paired arms launched concurrently; immediate successive calls, no simulated idle sleeps.",
+  "cache_scenarios_seconds": [
+    300,
+    1800
+  ],
+  "cache_scenario_scope": "Counterfactual message-prefix cache at 300/1800 seconds using real measured input/output totals, SHA256 source-prefix matches and explicit 128-token framing guard. Not measured native cache savings.",
+  "runtime": "Fresh ephemeral subscription thread per request, documented developerInstructions snapshot with quoted evidence; small fixed user task. All actual model usage is measured; native cache behavior is not the target cache model.",
+  "baseline": "OpenCode source-derived compaction adapter, not native executable",
+  "frozen_at": "2026-11-16T16:49:48.394074+00:00",
+  "transport": "codex",
+  "context_basis": "Full installed Codex usable window 828400; requested maximum 872000. API Luna full context 1050000 unavailable through this subscription surface.",
+  "workaround": "User authorized subscription workaround; thread/start developerInstructions snapshot avoids turn/start text-size limitation. No API requests.",
+  "evaluation_thread_ids": [
+    "scaled-26-07",
+    "scaled-24-07",
+    "scaled-29-07"
+  ],
+  "quality_design_sha256": "bf6a06466e9d70ef7dad4adb6836d56a7a0cc7fa5ec558d26fa155cc85a52237",
+  "policy_scope": "Original 0.4.0 selected policy and profile, not refitted on expanded corpus or test results.",
+  "sampling": "Company IDs fixed before the first policy evaluation; selected from original retrieval-size strata. They are not extrema of the revised full distribution.",
+  "comparison": "Three distinct unseen-company conversations; not three stochastic repeats of one case.",
+  "stop_rule": "A denied Compache admission stops that arm without sending a model request; unexecuted turns remain in the coverage denominator. No full-thread savings claim for incomplete pairs.",
+  "package_version": "0.4.0",
+  "bind_live_output_dependencies": true,
+  "all_arms_external_tools_disabled": true,
+  "fresh_runs": [
+    "opencode-1",
+    "opencode-2",
+    "opencode-3",
+    "compache-1",
+    "compache-2",
+    "compache-3"
+  ]
+}
