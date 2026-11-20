@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - 'site/**'
+      - 'docs/benchmark-handover.html'
+      - 'benchmarks/handoff/**'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
 
@@ -39,6 +41,10 @@ jobs:
         run: |
           mkdir -p _site
           cp site/index.html site/style.css site/app.mjs site/engine.mjs site/models.mjs site/charts.mjs site/worker.mjs site/methodology.html site/benchmarks.html site/comparisons.html _site/
+      - name: Include the benchmark handover
+        run: |
+          mkdir -p _site/docs
+          sed "s|href=\"../benchmarks/|href=\"https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_SHA}/benchmarks/|g" docs/benchmark-handover.html > _site/docs/benchmark-handover.html
       - name: Configure Pages
         uses: actions/configure-pages@v5
       - name: Upload website
