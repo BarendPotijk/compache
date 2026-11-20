@@ -1,0 +1,172 @@
+{
+  "system_prompt": "You answer operational questions over the records supplied to this fictional company’s support team. Every request has one company and one conversation. Work from the retrieved records and from the questions, documents and replies linked to this conversation. When a user provides a constraint, a number or a preference, carry it forward for the relevant case. When the user updates that information, use the latest applicable statement and make the change clear when it affects your answer.\n\nPreserve the distinction between a document’s publication date, version, effective date and scope. A new edition may supersede a rule for new agreements while prior agreements retain the original terms. Use case identifiers, customer segments, currencies, plan names and applicability dates to match provisions. If the question asks about an exception, inspect both the exception and the governing rule. Resolve disagreements using applicability and authority before recency. If the evidence remains in conflict, identify the competing provisions and the information needed to distinguish them.\n\nWhen giving a numerical answer, retain the source units, state the version of the pricing or operating rule, show the calculation the reader needs to reproduce it, and note any rounding. If the quantity comes from a prior user turn, distinguish it from a contractual limit in a document. Quote short decisive language only when wording materially affects the conclusion. Provide a document identifier, version and section for document claims. For claims about the conversation, identify the turn or the earlier user statement that supplies the value.\n\nRetrieval returns excerpts. A missing term in an excerpt supports a scoped observation about those records only. Use the catalogue and section tools when the question asks about coverage. If earlier evidence is stored behind a Compache handle, use the recovery tool before relying on the passage’s original wording or a value contained only there. Return concise answers in the language of the question. Keep requests for clarification specific to a missing fact that changes the possible answer.",
+  "default_tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "search_records",
+        "description": "Find passages in the current company catalogue that match a question. Results include document identifiers, versions, section paths, visible excerpts and citation handles. Supply concrete case terms and an optional date to restrict matches to the applicable record.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "The natural language question and the product or case identifiers relevant to it."
+            },
+            "effective_on": {
+              "type": "string",
+              "description": "Optional ISO calendar date on which the provision should apply."
+            },
+            "limit": {
+              "type": "integer",
+              "description": "Maximum number of ranked passages to return for this call."
+            }
+          },
+          "required": [
+            "query"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "read_section",
+        "description": "Return the exact section text and its citation metadata from one document edition. Use this when a search excerpt omits conditions, definitions, or exceptions that may change the conclusion.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "document_id": {
+              "type": "string",
+              "description": "Stable document identifier returned by the search results."
+            },
+            "version": {
+              "type": "string",
+              "description": "Exact published version identifier for the requested record."
+            },
+            "section_path": {
+              "type": "string",
+              "description": "Exact section path printed by the catalogue or search tool."
+            }
+          },
+          "required": [
+            "document_id",
+            "version",
+            "section_path"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "list_editions",
+        "description": "List the available editions of a policy, their publication and effective dates, the population to which each applies, and explicit supersession relationships documented by the company.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "document_id": {
+              "type": "string",
+              "description": "Stable identifier whose edition history should be returned."
+            },
+            "applicability": {
+              "type": "string",
+              "description": "Optional plan name, geography, or customer segment from the current question."
+            }
+          },
+          "required": [
+            "document_id"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "compare_editions",
+        "description": "Retrieve aligned text from two named editions of a document for a single section. Both source versions remain separately citable. A deleted or newly inserted section is reported explicitly.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "document_id": {
+              "type": "string",
+              "description": "The document whose editions should be compared."
+            },
+            "earlier_version": {
+              "type": "string",
+              "description": "Exact version identifier for the prior edition."
+            },
+            "later_version": {
+              "type": "string",
+              "description": "Exact version identifier for the later edition."
+            },
+            "section_path": {
+              "type": "string",
+              "description": "Section heading or path to compare in both versions."
+            }
+          },
+          "required": [
+            "document_id",
+            "earlier_version",
+            "later_version",
+            "section_path"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "reopen_context",
+        "description": "Recover the original user input, retrieved passage, or prior assistant output represented by a Compache handle in this conversation. Reopening returns the source text and its original identifier and version when present.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "handle": {
+              "type": "string",
+              "description": "The opaque handle printed in a compacted history entry for this thread."
+            }
+          },
+          "required": [
+            "handle"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "find_references",
+        "description": "List cross-references made by a given section of a published document. Each resolvable reference includes the destination edition, heading and a short excerpt, and unresolved references include their original text.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "document_id": {
+              "type": "string",
+              "description": "Source document identifier."
+            },
+            "version": {
+              "type": "string",
+              "description": "Source edition identifier."
+            },
+            "section_path": {
+              "type": "string",
+              "description": "Section containing the references to be inspected."
+            }
+          },
+          "required": [
+            "document_id",
+            "version",
+            "section_path"
+          ],
+          "additionalProperties": false
+        }
+      }
+    }
+  ]
+}
