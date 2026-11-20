@@ -13,9 +13,15 @@ from pathlib import Path
 
 from .dependencies import build_packet, validate_label
 from .optimizer.contracts import ModelSpec, digest, number
-from .optimizer.retention import fit_recipes
-from .optimizer.workload import DEFAULT_RECIPES
+from .optimizer.retention import RetentionRecipe, fit_recipes
 from .traces import ContractError, Thread, _unique
+
+# The preview scores two fixed cuts on at most a few sampled threads, and rejects
+# a cut that changes any turn it could not assess. `fit_workload` searches a grid.
+PREVIEW_RECIPES = (
+    RetentionRecipe(10, 10, 3, True),
+    RetentionRecipe(None, None, 10, True),
+)
 
 
 def dependency_preview(*, max_threads=3):
@@ -171,7 +177,7 @@ def _fit_visible_prefixes(threads, labels, spec, retention_floor):
 
     if scorable:
         scores = fit_recipes(
-            scorable, scorable_labels, spec, DEFAULT_RECIPES,
+            scorable, scorable_labels, spec, PREVIEW_RECIPES,
             retention_floor=retention_floor, max_unknown_change_rate=0,
         )
     else:
@@ -182,7 +188,7 @@ def _fit_visible_prefixes(threads, labels, spec, retention_floor):
              "turns": 0, "changed_runs": 0, "unknown_runs": 0, "unknown_changed_runs": 0,
              "unknown_change_rate": None, "max_unknown_change_rate": 0,
              "joint_envelope": None, "retention_floor": retention_floor}
-            for recipe in DEFAULT_RECIPES
+            for recipe in PREVIEW_RECIPES
         ]
     projection = {
         "scored_runs": len(scorable_labels),
