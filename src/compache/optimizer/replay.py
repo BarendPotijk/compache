@@ -4,13 +4,55 @@ from __future__ import annotations
 
 import copy
 import math
+from collections import Counter, defaultdict
 from dataclasses import replace
+from fractions import Fraction
 
 from compache.traces import ContractError, Thread
-from .contracts import Policy, digest, seconds, number
-from .fit import label_index, validate_profile
+from .contracts import Policy, seconds, number
+from .fit import freeze_profile, index_run_peaks, label_index, run_remaining_growth
 from .gate import Request, Source, ThreadState, prepare, wire_part
 from .planner import end_run
+from .position import position_risk
+
+
+def warm_outcome_validation(records, policy):
+    """Score reached, supported warm entries by position using realized frozen growth."""
+    groups = defaultdict(list)
+    for row in records:
+        if row["window"] != "warm":
+            continue
+        forecast = row.get("warm_overflow_risk", {}).get("before")
+        if forecast is None and row["action"] == "observe_only":
+            # Hidden input can suppress the gate evaluation. It is still a
+            # missing outcome at a reached warm position with training support.
+            forecast = position_risk(policy, row["run_index"], 0, "remaining_tokens")
+        if forecast is not None and forecast["triggered"] is not None:
+            groups[row["run_index"]].append(row.get("frozen_growth_outcome", {}))
+    alpha = Fraction(str(policy.max_overflow_probability))
+    minimum = max(policy.position_growth["min_threads"], math.ceil(1 / alpha) - 1)
+    positions = {}
+    for pos, outcomes in sorted(groups.items()):
+        n = len(outcomes)
+        x = sum(o.get("modeled_overflow") is True for o in outcomes)
+        u = sum(o.get("modeled_overflow") is None for o in outcomes)
+        if x > alpha * n:
+            status = "exceeds_budget"
+        elif x + u > alpha * n:
+            status = "inconclusive_missing"
+        elif n < minimum:
+            status = "insufficient_validation_threads"
+        else:
+            status = "within_empirical_budget"
+        positions[str(pos)] = {"opportunities": n, "assessed": n-u, "exceedances": x, "unresolved": u,
+                               "lower_fraction": x/n, "upper_fraction": (x+u)/n, "status": status,
+                               "sources": dict(Counter(o.get("source", "unassessed") for o in outcomes))}
+    statuses = {v["status"] for v in positions.values()}
+    status = next((s for s in ("exceeds_budget", "inconclusive_missing", "insufficient_validation_threads")
+                   if s in statuses), "within_empirical_budget" if positions else "no_supported_warm_opportunities")
+    return {"status": status, "max_overflow_probability": float(alpha), "min_validation_threads_per_position": minimum,
+            "supported_warm_opportunities": sum(map(len, groups.values())), "by_run_index": positions,
+            "basis": "Per-position empirical frozen-growth outcomes under the projected request. Unresolved outcomes count toward the upper fraction. Source labels distinguish whole-run sidecars and one-generation estimates. No population-rate confidence claim."}
 
 
 class Cache:
@@ -53,12 +95,7 @@ class Cache:
             cached = 0
         fresh = total if not eligible else 0
         writes = total - cached if eligible else 0
-        cost = (
-            fresh
-            + cached * spec.read_multiplier
-            + writes * spec.write_multiplier
-            + output_tokens * spec.output_multiplier
-        )
+        cost = spec.token_charge(fresh, writes, cached, output_tokens)
         if eligible:
             self.lines, self.counts, self.refreshed = lines, counts, now
         return {
@@ -139,18 +176,21 @@ def replay(
     include_ledger=True,
     recovery_overhead="priced",
     overhead_tokens=0,
+    peak_observations=None,
 ) -> dict:
     number(overhead_tokens, "overhead_tokens", integer=True)
     if recovery_overhead not in ("priced", "zero"):
         raise ContractError("recovery_overhead must be priced or zero")
     if profile is not None:
-        validate_profile(profile)
-        if policy.profile_hash != digest(profile):
+        profile = freeze_profile(profile)
+        if policy.profile_hash != profile.fingerprint:
             raise ContractError("policy/profile hash mismatch")
     end = seconds(observation_end)
     if any(seconds(r.ended_at) > end for t in threads for r in t.runs):
         raise ContractError("observation_end precedes trace")
     labels_by_id = label_index(threads, labels)
+    peaks = index_run_peaks(peak_observations, {r.run_id for t in threads for r in t.runs})
+    evaluate_growth = peaks is not None or policy.position_growth is not None
     spec = policy.spec
     if any(r.generation.model != spec.model_id for t in threads for r in t.runs):
         raise ContractError(
@@ -202,6 +242,17 @@ def replay(
             if not prepared.admitted:
                 skipped += len(thread.runs) - i - 1
                 break
+            if evaluate_growth and prepared.action != "observe_only":
+                # Score the frozen outcome after preparing the view. Holding the
+                # original within-run growth fixed is a replay assumption.
+                source, status, remaining = run_remaining_growth(run, spec, peaks)
+                crossing = None if remaining is None else prepared.tokens + remaining > spec.context_tokens
+                identified = (status == "complete" or (status == "censored" and crossing is True)
+                              or (status == "upper_bound" and crossing is False))
+                record["frozen_growth_outcome"] = {
+                    "source": source, "status": status, "remaining_tokens": remaining,
+                    "modeled_overflow": crossing if identified else None,
+                }
             missing = bool(assessment["missed_requirements"])
             output = spec.text_tokens(run.output.text)
             usage = cache.charge(
@@ -292,6 +343,8 @@ def replay(
             record["planned_pings"] = decision.pings if decision else 0
             record["expected_ping_saving"] = decision.expected_saving if decision else 0
             if decision:
+                if decision.next_run_overflow_risk is not None:
+                    record["next_run_overflow_risk"] = decision.next_run_overflow_risk
                 next_start = (
                     seconds(thread.runs[i + 1].started_at)
                     if i + 1 < len(thread.runs)
@@ -385,6 +438,23 @@ def replay(
     summary["runs_with_unavailable_text"] = sum(
         r["cost_coverage"] == "visible_projection_only" for r in records
     )
+    if evaluate_growth:
+        outcomes = [r.get("frozen_growth_outcome", {}).get("modeled_overflow") for r in records]
+        summary["frozen_growth_overflow"] = {
+            "exceedances": sum(x is True for x in outcomes),
+            "assessed_runs": sum(x is not None for x in outcomes),
+            "unassessed_or_skipped": summary["planned_runs"] - sum(x is not None for x in outcomes),
+            "basis": "Initial projected input plus frozen run growth. Tool behavior and answers may change after a rewrite. Without a peak sidecar growth uses reported one-generation output tokens or a visible answer proxy.",
+        }
+    if policy.position_growth is not None:
+        forecasts = [r["warm_overflow_risk"] for r in records if "warm_overflow_risk" in r]
+        summary["warm_risk_gate"] = {
+            "supported_runs": sum(f["before"]["triggered"] is not None for f in forecasts),
+            "fixed_fallback_runs": sum(f["before"]["triggered"] is None for f in forecasts),
+            "triggered_runs": sum(f["before"]["triggered"] is True for f in forecasts),
+            "remaining_above_budget": sum(f["after"]["triggered"] is True for f in forecasts),
+        }
+        summary["warm_outcome_validation"] = warm_outcome_validation(records, policy)
     summary["cost_coverage"] = (
         "visible_projection_only"
         if summary["runs_with_unavailable_text"]

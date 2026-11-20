@@ -4,14 +4,23 @@ from __future__ import annotations
 
 import statistics
 from collections import Counter, defaultdict
+from functools import cached_property
 
 from compache.dependencies import build_packet, validate_label
 from compache.traces import ContractError, Thread
-from .contracts import ModelSpec, digest, number, seconds
+from .contracts import FrozenDict, ModelSpec, digest, freeze_json, number, seconds
 from .gate import Request
+from .position import STATUSES, fit_position_growth, validate_growth
 
 
 def label_index(threads: list[Thread], labels: list[dict]) -> dict:
+    # Python callers can construct individually valid threads without the
+    # cross-thread identity checks made by load_threads(). Labels and peaks
+    # are keyed by run ID, so a collision could leak a held-out observation.
+    thread_ids = [t.thread_id for t in threads]
+    run_ids = [r.run_id for t in threads for r in t.runs]
+    if len(set(thread_ids)) != len(thread_ids) or len(set(run_ids)) != len(run_ids):
+        raise ContractError("training/evaluation requires globally unique thread and run IDs")
     packets = {r.run_id: build_packet(t, r.run_id) for t in threads for r in t.runs}
     result = {}
     for label in labels:
@@ -73,6 +82,43 @@ def cdf(curve: dict, idle_seconds: float) -> float:
     return value
 
 
+def index_run_peaks(peak_observations, run_ids):
+    """A peak covers initial input through the largest input-plus-output occupancy."""
+    if peak_observations is None:
+        return None
+    indexed = {}
+    for row in peak_observations:
+        if not isinstance(row, dict) or set(row) != {
+            "run_id", "start_input_tokens", "peak_context_tokens", "status"
+        }:
+            raise ContractError("invalid run peak observation fields")
+        rid = row["run_id"]
+        if not isinstance(rid, str) or rid not in run_ids or rid in indexed:
+            raise ContractError("run peaks must identify unique runs from the supplied traces")
+        if row["status"] not in STATUSES:
+            raise ContractError("invalid run peak observation status")
+        if row["status"] == "missing":
+            if row["start_input_tokens"] is not None or row["peak_context_tokens"] is not None:
+                raise ContractError("missing run peaks require null counts")
+        else:
+            number(row["start_input_tokens"], "start_input_tokens", integer=True)
+            number(row["peak_context_tokens"], "peak_context_tokens", row["start_input_tokens"], integer=True)
+        indexed[rid] = row
+    return indexed
+
+
+def run_remaining_growth(run, spec, peaks):
+    if peaks is None:
+        if run.generation.usage is not None:
+            return "single_generation_reported_output", "complete", dict(run.generation.usage)["output"]
+        remaining = spec.text_tokens(run.output.text) if run.output.text is not None else None
+        return "single_generation_proxy", "complete" if remaining is not None else "missing", remaining
+    peak = peaks.get(run.run_id)
+    status = peak["status"] if peak else "missing"
+    remaining = peak["peak_context_tokens"] - peak["start_input_tokens"] if status != "missing" else None
+    return "observed_peak", status, remaining
+
+
 def fit_profile(
     threads: list[Thread],
     labels: list[dict],
@@ -82,6 +128,7 @@ def fit_profile(
     horizon_seconds=604_800,
     min_index_samples=5,
     timing_source="supplied_timestamps",
+    peak_observations=None,
 ) -> dict:
     if not threads:
         raise ContractError("fit requires at least one thread")
@@ -96,6 +143,8 @@ def fit_profile(
     if any(seconds(r.ended_at) > end for r in all_runs):
         raise ContractError("observation_end precedes a run end")
     labels_by_id = label_index(threads, labels)
+    peaks = index_run_peaks(peak_observations, {r.run_id for r in all_runs})
+    growth_rows = []
     observations = defaultdict(list)
     durations = defaultdict(list)
     growth = []
@@ -115,6 +164,13 @@ def fit_profile(
             observations[r.run_index].append(obs)
             request = Request.from_thread(t, r.run_id)
             growth.append(sum(spec.part_tokens(p.text) for p in request.parts))
+            arriving = [p for p in request.parts if p.run_index == r.run_index]
+            arrival_tokens = (sum(spec.part_tokens(p.text) for p in arriving)
+                              if all(p.text is not None for p in arriving) else None)
+            source, status, remaining = run_remaining_growth(r, spec, peaks)
+            growth_rows.append({"thread_id": t.thread_id, "run_index": r.run_index,
+                                "arrival_tokens": arrival_tokens, "remaining_tokens": remaining,
+                                "status": status, "source": source})
             label = labels_by_id.get(r.run_id)
             if (
                 label is None
@@ -198,14 +254,33 @@ def fit_profile(
                 len(t.runs) for t in sorted(threads, key=lambda t: t.thread_id)
             ],
         },
+        "position_growth": fit_position_growth(growth_rows, min_threads=min_index_samples),
     }
     return profile
 
 
+class _ValidatedProfile(FrozenDict):
+    @cached_property
+    def fingerprint(self):
+        return digest(self)
+
+
+def freeze_profile(profile):
+    """Validate and freeze one profile for reuse by a runtime/replay loop."""
+    if isinstance(profile, _ValidatedProfile):
+        return profile
+    validate_profile(profile)
+    return _ValidatedProfile((k, freeze_json(v)) for k, v in profile.items())
+
+
 def validate_profile(profile: dict) -> None:
+    if isinstance(profile, _ValidatedProfile):
+        return
     try:
         if profile["schema_version"] != "compache-profile-v1":
             raise ValueError()
+        if "position_growth" in profile:
+            validate_growth(profile["position_growth"])
         curves = [profile["cadence"]["pooled"]] + [
             v["curve"] for v in profile["cadence"]["by_run_index"].values()
         ]

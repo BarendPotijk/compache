@@ -1,3 +1,3 @@
 """Compache: offline workload optimization and deterministic RAG decisions."""
 
-__version__ = "0.4.1"
+__version__ = "0.9.0"

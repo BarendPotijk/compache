@@ -29,12 +29,15 @@ They cooperate: the planner prices a cold return at the gate's own cold plan, an
 
 ## Docs
 
+[Run the trace-fitted workload planner](workload-planner.md) · [Try both frozen cache-window fits](../examples/fitted_policy/README.md) · [Configure a workload](setup.md)
+
 [Comparison scopes and Headroom replay](comparisons.md) · [Application structure](application-structure.md)
 
 | Doc | Covers |
 |---|---|
 | [Implemented RAG optimizer](optimizer.md) | Runnable fit/solve/replay, promotion checks, pure gate/planner, economics and coverage limits |
 | [Scaled RAG workload](scaled-rag-workload.md) | Fictional 300-thread workload, sharded export, planning assumptions and audit scope |
+| [BEAM workload](beam-workload.md) | Adapter for 90 public long chats: evidence labels, fixed train/test split and declared return scenarios |
 | [Scaled RAG results](scaled-rag-results.md) | Frozen-policy admission failures, measured sample and limits on cost/coverage claims |
 | [Admission repair results](admission-fix-results.md) | Source protection, selective recall, causal token calibration and repeat evaluation |
 | [Scaled RAG results](scaled-rag-results.md) | Frozen-policy admission failures, measured sample and limits on cost/coverage claims |
