@@ -1,7 +1,7 @@
 import unittest
 
 from compache.optimizer.contracts import ModelSpec
-from compache.optimizer.gate import Request, Source
+from compache.optimizer.parts import Request, Source
 from compache.optimizer.opencode import (
     OpenCodeBaseline,
     Settings,

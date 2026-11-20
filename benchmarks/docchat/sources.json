@@ -1,0 +1,2561 @@
+{
+ "schema_version": "compache-docchat-sources-v1",
+ "note": "sha256 is the hash of a document's parsed text, written by `docchat.py lock`. A build stops when a source no longer matches.",
+ "domains": {
+  "finance": {
+   "source": "EDGAR-CORPUS (eloukas/edgar-corpus), annual reports filed with the US SEC",
+   "licence": "Apache-2.0",
+   "url": "https://huggingface.co/datasets/eloukas/edgar-corpus/tree/7e90f0f342569b35213445f809cfaf3b91f9964f",
+   "documents": [
+    {
+     "id": "fin-50725",
+     "title": "Annual report on Form 10-K for fiscal 2020 (SEC CIK 50725)",
+     "parser": "edgar",
+     "version": "edgar-corpus@7e90f0f3",
+     "files": [
+      {
+       "url": "https://huggingface.co/datasets/eloukas/edgar-corpus/resolve/7e90f0f342569b35213445f809cfaf3b91f9964f/2020/test.jsonl",
+       "name": "edgar-2020-test.jsonl",
+       "select": "50725_2020.htm"
+      }
+     ],
+     "sha256": "de96ffb85b65c8f7fd504516fd268cab48497a2fc360a723846933249a001b13"
+    },
+    {
+     "id": "fin-1592058",
+     "title": "Annual report on Form 10-K for fiscal 2020 (SEC CIK 1592058)",
+     "parser": "edgar",
+     "version": "edgar-corpus@7e90f0f3",
+     "files": [
+      {
+       "url": "https://huggingface.co/datasets/eloukas/edgar-corpus/resolve/7e90f0f342569b35213445f809cfaf3b91f9964f/2020/test.jsonl",
+       "name": "edgar-2020-test.jsonl",
+       "select": "1592058_2020.htm"
+      }
+     ],
+     "sha256": "4a0e06fcc815976066c2c27706ef1809921fdd0719bcde56f82431bc279a9076"
+    },
+    {
+     "id": "fin-59478",
+     "title": "Annual report on Form 10-K for fiscal 2020 (SEC CIK 59478)",
+     "parser": "edgar",
+     "version": "edgar-corpus@7e90f0f3",
+     "files": [
+      {
+       "url": "https://huggingface.co/datasets/eloukas/edgar-corpus/resolve/7e90f0f342569b35213445f809cfaf3b91f9964f/2020/test.jsonl",
+       "name": "edgar-2020-test.jsonl",
+       "select": "59478_2020.htm"
+      }
+     ],
+     "sha256": "a8e9ca2be37e4f5a633dbf6b6db8f796da08818c73d84bcf00d03de32477c507"
+    },
+    {
+     "id": "fin-1060219",
+     "title": "Annual report on Form 10-K for fiscal 2020 (SEC CIK 1060219)",
+     "parser": "edgar",
+     "version": "edgar-corpus@7e90f0f3",
+     "files": [
+      {
+       "url": "https://huggingface.co/datasets/eloukas/edgar-corpus/resolve/7e90f0f342569b35213445f809cfaf3b91f9964f/2020/test.jsonl",
+       "name": "edgar-2020-test.jsonl",
+       "select": "1060219_2020.htm"
+      }
+     ],
+     "sha256": "d9e802eeca354f0aab86cd51ef10e8aaef2c54854576431e279280d5cf46c64c"
+    },
+    {
+     "id": "fin-1578776",
+     "title": "Annual report on Form 10-K for fiscal 2020 (SEC CIK 1578776)",
+     "parser": "edgar",
+     "version": "edgar-corpus@7e90f0f3",
+     "files": [
+      {
+       "url": "https://huggingface.co/datasets/eloukas/edgar-corpus/resolve/7e90f0f342569b35213445f809cfaf3b91f9964f/2020/test.jsonl",
+       "name": "edgar-2020-test.jsonl",
+       "select": "1578776_2020.htm"
+      }
+     ],
+     "sha256": "e8ad1a9d24e7ec089ad6af7d116163a74f9b8f964ab9f780ac455d5003bdec70"
+    },
+    {
+     "id": "fin-1180145",
+     "title": "Annual report on Form 10-K for fiscal 2020 (SEC CIK 1180145)",
+     "parser": "edgar",
+     "version": "edgar-corpus@7e90f0f3",
+     "files": [
+      {
+       "url": "https://huggingface.co/datasets/eloukas/edgar-corpus/resolve/7e90f0f342569b35213445f809cfaf3b91f9964f/2020/test.jsonl",
+       "name": "edgar-2020-test.jsonl",
+       "select": "1180145_2020.htm"
+      }
+     ],
+     "sha256": "4041858489a710660a9957e9709019782d8fb6f1c9c5a5ef50e8a57fcfad83a0"
+    },
+    {
+     "id": "fin-1800667",
+     "title": "Annual report on Form 10-K for fiscal 2020 (SEC CIK 1800667)",
+     "parser": "edgar",
+     "version": "edgar-corpus@7e90f0f3",
+     "files": [
+      {
+       "url": "https://huggingface.co/datasets/eloukas/edgar-corpus/resolve/7e90f0f342569b35213445f809cfaf3b91f9964f/2020/test.jsonl",
+       "name": "edgar-2020-test.jsonl",
+       "select": "1800667_2020.htm"
+      }
+     ],
+     "sha256": "156f2f784d27dd40be5eb5c3bb14d469008a1cea8005b019e09585d45af895fd"
+    },
+    {
+     "id": "fin-793733",
+     "title": "Annual report on Form 10-K for fiscal 2020 (SEC CIK 793733)",
+     "parser": "edgar",
+     "version": "edgar-corpus@7e90f0f3",
+     "files": [
+      {
+       "url": "https://huggingface.co/datasets/eloukas/edgar-corpus/resolve/7e90f0f342569b35213445f809cfaf3b91f9964f/2020/test.jsonl",
+       "name": "edgar-2020-test.jsonl",
+       "select": "793733_2020.htm"
+      }
+     ],
+     "sha256": "4aac9d0d8f85f2e559466e436e0a974ad3c7454c893ba29af4555fd82a2c884b"
+    },
+    {
+     "id": "fin-1704715",
+     "title": "Annual report on Form 10-K for fiscal 2020 (SEC CIK 1704715)",
+     "parser": "edgar",
+     "version": "edgar-corpus@7e90f0f3",
+     "files": [
+      {
+       "url": "https://huggingface.co/datasets/eloukas/edgar-corpus/resolve/7e90f0f342569b35213445f809cfaf3b91f9964f/2020/test.jsonl",
+       "name": "edgar-2020-test.jsonl",
+       "select": "1704715_2020.htm"
+      }
+     ],
+     "sha256": "1f84430a9f29e4e83d61793c61bfda83a91918e97592a7ee7b4be5c6e19e7138"
+    },
+    {
+     "id": "fin-3545",
+     "title": "Annual report on Form 10-K for fiscal 2020 (SEC CIK 3545)",
+     "parser": "edgar",
+     "version": "edgar-corpus@7e90f0f3",
+     "files": [
+      {
+       "url": "https://huggingface.co/datasets/eloukas/edgar-corpus/resolve/7e90f0f342569b35213445f809cfaf3b91f9964f/2020/test.jsonl",
+       "name": "edgar-2020-test.jsonl",
+       "select": "3545_2020.htm"
+      }
+     ],
+     "sha256": "6420ffe4d665c631dbe06f04c4ae713841dbace5955824340e7f60a689a97034"
+    }
+   ]
+  },
+  "legal": {
+   "source": "CUAD v1, The Atticus Project: commercial contracts from SEC filings",
+   "licence": "CC BY 4.0",
+   "url": "https://huggingface.co/datasets/theatticusproject/cuad/tree/a3c393f5d103fd0c516374e4fdff676c8176dcb1",
+   "documents": [
+    {
+     "id": "leg-09d2d3",
+     "title": "Contract: RitterPharmaceuticalsInc 20200313 S-4A EX-10.54 12055220 EX-10.54 Development Agreement",
+     "parser": "text",
+     "version": "cuad@a3c393f5",
+     "files": [
+      {
+       "url": "https://huggingface.co/datasets/theatticusproject/cuad/resolve/a3c393f5d103fd0c516374e4fdff676c8176dcb1/CUAD_v1/full_contract_txt/Part_II/RitterPharmaceuticalsInc_20200313_S-4A_EX-10.54_12055220_EX-10.54_Development%20Agreement.txt",
+       "name": "cuad-09d2d3d0.txt"
+      }
+     ],
+     "sha256": "61ba4266f07276220c31632e10e98680b96255731589a4e8ace7ded3cf6cb2c9"
+    },
+    {
+     "id": "leg-0e36f0",
+     "title": "Contract: LOYALTYPOINTINC 11 16 2004-EX-10.2-RESELLER AGREEMENT",
+     "parser": "text",
+     "version": "cuad@a3c393f5",
+     "files": [
+      {
+       "url": "https://huggingface.co/datasets/theatticusproject/cuad/resolve/a3c393f5d103fd0c516374e4fdff676c8176dcb1/CUAD_v1/full_contract_txt/Part_II/LOYALTYPOINTINC_11_16_2004-EX-10.2-RESELLER%20AGREEMENT.txt",
+       "name": "cuad-0e36f086.txt"
+      }
+     ],
+     "sha256": "187ced0a2454ff6b019b1a1c63444787ad79a74bc02ec1a6f752d04ba3155745"
+    },
+    {
+     "id": "leg-13179a",
+     "title": "Contract: BABCOCK WILCOXENTERPRISES,INC 08 04 2015-EX-10.17-INTELLECTUAL PROPERTY AGREEMENT between THE BABCOCK   WILCOX COMPANY and BABCOCK   WILCOX ENTERPRISES, INC.",
+     "parser": "text",
+     "version": "cuad@a3c393f5",
+     "files": [
+      {
+       "url": "https://huggingface.co/datasets/theatticusproject/cuad/resolve/a3c393f5d103fd0c516374e4fdff676c8176dcb1/CUAD_v1/full_contract_txt/Part_I/BABCOCK_WILCOXENTERPRISES%2CINC_08_04_2015-EX-10.17-INTELLECTUAL%20PROPERTY%20AGREEMENT%20between%20THE%20BABCOCK%20_%20WILCOX%20COMPANY%20and%20BABCOCK%20_%20WILCOX%20ENTERPRISES%2C%20INC..txt",
+       "name": "cuad-13179a0b.txt"
+      }
+     ],
+     "sha256": "417bb063fa947bfb071e4a184242577ceda8ba3968c68c89ae214540531887a0"
+    },
+    {
+     "id": "leg-217c68",
+     "title": "Contract: INTERNATIONALFASTFOODCORP 04 04 1997-EX-99-FRANCHISE AGREEMENT",
+     "parser": "text",
+     "version": "cuad@a3c393f5",
+     "files": [
+      {
+       "url": "https://huggingface.co/datasets/theatticusproject/cuad/resolve/a3c393f5d103fd0c516374e4fdff676c8176dcb1/CUAD_v1/full_contract_txt/Part_I/INTERNATIONALFASTFOODCORP_04_04_1997-EX-99-FRANCHISE%20AGREEMENT.txt",
+       "name": "cuad-217c6861.txt"
+      }
+     ],
+     "sha256": "ca25d1980452ad2e681c0b74383a0e1d757f4a81c58925e9d0623d3c71550885"
+    },
+    {
+     "id": "leg-325af7",
+     "title": "Contract: TRANSPHORM,INC 02 14 2020-EX-10.12(1)-JOINT VENTURE AGREEMENT",
+     "parser": "text",
+     "version": "cuad@a3c393f5",
+     "files": [
+      {
+       "url": "https://huggingface.co/datasets/theatticusproject/cuad/resolve/a3c393f5d103fd0c516374e4fdff676c8176dcb1/CUAD_v1/full_contract_txt/Part_II/TRANSPHORM%2CINC_02_14_2020-EX-10.12%281%29-JOINT%20VENTURE%20AGREEMENT.txt",
+       "name": "cuad-325af7ab.txt"
+      }
+     ],
+     "sha256": "68b6e987b8b81bc1a336b033a08c55256eb8c9bd257116498788f141e89bd473"
+    },
+    {
+     "id": "leg-35e05e",
+     "title": "Contract: ReynoldsConsumerProductsInc 20200121 S-1A EX-10.22 11948918 EX-10.22 Service Agreement",
+     "parser": "text",
+     "version": "cuad@a3c393f5",
+     "files": [
+      {
+       "url": "https://huggingface.co/datasets/theatticusproject/cuad/resolve/a3c393f5d103fd0c516374e4fdff676c8176dcb1/CUAD_v1/full_contract_txt/Part_II/ReynoldsConsumerProductsInc_20200121_S-1A_EX-10.22_11948918_EX-10.22_Service%20Agreement.txt",
+       "name": "cuad-35e05e50.txt"
+      }
+     ],
+     "sha256": "5f22315c1e031c212600f0c4620f5b8d93f2ee513218ee1fa562fb63d71ac6e0"
+    },
+    {
+     "id": "leg-50195f",
+     "title": "Contract: MetLife, Inc. - Remarketing Agreement",
+     "parser": "text",
+     "version": "cuad@a3c393f5",
+     "files": [
+      {
+       "url": "https://huggingface.co/datasets/theatticusproject/cuad/resolve/a3c393f5d103fd0c516374e4fdff676c8176dcb1/CUAD_v1/full_contract_txt/Part_II/MetLife%2C%20Inc.%20-%20Remarketing%20Agreement.txt",
+       "name": "cuad-50195fd0.txt"
+      }
+     ],
+     "sha256": "f779eade126d8af20b3905b092b25365b6d38051776b30b382e4da6a104ea1ff"
+    },
+    {
+     "id": "leg-5ada37",
+     "title": "Contract: ZEBRATECHNOLOGIESCORP 04 16 2014-EX-10.1-INTELLECTUAL PROPERTY AGREEMENT",
+     "parser": "text",
+     "version": "cuad@a3c393f5",
+     "files": [
+      {
+       "url": "https://huggingface.co/datasets/theatticusproject/cuad/resolve/a3c393f5d103fd0c516374e4fdff676c8176dcb1/CUAD_v1/full_contract_txt/Part_II/ZEBRATECHNOLOGIESCORP_04_16_2014-EX-10.1-INTELLECTUAL%20PROPERTY%20AGREEMENT.txt",
+       "name": "cuad-5ada37dd.txt"
+      }
+     ],
+     "sha256": "99eb05e1bdece68e35af6646ad362db5025b42b70de43cb9f08c9697b584531f"
+    },
+    {
+     "id": "leg-6d0e8c",
+     "title": "Contract: SUMMAFOURINC 06 19 1998-EX-10.3-SOFTWARE LICENSE AND MAINTENANCE AGREEMENT",
+     "parser": "text",
+     "version": "cuad@a3c393f5",
+     "files": [
+      {
+       "url": "https://huggingface.co/datasets/theatticusproject/cuad/resolve/a3c393f5d103fd0c516374e4fdff676c8176dcb1/CUAD_v1/full_contract_txt/Part_II/SUMMAFOURINC_06_19_1998-EX-10.3-SOFTWARE%20LICENSE%20AND%20MAINTENANCE%20AGREEMENT.txt",
+       "name": "cuad-6d0e8c44.txt"
+      }
+     ],
+     "sha256": "f57ac751bfc4fcfbe3e4316ba091023d3cb30bf141bbcbb8df0dd926ea086dca"
+    },
+    {
+     "id": "leg-74cf03",
+     "title": "Contract: PfHospitalityGroupInc 20150923 10-12G EX-10.1 9266710 EX-10.1 Franchise Agreement1",
+     "parser": "text",
+     "version": "cuad@a3c393f5",
+     "files": [
+      {
+       "url": "https://huggingface.co/datasets/theatticusproject/cuad/resolve/a3c393f5d103fd0c516374e4fdff676c8176dcb1/CUAD_v1/full_contract_txt/Part_II/PfHospitalityGroupInc_20150923_10-12G_EX-10.1_9266710_EX-10.1_Franchise%20Agreement1.txt",
+       "name": "cuad-74cf0307.txt"
+      }
+     ],
+     "sha256": "8d8aab330feb32ea8605eabaa1f072b686f26ce827ecacd3d3eff10c4e569ef4"
+    }
+   ]
+  },
+  "healthcare": {
+   "source": "openFDA drug labelling (FDA Structured Product Labeling)",
+   "licence": "Public domain, CC0 1.0 (https://open.fda.gov/license/)",
+   "url": "https://open.fda.gov/apis/drug/label/",
+   "documents": [
+    {
+     "id": "med-eliquis",
+     "title": "Prescribing information: Eliquis (apixaban)",
+     "parser": "openfda",
+     "version": "spl-41a133ef-v5",
+     "files": [
+      {
+       "url": "https://api.fda.gov/drug/label.json?search=set_id:%2241a133ef-e461-48ad-8221-b735bdd0ec25%22&limit=1",
+       "name": "openfda-41a133ef-e461-48ad-8221-b735bdd0ec25.json"
+      }
+     ],
+     "sha256": "50e63d1160a2e9fa0cfb47df3be25a9631f5cb1d06594414c342c94a0485e697"
+    },
+    {
+     "id": "med-ozempic",
+     "title": "Prescribing information: Ozempic (semaglutide)",
+     "parser": "openfda",
+     "version": "spl-e6da837c-v6",
+     "files": [
+      {
+       "url": "https://api.fda.gov/drug/label.json?search=set_id:%22e6da837c-0da0-41d6-973c-5559bf764367%22&limit=1",
+       "name": "openfda-e6da837c-0da0-41d6-973c-5559bf764367.json"
+      }
+     ],
+     "sha256": "834fd33d47fd7080a7f6bca86b96821488745afc417095bef3e9b13c042c2070"
+    },
+    {
+     "id": "med-jardiance",
+     "title": "Prescribing information: Jardiance (empagliflozin)",
+     "parser": "openfda",
+     "version": "spl-942a82a4-v9",
+     "files": [
+      {
+       "url": "https://api.fda.gov/drug/label.json?search=set_id:%22942a82a4-cbbd-4e44-9965-8d03f767912b%22&limit=1",
+       "name": "openfda-942a82a4-cbbd-4e44-9965-8d03f767912b.json"
+      }
+     ],
+     "sha256": "268d9de2139fdd1f561740f0700332a441478f651b63a9f1bf777ac170589730"
+    },
+    {
+     "id": "med-entresto",
+     "title": "Prescribing information: Entresto (sacubitril and valsartan)",
+     "parser": "openfda",
+     "version": "spl-000dc81d-v25",
+     "files": [
+      {
+       "url": "https://api.fda.gov/drug/label.json?search=set_id:%22000dc81d-ab91-450c-8eae-8eb74e72296f%22&limit=1",
+       "name": "openfda-000dc81d-ab91-450c-8eae-8eb74e72296f.json"
+      }
+     ],
+     "sha256": "1aa9f8911b5cf4b59f28c10fe22752a088fb8bca85fce905d8ecd41c9eea5a08"
+    },
+    {
+     "id": "med-lipitor",
+     "title": "Prescribing information: Lipitor (atorvastatin)",
+     "parser": "openfda",
+     "version": "spl-a60cc18b-v8",
+     "files": [
+      {
+       "url": "https://api.fda.gov/drug/label.json?search=set_id:%22a60cc18b-0631-4cf0-b021-9f52224ece65%22&limit=1",
+       "name": "openfda-a60cc18b-0631-4cf0-b021-9f52224ece65.json"
+      }
+     ],
+     "sha256": "717eb3d7a35b32a04da0925d91ef14fa3caced601d3c39b6770e6fec5a06d29e"
+    },
+    {
+     "id": "med-zoloft",
+     "title": "Prescribing information: Zoloft (sertraline)",
+     "parser": "openfda",
+     "version": "spl-fda754f6-v7",
+     "files": [
+      {
+       "url": "https://api.fda.gov/drug/label.json?search=set_id:%22fda754f6-d0f3-4dce-a17a-927d64f912f7%22&limit=1",
+       "name": "openfda-fda754f6-d0f3-4dce-a17a-927d64f912f7.json"
+      }
+     ],
+     "sha256": "baca16e36a6bf5091afbcd865f729027e9524afdd3630adaf76d420a6cb84239"
+    },
+    {
+     "id": "med-lantus",
+     "title": "Prescribing information: Lantus SoloStar (insulin glargine)",
+     "parser": "openfda",
+     "version": "spl-3a97c40f-v6",
+     "files": [
+      {
+       "url": "https://api.fda.gov/drug/label.json?search=set_id:%223a97c40f-0c83-42d7-a8ee-484b208db4e3%22&limit=1",
+       "name": "openfda-3a97c40f-0c83-42d7-a8ee-484b208db4e3.json"
+      }
+     ],
+     "sha256": "2a287539665d4f5dad2cdf5084c13074d1dee42d41e021f9c76058524a73f7b5"
+    },
+    {
+     "id": "med-trulicity",
+     "title": "Prescribing information: Trulicity (dulaglutide)",
+     "parser": "openfda",
+     "version": "spl-80d1e766-v1",
+     "files": [
+      {
+       "url": "https://api.fda.gov/drug/label.json?search=set_id:%2280d1e766-fefc-44b4-bec9-c7b0198ec08f%22&limit=1",
+       "name": "openfda-80d1e766-fefc-44b4-bec9-c7b0198ec08f.json"
+      }
+     ],
+     "sha256": "06a6569c66a5fcf5dfb81478ac109b0ded690dd5b11269d8b9c4f2cd8a94defa"
+    },
+    {
+     "id": "med-januvia",
+     "title": "Prescribing information: Januvia (sitagliptin)",
+     "parser": "openfda",
+     "version": "spl-4a758211-v7",
+     "files": [
+      {
+       "url": "https://api.fda.gov/drug/label.json?search=set_id:%224a758211-8af1-449b-9a10-f3d67d7ec8b6%22&limit=1",
+       "name": "openfda-4a758211-8af1-449b-9a10-f3d67d7ec8b6.json"
+      }
+     ],
+     "sha256": "70890ed3a14f14ded34f1553a9a587062d7d47ed35ccaf5bcf71976a5e78bebe"
+    },
+    {
+     "id": "med-lyrica",
+     "title": "Prescribing information: Lyrica CR (pregabalin)",
+     "parser": "openfda",
+     "version": "spl-f280bbd8-v7",
+     "files": [
+      {
+       "url": "https://api.fda.gov/drug/label.json?search=set_id:%22f280bbd8-2af2-444a-bd96-e409337ca6dd%22&limit=1",
+       "name": "openfda-f280bbd8-2af2-444a-bd96-e409337ca6dd.json"
+      }
+     ],
+     "sha256": "80343cd220c90952dd67c28db400dd866216a77d21b169876c2e3dad2aef6ea5"
+    }
+   ]
+  },
+  "support": {
+   "source": "Kubernetes documentation (kubernetes/website)",
+   "licence": "CC BY 4.0",
+   "url": "https://github.com/kubernetes/website/tree/542bad2ab92dd6ee7916b2b916d84cda64c77f6c",
+   "documents": [
+    {
+     "id": "k8s-workloads",
+     "title": "Kubernetes documentation: workloads",
+     "parser": "markdown",
+     "version": "website@542bad2a",
+     "files": [
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/workloads/_index.md",
+       "name": "k8s-542bad2a-concepts__workloads___index.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/workloads/autoscaling.md",
+       "name": "k8s-542bad2a-concepts__workloads__autoscaling.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/workloads/autoscaling/horizontal-pod-autoscale.md",
+       "name": "k8s-542bad2a-concepts__workloads__autoscaling__horizontal-pod-autoscale.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/workloads/autoscaling/vertical-pod-autoscale.md",
+       "name": "k8s-542bad2a-concepts__workloads__autoscaling__vertical-pod-autoscale.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/workloads/compositepodgroup-api/_index.md",
+       "name": "k8s-542bad2a-concepts__workloads__compositepodgroup-api___index.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/workloads/compositepodgroup-api/lifecycle.md",
+       "name": "k8s-542bad2a-concepts__workloads__compositepodgroup-api__lifecycle.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/workloads/controllers/_index.md",
+       "name": "k8s-542bad2a-concepts__workloads__controllers___index.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/workloads/controllers/cron-jobs.md",
+       "name": "k8s-542bad2a-concepts__workloads__controllers__cron-jobs.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/workloads/controllers/daemonset.md",
+       "name": "k8s-542bad2a-concepts__workloads__controllers__daemonset.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/workloads/controllers/deployment.md",
+       "name": "k8s-542bad2a-concepts__workloads__controllers__deployment.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/workloads/controllers/job.md",
+       "name": "k8s-542bad2a-concepts__workloads__controllers__job.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/workloads/controllers/replicaset.md",
+       "name": "k8s-542bad2a-concepts__workloads__controllers__replicaset.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/workloads/controllers/replicationcontroller.md",
+       "name": "k8s-542bad2a-concepts__workloads__controllers__replicationcontroller.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/workloads/controllers/statefulset.md",
+       "name": "k8s-542bad2a-concepts__workloads__controllers__statefulset.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/workloads/controllers/ttlafterfinished.md",
+       "name": "k8s-542bad2a-concepts__workloads__controllers__ttlafterfinished.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/workloads/management.md",
+       "name": "k8s-542bad2a-concepts__workloads__management.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/workloads/podgroup-api/_index.md",
+       "name": "k8s-542bad2a-concepts__workloads__podgroup-api___index.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/workloads/podgroup-api/lifecycle.md",
+       "name": "k8s-542bad2a-concepts__workloads__podgroup-api__lifecycle.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/workloads/pods/_index.md",
+       "name": "k8s-542bad2a-concepts__workloads__pods___index.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/workloads/pods/advanced-pod-config.md",
+       "name": "k8s-542bad2a-concepts__workloads__pods__advanced-pod-config.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/workloads/pods/disruptions.md",
+       "name": "k8s-542bad2a-concepts__workloads__pods__disruptions.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/workloads/pods/downward-api.md",
+       "name": "k8s-542bad2a-concepts__workloads__pods__downward-api.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/workloads/pods/ephemeral-containers.md",
+       "name": "k8s-542bad2a-concepts__workloads__pods__ephemeral-containers.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/workloads/pods/init-containers.md",
+       "name": "k8s-542bad2a-concepts__workloads__pods__init-containers.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/workloads/pods/pod-condition.md",
+       "name": "k8s-542bad2a-concepts__workloads__pods__pod-condition.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/workloads/pods/pod-hostname.md",
+       "name": "k8s-542bad2a-concepts__workloads__pods__pod-hostname.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/workloads/pods/pod-lifecycle.md",
+       "name": "k8s-542bad2a-concepts__workloads__pods__pod-lifecycle.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/workloads/pods/pod-qos.md",
+       "name": "k8s-542bad2a-concepts__workloads__pods__pod-qos.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/workloads/pods/pod-termination.md",
+       "name": "k8s-542bad2a-concepts__workloads__pods__pod-termination.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/workloads/pods/probes.md",
+       "name": "k8s-542bad2a-concepts__workloads__pods__probes.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/workloads/pods/scheduling-group.md",
+       "name": "k8s-542bad2a-concepts__workloads__pods__scheduling-group.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/workloads/pods/sidecar-containers.md",
+       "name": "k8s-542bad2a-concepts__workloads__pods__sidecar-containers.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/workloads/pods/static-pods.md",
+       "name": "k8s-542bad2a-concepts__workloads__pods__static-pods.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/workloads/pods/user-namespaces.md",
+       "name": "k8s-542bad2a-concepts__workloads__pods__user-namespaces.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/workloads/workload-api/_index.md",
+       "name": "k8s-542bad2a-concepts__workloads__workload-api___index.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/workloads/workload-api/disruption-and-priority.md",
+       "name": "k8s-542bad2a-concepts__workloads__workload-api__disruption-and-priority.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/workloads/workload-api/policies.md",
+       "name": "k8s-542bad2a-concepts__workloads__workload-api__policies.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/workloads/workload-api/topology-aware-scheduling.md",
+       "name": "k8s-542bad2a-concepts__workloads__workload-api__topology-aware-scheduling.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/workloads/workload-api/workloadbuilder.md",
+       "name": "k8s-542bad2a-concepts__workloads__workload-api__workloadbuilder.md"
+      }
+     ],
+     "sha256": "fdc41316a9d9b7dd70ed7100a00722b62333c31d24ccba33ccd88b2aac88c63e"
+    },
+    {
+     "id": "k8s-administer-cluster",
+     "title": "Kubernetes documentation: administer cluster",
+     "parser": "markdown",
+     "version": "website@542bad2a",
+     "files": [
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/_index.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster___index.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/access-cluster-api.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__access-cluster-api.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/certificates.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__certificates.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/change-default-storage-class.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__change-default-storage-class.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/change-pv-access-mode-readwriteoncepod.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__change-pv-access-mode-readwriteoncepod.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/change-pv-reclaim-policy.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__change-pv-reclaim-policy.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/cluster-shutdown-and-restart.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__cluster-shutdown-and-restart.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/cluster-upgrade.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__cluster-upgrade.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/configure-feature-gates.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__configure-feature-gates.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/configure-upgrade-etcd.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__configure-upgrade-etcd.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/controller-manager-leader-migration.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__controller-manager-leader-migration.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/coredns.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__coredns.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/cpu-management-policies.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__cpu-management-policies.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/declare-network-policy.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__declare-network-policy.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/decrypt-data.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__decrypt-data.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/developing-cloud-controller-manager.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__developing-cloud-controller-manager.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/dns-custom-nameservers.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__dns-custom-nameservers.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/dns-debugging-resolution.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__dns-debugging-resolution.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/dns-horizontal-autoscaling.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__dns-horizontal-autoscaling.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/enable-disable-api.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__enable-disable-api.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/encrypt-data.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__encrypt-data.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/extended-resource-node.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__extended-resource-node.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/guaranteed-scheduling-critical-addon-pods.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__guaranteed-scheduling-critical-addon-pods.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/hardening-dra.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__hardening-dra.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/ip-masq-agent.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__ip-masq-agent.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/kms-provider.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__kms-provider.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/kubeadm/_index.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__kubeadm___index.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/kubeadm/adding-linux-nodes.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__kubeadm__adding-linux-nodes.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/kubeadm/adding-windows-nodes.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__kubeadm__adding-windows-nodes.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/kubeadm/change-package-repository.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__kubeadm__change-package-repository.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/kubeadm/kubeadm-certs.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__kubeadm__kubeadm-certs.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/kubeadm/kubeadm-reconfigure.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__kubeadm__kubeadm-reconfigure.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/kubeadm/kubeadm-upgrade.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__kubeadm__kubeadm-upgrade.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/kubeadm/upgrading-linux-nodes.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__kubeadm__upgrading-linux-nodes.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/kubeadm/upgrading-windows-nodes.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__kubeadm__upgrading-windows-nodes.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/kubelet-config-file.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__kubelet-config-file.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/kubelet-credential-provider.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__kubelet-credential-provider.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/kubelet-in-userns.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__kubelet-in-userns.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/limit-storage-consumption.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__limit-storage-consumption.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/manage-resources/_index.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__manage-resources___index.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/manage-resources/cpu-constraint-namespace.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__manage-resources__cpu-constraint-namespace.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/manage-resources/cpu-default-namespace.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__manage-resources__cpu-default-namespace.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/manage-resources/memory-constraint-namespace.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__manage-resources__memory-constraint-namespace.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/manage-resources/memory-default-namespace.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__manage-resources__memory-default-namespace.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/manage-resources/quota-memory-cpu-namespace.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__manage-resources__quota-memory-cpu-namespace.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/manage-resources/quota-pod-namespace.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__manage-resources__quota-pod-namespace.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/memory-manager.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__memory-manager.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/migrating-from-dockershim/_index.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__migrating-from-dockershim___index.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/migrating-from-dockershim/change-runtime-containerd.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__migrating-from-dockershim__change-runtime-containerd.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/migrating-from-dockershim/check-if-dockershim-removal-affects-you.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__migrating-from-dockershim__check-if-dockershim-removal-affects-you.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/migrating-from-dockershim/find-out-runtime-you-use.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__migrating-from-dockershim__find-out-runtime-you-use.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/migrating-from-dockershim/migrating-telemetry-and-security-agents.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__migrating-from-dockershim__migrating-telemetry-and-security-agents.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/migrating-from-dockershim/troubleshooting-cni-plugin-related-errors.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__migrating-from-dockershim__troubleshooting-cni-plugin-related-errors.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/namespaces.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__namespaces.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/network-policy-provider/_index.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__network-policy-provider___index.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/network-policy-provider/antrea-network-policy.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__network-policy-provider__antrea-network-policy.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/network-policy-provider/calico-network-policy.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__network-policy-provider__calico-network-policy.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/network-policy-provider/cilium-network-policy.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__network-policy-provider__cilium-network-policy.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/network-policy-provider/kube-router-network-policy.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__network-policy-provider__kube-router-network-policy.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/node-overprovisioning.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__node-overprovisioning.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/nodelocaldns.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__nodelocaldns.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/quota-api-object.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__quota-api-object.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/reserve-compute-resources.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__reserve-compute-resources.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/running-cloud-controller.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__running-cloud-controller.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/safely-drain-node.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__safely-drain-node.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/securing-a-cluster.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__securing-a-cluster.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/switch-to-evented-pleg.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__switch-to-evented-pleg.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/sysctl-cluster.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__sysctl-cluster.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/topology-manager.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__topology-manager.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/use-cascading-deletion.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__use-cascading-deletion.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/administer-cluster/verify-signed-artifacts.md",
+       "name": "k8s-542bad2a-tasks__administer-cluster__verify-signed-artifacts.md"
+      }
+     ],
+     "sha256": "1f3bfd4becc98d89f7c96375bd926c200d3059651af8fc77139e83991189bf53"
+    },
+    {
+     "id": "k8s-configure-pod-container",
+     "title": "Kubernetes documentation: configure pod container",
+     "parser": "markdown",
+     "version": "website@542bad2a",
+     "files": [
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/configure-pod-container/_index.md",
+       "name": "k8s-542bad2a-tasks__configure-pod-container___index.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/configure-pod-container/assign-cpu-resource.md",
+       "name": "k8s-542bad2a-tasks__configure-pod-container__assign-cpu-resource.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/configure-pod-container/assign-memory-resource.md",
+       "name": "k8s-542bad2a-tasks__configure-pod-container__assign-memory-resource.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/configure-pod-container/assign-pod-level-resources.md",
+       "name": "k8s-542bad2a-tasks__configure-pod-container__assign-pod-level-resources.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/configure-pod-container/assign-pods-nodes-using-node-affinity.md",
+       "name": "k8s-542bad2a-tasks__configure-pod-container__assign-pods-nodes-using-node-affinity.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/configure-pod-container/assign-pods-nodes.md",
+       "name": "k8s-542bad2a-tasks__configure-pod-container__assign-pods-nodes.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/configure-pod-container/assign-resources/_index.md",
+       "name": "k8s-542bad2a-tasks__configure-pod-container__assign-resources___index.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/configure-pod-container/assign-resources/access-dra-device-metadata.md",
+       "name": "k8s-542bad2a-tasks__configure-pod-container__assign-resources__access-dra-device-metadata.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/configure-pod-container/assign-resources/allocate-devices-dra.md",
+       "name": "k8s-542bad2a-tasks__configure-pod-container__assign-resources__allocate-devices-dra.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/configure-pod-container/assign-resources/set-up-dra-cluster.md",
+       "name": "k8s-542bad2a-tasks__configure-pod-container__assign-resources__set-up-dra-cluster.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/configure-pod-container/attach-handler-lifecycle-event.md",
+       "name": "k8s-542bad2a-tasks__configure-pod-container__attach-handler-lifecycle-event.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/configure-pod-container/configure-bind-mount-options.md",
+       "name": "k8s-542bad2a-tasks__configure-pod-container__configure-bind-mount-options.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/configure-pod-container/configure-emptydir-volume-mode.md",
+       "name": "k8s-542bad2a-tasks__configure-pod-container__configure-emptydir-volume-mode.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/configure-pod-container/configure-gmsa.md",
+       "name": "k8s-542bad2a-tasks__configure-pod-container__configure-gmsa.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes.md",
+       "name": "k8s-542bad2a-tasks__configure-pod-container__configure-liveness-readiness-startup-probes.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/configure-pod-container/configure-pod-configmap.md",
+       "name": "k8s-542bad2a-tasks__configure-pod-container__configure-pod-configmap.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/configure-pod-container/configure-pod-initialization.md",
+       "name": "k8s-542bad2a-tasks__configure-pod-container__configure-pod-initialization.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/configure-pod-container/configure-projected-volume-storage.md",
+       "name": "k8s-542bad2a-tasks__configure-pod-container__configure-projected-volume-storage.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/configure-pod-container/configure-runasusername.md",
+       "name": "k8s-542bad2a-tasks__configure-pod-container__configure-runasusername.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/configure-pod-container/configure-service-account.md",
+       "name": "k8s-542bad2a-tasks__configure-pod-container__configure-service-account.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/configure-pod-container/configure-volume-storage.md",
+       "name": "k8s-542bad2a-tasks__configure-pod-container__configure-volume-storage.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/configure-pod-container/create-hostprocess-pod.md",
+       "name": "k8s-542bad2a-tasks__configure-pod-container__create-hostprocess-pod.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/configure-pod-container/enforce-standards-admission-controller.md",
+       "name": "k8s-542bad2a-tasks__configure-pod-container__enforce-standards-admission-controller.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/configure-pod-container/enforce-standards-namespace-labels.md",
+       "name": "k8s-542bad2a-tasks__configure-pod-container__enforce-standards-namespace-labels.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/configure-pod-container/extended-resource.md",
+       "name": "k8s-542bad2a-tasks__configure-pod-container__extended-resource.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/configure-pod-container/image-volumes.md",
+       "name": "k8s-542bad2a-tasks__configure-pod-container__image-volumes.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/configure-pod-container/migrate-from-psp.md",
+       "name": "k8s-542bad2a-tasks__configure-pod-container__migrate-from-psp.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/configure-pod-container/pull-image-private-registry.md",
+       "name": "k8s-542bad2a-tasks__configure-pod-container__pull-image-private-registry.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/configure-pod-container/quality-service-pod.md",
+       "name": "k8s-542bad2a-tasks__configure-pod-container__quality-service-pod.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/configure-pod-container/resize-container-resources.md",
+       "name": "k8s-542bad2a-tasks__configure-pod-container__resize-container-resources.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/configure-pod-container/resize-pod-resources.md",
+       "name": "k8s-542bad2a-tasks__configure-pod-container__resize-pod-resources.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/configure-pod-container/security-context.md",
+       "name": "k8s-542bad2a-tasks__configure-pod-container__security-context.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/configure-pod-container/share-process-namespace.md",
+       "name": "k8s-542bad2a-tasks__configure-pod-container__share-process-namespace.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/configure-pod-container/static-pod.md",
+       "name": "k8s-542bad2a-tasks__configure-pod-container__static-pod.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/configure-pod-container/translate-compose-kubernetes.md",
+       "name": "k8s-542bad2a-tasks__configure-pod-container__translate-compose-kubernetes.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/configure-pod-container/user-namespaces.md",
+       "name": "k8s-542bad2a-tasks__configure-pod-container__user-namespaces.md"
+      }
+     ],
+     "sha256": "d4f1d6fd1a3cbfe9552c7b57ad7468af019214a8dcad8973ce8d936754d693cc"
+    },
+    {
+     "id": "k8s-scheduling-eviction",
+     "title": "Kubernetes documentation: scheduling eviction",
+     "parser": "markdown",
+     "version": "website@542bad2a",
+     "files": [
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/scheduling-eviction/_index.md",
+       "name": "k8s-542bad2a-concepts__scheduling-eviction___index.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/scheduling-eviction/api-eviction.md",
+       "name": "k8s-542bad2a-concepts__scheduling-eviction__api-eviction.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/scheduling-eviction/assign-pod-node.md",
+       "name": "k8s-542bad2a-concepts__scheduling-eviction__assign-pod-node.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/scheduling-eviction/gang-scheduling.md",
+       "name": "k8s-542bad2a-concepts__scheduling-eviction__gang-scheduling.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/scheduling-eviction/kube-scheduler.md",
+       "name": "k8s-542bad2a-concepts__scheduling-eviction__kube-scheduler.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/scheduling-eviction/node-declared-features.md",
+       "name": "k8s-542bad2a-concepts__scheduling-eviction__node-declared-features.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/scheduling-eviction/node-pressure-eviction.md",
+       "name": "k8s-542bad2a-concepts__scheduling-eviction__node-pressure-eviction.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/scheduling-eviction/pod-overhead.md",
+       "name": "k8s-542bad2a-concepts__scheduling-eviction__pod-overhead.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/scheduling-eviction/pod-priority-preemption.md",
+       "name": "k8s-542bad2a-concepts__scheduling-eviction__pod-priority-preemption.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/scheduling-eviction/pod-scheduling-readiness.md",
+       "name": "k8s-542bad2a-concepts__scheduling-eviction__pod-scheduling-readiness.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/scheduling-eviction/podgroup-scheduling.md",
+       "name": "k8s-542bad2a-concepts__scheduling-eviction__podgroup-scheduling.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/scheduling-eviction/resource-bin-packing.md",
+       "name": "k8s-542bad2a-concepts__scheduling-eviction__resource-bin-packing.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/scheduling-eviction/running-multiple-schedulers.md",
+       "name": "k8s-542bad2a-concepts__scheduling-eviction__running-multiple-schedulers.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/scheduling-eviction/scheduler-perf-tuning.md",
+       "name": "k8s-542bad2a-concepts__scheduling-eviction__scheduler-perf-tuning.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/scheduling-eviction/scheduling-framework.md",
+       "name": "k8s-542bad2a-concepts__scheduling-eviction__scheduling-framework.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/scheduling-eviction/taint-and-toleration.md",
+       "name": "k8s-542bad2a-concepts__scheduling-eviction__taint-and-toleration.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/scheduling-eviction/topology-aware-scheduling.md",
+       "name": "k8s-542bad2a-concepts__scheduling-eviction__topology-aware-scheduling.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/scheduling-eviction/topology-spread-constraints.md",
+       "name": "k8s-542bad2a-concepts__scheduling-eviction__topology-spread-constraints.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/scheduling-eviction/workload-aware-preemption.md",
+       "name": "k8s-542bad2a-concepts__scheduling-eviction__workload-aware-preemption.md"
+      }
+     ],
+     "sha256": "e3cc992ba827c588f20a4862f3bfda609d433b216aeb1e44b32f374317c12f3d"
+    },
+    {
+     "id": "k8s-cluster-administration",
+     "title": "Kubernetes documentation: cluster administration",
+     "parser": "markdown",
+     "version": "website@542bad2a",
+     "files": [
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/cluster-administration/_index.md",
+       "name": "k8s-542bad2a-concepts__cluster-administration___index.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/cluster-administration/addons.md",
+       "name": "k8s-542bad2a-concepts__cluster-administration__addons.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/cluster-administration/admission-webhooks-good-practices.md",
+       "name": "k8s-542bad2a-concepts__cluster-administration__admission-webhooks-good-practices.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/cluster-administration/certificates.md",
+       "name": "k8s-542bad2a-concepts__cluster-administration__certificates.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/cluster-administration/compatibility-version.md",
+       "name": "k8s-542bad2a-concepts__cluster-administration__compatibility-version.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/cluster-administration/coordinated-leader-election.md",
+       "name": "k8s-542bad2a-concepts__cluster-administration__coordinated-leader-election.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/cluster-administration/dra.md",
+       "name": "k8s-542bad2a-concepts__cluster-administration__dra.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/cluster-administration/flow-control.md",
+       "name": "k8s-542bad2a-concepts__cluster-administration__flow-control.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/cluster-administration/kube-state-metrics.md",
+       "name": "k8s-542bad2a-concepts__cluster-administration__kube-state-metrics.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/cluster-administration/logging.md",
+       "name": "k8s-542bad2a-concepts__cluster-administration__logging.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/cluster-administration/networking.md",
+       "name": "k8s-542bad2a-concepts__cluster-administration__networking.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/cluster-administration/node-autoscaling.md",
+       "name": "k8s-542bad2a-concepts__cluster-administration__node-autoscaling.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/cluster-administration/node-shutdown.md",
+       "name": "k8s-542bad2a-concepts__cluster-administration__node-shutdown.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/cluster-administration/observability.md",
+       "name": "k8s-542bad2a-concepts__cluster-administration__observability.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/cluster-administration/proxies.md",
+       "name": "k8s-542bad2a-concepts__cluster-administration__proxies.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/cluster-administration/swap-memory-management.md",
+       "name": "k8s-542bad2a-concepts__cluster-administration__swap-memory-management.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/cluster-administration/system-logs.md",
+       "name": "k8s-542bad2a-concepts__cluster-administration__system-logs.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/cluster-administration/system-metrics.md",
+       "name": "k8s-542bad2a-concepts__cluster-administration__system-metrics.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/cluster-administration/system-traces.md",
+       "name": "k8s-542bad2a-concepts__cluster-administration__system-traces.md"
+      }
+     ],
+     "sha256": "c99db11018090a64f65c3402349bb57c4943a9194157d799a3e949392ad200a1"
+    },
+    {
+     "id": "k8s-storage",
+     "title": "Kubernetes documentation: storage",
+     "parser": "markdown",
+     "version": "website@542bad2a",
+     "files": [
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/storage/_index.md",
+       "name": "k8s-542bad2a-concepts__storage___index.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/storage/dynamic-provisioning.md",
+       "name": "k8s-542bad2a-concepts__storage__dynamic-provisioning.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/storage/ephemeral-storage.md",
+       "name": "k8s-542bad2a-concepts__storage__ephemeral-storage.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/storage/ephemeral-volumes.md",
+       "name": "k8s-542bad2a-concepts__storage__ephemeral-volumes.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/storage/persistent-volumes.md",
+       "name": "k8s-542bad2a-concepts__storage__persistent-volumes.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/storage/projected-volumes.md",
+       "name": "k8s-542bad2a-concepts__storage__projected-volumes.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/storage/storage-capacity.md",
+       "name": "k8s-542bad2a-concepts__storage__storage-capacity.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/storage/storage-classes.md",
+       "name": "k8s-542bad2a-concepts__storage__storage-classes.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/storage/storage-limits.md",
+       "name": "k8s-542bad2a-concepts__storage__storage-limits.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/storage/volume-attributes-classes.md",
+       "name": "k8s-542bad2a-concepts__storage__volume-attributes-classes.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/storage/volume-health-monitoring.md",
+       "name": "k8s-542bad2a-concepts__storage__volume-health-monitoring.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/storage/volume-populators-and-data-sources.md",
+       "name": "k8s-542bad2a-concepts__storage__volume-populators-and-data-sources.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/storage/volume-pvc-datasource.md",
+       "name": "k8s-542bad2a-concepts__storage__volume-pvc-datasource.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/storage/volume-snapshot-classes.md",
+       "name": "k8s-542bad2a-concepts__storage__volume-snapshot-classes.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/storage/volume-snapshots.md",
+       "name": "k8s-542bad2a-concepts__storage__volume-snapshots.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/storage/volumes.md",
+       "name": "k8s-542bad2a-concepts__storage__volumes.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/storage/windows-storage.md",
+       "name": "k8s-542bad2a-concepts__storage__windows-storage.md"
+      }
+     ],
+     "sha256": "21366fc88c58e1c580bb06aa4d89bae2903260cade64ab3f65849b9dcf62f936"
+    },
+    {
+     "id": "k8s-security",
+     "title": "Kubernetes documentation: security",
+     "parser": "markdown",
+     "version": "website@542bad2a",
+     "files": [
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/security/_index.md",
+       "name": "k8s-542bad2a-concepts__security___index.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/security/api-server-bypass-risks.md",
+       "name": "k8s-542bad2a-concepts__security__api-server-bypass-risks.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/security/application-security-checklist.md",
+       "name": "k8s-542bad2a-concepts__security__application-security-checklist.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/security/cloud-native-security.md",
+       "name": "k8s-542bad2a-concepts__security__cloud-native-security.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/security/controlling-access.md",
+       "name": "k8s-542bad2a-concepts__security__controlling-access.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/security/hardening-guide/authentication-mechanisms.md",
+       "name": "k8s-542bad2a-concepts__security__hardening-guide__authentication-mechanisms.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/security/hardening-guide/dynamic-resource-allocation.md",
+       "name": "k8s-542bad2a-concepts__security__hardening-guide__dynamic-resource-allocation.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/security/hardening-guide/scheduler.md",
+       "name": "k8s-542bad2a-concepts__security__hardening-guide__scheduler.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/security/linux-kernel-security-constraints.md",
+       "name": "k8s-542bad2a-concepts__security__linux-kernel-security-constraints.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/security/linux-security.md",
+       "name": "k8s-542bad2a-concepts__security__linux-security.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/security/multi-tenancy.md",
+       "name": "k8s-542bad2a-concepts__security__multi-tenancy.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/security/pod-security-admission.md",
+       "name": "k8s-542bad2a-concepts__security__pod-security-admission.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/security/pod-security-policy.md",
+       "name": "k8s-542bad2a-concepts__security__pod-security-policy.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/security/pod-security-standards.md",
+       "name": "k8s-542bad2a-concepts__security__pod-security-standards.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/security/rbac-good-practices.md",
+       "name": "k8s-542bad2a-concepts__security__rbac-good-practices.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/security/secrets-good-practices.md",
+       "name": "k8s-542bad2a-concepts__security__secrets-good-practices.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/security/security-checklist.md",
+       "name": "k8s-542bad2a-concepts__security__security-checklist.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/security/service-accounts.md",
+       "name": "k8s-542bad2a-concepts__security__service-accounts.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/security/windows-security.md",
+       "name": "k8s-542bad2a-concepts__security__windows-security.md"
+      }
+     ],
+     "sha256": "cb08aabe911d233564ca47d3bf4cf5e265a68bfd25cc3f8ca74a089f301b3a90"
+    },
+    {
+     "id": "k8s-services-networking",
+     "title": "Kubernetes documentation: services networking",
+     "parser": "markdown",
+     "version": "website@542bad2a",
+     "files": [
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/services-networking/_index.md",
+       "name": "k8s-542bad2a-concepts__services-networking___index.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/services-networking/cluster-ip-allocation.md",
+       "name": "k8s-542bad2a-concepts__services-networking__cluster-ip-allocation.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/services-networking/dns-pod-service.md",
+       "name": "k8s-542bad2a-concepts__services-networking__dns-pod-service.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/services-networking/dual-stack.md",
+       "name": "k8s-542bad2a-concepts__services-networking__dual-stack.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/services-networking/endpoint-slices.md",
+       "name": "k8s-542bad2a-concepts__services-networking__endpoint-slices.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/services-networking/gateway.md",
+       "name": "k8s-542bad2a-concepts__services-networking__gateway.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/services-networking/ingress-controllers.md",
+       "name": "k8s-542bad2a-concepts__services-networking__ingress-controllers.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/services-networking/ingress.md",
+       "name": "k8s-542bad2a-concepts__services-networking__ingress.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/services-networking/network-policies.md",
+       "name": "k8s-542bad2a-concepts__services-networking__network-policies.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/services-networking/service-traffic-policy.md",
+       "name": "k8s-542bad2a-concepts__services-networking__service-traffic-policy.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/services-networking/service.md",
+       "name": "k8s-542bad2a-concepts__services-networking__service.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/services-networking/topology-aware-routing.md",
+       "name": "k8s-542bad2a-concepts__services-networking__topology-aware-routing.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/services-networking/windows-networking.md",
+       "name": "k8s-542bad2a-concepts__services-networking__windows-networking.md"
+      }
+     ],
+     "sha256": "a64e5e83c683989c781740cfa6931e79043f22d9353d06c43fff4b39b0fdc5a4"
+    },
+    {
+     "id": "k8s-debug",
+     "title": "Kubernetes documentation: debug",
+     "parser": "markdown",
+     "version": "website@542bad2a",
+     "files": [
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/debug/_index.md",
+       "name": "k8s-542bad2a-tasks__debug___index.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/debug/debug-application/_index.md",
+       "name": "k8s-542bad2a-tasks__debug__debug-application___index.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/debug/debug-application/debug-init-containers.md",
+       "name": "k8s-542bad2a-tasks__debug__debug-application__debug-init-containers.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/debug/debug-application/debug-pods.md",
+       "name": "k8s-542bad2a-tasks__debug__debug-application__debug-pods.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/debug/debug-application/debug-running-pod.md",
+       "name": "k8s-542bad2a-tasks__debug__debug-application__debug-running-pod.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/debug/debug-application/debug-service.md",
+       "name": "k8s-542bad2a-tasks__debug__debug-application__debug-service.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/debug/debug-application/debug-statefulset.md",
+       "name": "k8s-542bad2a-tasks__debug__debug-application__debug-statefulset.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/debug/debug-application/determine-reason-pod-failure.md",
+       "name": "k8s-542bad2a-tasks__debug__debug-application__determine-reason-pod-failure.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/debug/debug-application/get-shell-running-container.md",
+       "name": "k8s-542bad2a-tasks__debug__debug-application__get-shell-running-container.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/debug/debug-cluster/_index.md",
+       "name": "k8s-542bad2a-tasks__debug__debug-cluster___index.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/debug/debug-cluster/audit.md",
+       "name": "k8s-542bad2a-tasks__debug__debug-cluster__audit.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/debug/debug-cluster/crictl.md",
+       "name": "k8s-542bad2a-tasks__debug__debug-cluster__crictl.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/debug/debug-cluster/kubectl-node-debug.md",
+       "name": "k8s-542bad2a-tasks__debug__debug-cluster__kubectl-node-debug.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/debug/debug-cluster/local-debugging.md",
+       "name": "k8s-542bad2a-tasks__debug__debug-cluster__local-debugging.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/debug/debug-cluster/monitor-node-health.md",
+       "name": "k8s-542bad2a-tasks__debug__debug-cluster__monitor-node-health.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/debug/debug-cluster/resource-metrics-pipeline.md",
+       "name": "k8s-542bad2a-tasks__debug__debug-cluster__resource-metrics-pipeline.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/debug/debug-cluster/resource-usage-monitoring.md",
+       "name": "k8s-542bad2a-tasks__debug__debug-cluster__resource-usage-monitoring.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/debug/debug-cluster/topology.md",
+       "name": "k8s-542bad2a-tasks__debug__debug-cluster__topology.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/debug/debug-cluster/troubleshoot-kubectl.md",
+       "name": "k8s-542bad2a-tasks__debug__debug-cluster__troubleshoot-kubectl.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/debug/debug-cluster/windows.md",
+       "name": "k8s-542bad2a-tasks__debug__debug-cluster__windows.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/debug/logging/_index.md",
+       "name": "k8s-542bad2a-tasks__debug__logging___index.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/tasks/debug/monitoring/_index.md",
+       "name": "k8s-542bad2a-tasks__debug__monitoring___index.md"
+      }
+     ],
+     "sha256": "74289a948df9e9ee674160a59bf4b7343dd97059d4f41ff41a90e39d904979d0"
+    },
+    {
+     "id": "k8s-resource-management",
+     "title": "Kubernetes documentation: resource management",
+     "parser": "markdown",
+     "version": "website@542bad2a",
+     "files": [
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/resource-management/_index.md",
+       "name": "k8s-542bad2a-concepts__resource-management___index.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/resource-management/dynamic-resource-allocation/_index.md",
+       "name": "k8s-542bad2a-concepts__resource-management__dynamic-resource-allocation___index.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/resource-management/dynamic-resource-allocation/device-taints.md",
+       "name": "k8s-542bad2a-concepts__resource-management__dynamic-resource-allocation__device-taints.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/resource-management/dynamic-resource-allocation/dra-api.md",
+       "name": "k8s-542bad2a-concepts__resource-management__dynamic-resource-allocation__dra-api.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/resource-management/dynamic-resource-allocation/dra-features.md",
+       "name": "k8s-542bad2a-concepts__resource-management__dynamic-resource-allocation__dra-features.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/resource-management/dynamic-resource-allocation/dra-observability.md",
+       "name": "k8s-542bad2a-concepts__resource-management__dynamic-resource-allocation__dra-observability.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/resource-management/dynamic-resource-allocation/how-dra-works.md",
+       "name": "k8s-542bad2a-concepts__resource-management__dynamic-resource-allocation__how-dra-works.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/resource-management/effective-pod-requests-limits.md",
+       "name": "k8s-542bad2a-concepts__resource-management__effective-pod-requests-limits.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/resource-management/pod-level-resource-managers.md",
+       "name": "k8s-542bad2a-concepts__resource-management__pod-level-resource-managers.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/kubernetes/website/542bad2ab92dd6ee7916b2b916d84cda64c77f6c/content/en/docs/concepts/resource-management/resource-managers.md",
+       "name": "k8s-542bad2a-concepts__resource-management__resource-managers.md"
+      }
+     ],
+     "sha256": "af1ea06b89eebe119a7fea4f046a6c531903c2ad85df2253d49a94b6f1ba5a8c"
+    }
+   ]
+  },
+  "hr": {
+   "source": "TTS Handbook, US General Services Administration (GSA-TTS/handbook)",
+   "licence": "Public domain, CC0 1.0",
+   "url": "https://github.com/GSA-TTS/handbook/tree/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e",
+   "documents": [
+    {
+     "id": "tts-general-information-and-resources",
+     "title": "TTS Handbook: general information and resources",
+     "parser": "markdown",
+     "version": "handbook@c220f938",
+     "files": [
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/general-information-and-resources/business-and-ops-policies/billing_policy.md",
+       "name": "tts-c220f938-pages__general-information-and-resources__business-and-ops-policies__billing_policy.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/general-information-and-resources/business-and-ops-policies/igcap-october2016.md",
+       "name": "tts-c220f938-pages__general-information-and-resources__business-and-ops-policies__igcap-october2016.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/general-information-and-resources/business-and-ops-policies/top-secret.md",
+       "name": "tts-c220f938-pages__general-information-and-resources__business-and-ops-policies__top-secret.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/general-information-and-resources/chicago.md",
+       "name": "tts-c220f938-pages__general-information-and-resources__chicago.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/general-information-and-resources/collaboration-tools.md",
+       "name": "tts-c220f938-pages__general-information-and-resources__collaboration-tools.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/general-information-and-resources/conflict-feedback-additional-frameworks.md",
+       "name": "tts-c220f938-pages__general-information-and-resources__conflict-feedback-additional-frameworks.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/general-information-and-resources/conflict-feedback-follow-up-escalation.md",
+       "name": "tts-c220f938-pages__general-information-and-resources__conflict-feedback-follow-up-escalation.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/general-information-and-resources/conflict-feedback-intro.md",
+       "name": "tts-c220f938-pages__general-information-and-resources__conflict-feedback-intro.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/general-information-and-resources/conflict-feedback-principles.md",
+       "name": "tts-c220f938-pages__general-information-and-resources__conflict-feedback-principles.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/general-information-and-resources/conflict-feedback-receiving-feedback.md",
+       "name": "tts-c220f938-pages__general-information-and-resources__conflict-feedback-receiving-feedback.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/general-information-and-resources/distributed.md",
+       "name": "tts-c220f938-pages__general-information-and-resources__distributed.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/general-information-and-resources/employee-resources-policies/benefits-links.md",
+       "name": "tts-c220f938-pages__general-information-and-resources__employee-resources-policies__benefits-links.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/general-information-and-resources/employee-resources-policies/daily-checkin.md",
+       "name": "tts-c220f938-pages__general-information-and-resources__employee-resources-policies__daily-checkin.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/general-information-and-resources/employee-resources-policies/deaf-hoh.md",
+       "name": "tts-c220f938-pages__general-information-and-resources__employee-resources-policies__deaf-hoh.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/general-information-and-resources/employee-resources-policies/employment-verification.md",
+       "name": "tts-c220f938-pages__general-information-and-resources__employee-resources-policies__employment-verification.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/general-information-and-resources/employee-resources-policies/hosting-non-government-speakers.md",
+       "name": "tts-c220f938-pages__general-information-and-resources__employee-resources-policies__hosting-non-government-speakers.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/general-information-and-resources/employee-resources-policies/supporting-deaf-hoh-colleagues.md",
+       "name": "tts-c220f938-pages__general-information-and-resources__employee-resources-policies__supporting-deaf-hoh-colleagues.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/general-information-and-resources/employee-resources-policies/transit-benefit.md",
+       "name": "tts-c220f938-pages__general-information-and-resources__employee-resources-policies__transit-benefit.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/general-information-and-resources/employee-resources-policies/veterans-service-members.md",
+       "name": "tts-c220f938-pages__general-information-and-resources__employee-resources-policies__veterans-service-members.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/general-information-and-resources/employee-resources-policies/work-schedules.md",
+       "name": "tts-c220f938-pages__general-information-and-resources__employee-resources-policies__work-schedules.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/general-information-and-resources/general-contacts.md",
+       "name": "tts-c220f938-pages__general-information-and-resources__general-contacts.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/general-information-and-resources/glossary.md",
+       "name": "tts-c220f938-pages__general-information-and-resources__glossary.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/general-information-and-resources/how-we-collaborate.md",
+       "name": "tts-c220f938-pages__general-information-and-resources__how-we-collaborate.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/general-information-and-resources/inclusive-behaviors.md",
+       "name": "tts-c220f938-pages__general-information-and-resources__inclusive-behaviors.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/general-information-and-resources/new-york-city.md",
+       "name": "tts-c220f938-pages__general-information-and-resources__new-york-city.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/general-information-and-resources/purchase-requests.md",
+       "name": "tts-c220f938-pages__general-information-and-resources__purchase-requests.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/general-information-and-resources/reasonable-accommodations.md",
+       "name": "tts-c220f938-pages__general-information-and-resources__reasonable-accommodations.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/general-information-and-resources/san-francisco.md",
+       "name": "tts-c220f938-pages__general-information-and-resources__san-francisco.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/general-information-and-resources/sensitive-information.md",
+       "name": "tts-c220f938-pages__general-information-and-resources__sensitive-information.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/general-information-and-resources/software.md",
+       "name": "tts-c220f938-pages__general-information-and-resources__software.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/general-information-and-resources/tech-policies/bug-bounty.md",
+       "name": "tts-c220f938-pages__general-information-and-resources__tech-policies__bug-bounty.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/general-information-and-resources/tech-policies/fitara.md",
+       "name": "tts-c220f938-pages__general-information-and-resources__tech-policies__fitara.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/general-information-and-resources/tech-policies/gsa-pages.md",
+       "name": "tts-c220f938-pages__general-information-and-resources__tech-policies__gsa-pages.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/general-information-and-resources/tech-policies/open-source.md",
+       "name": "tts-c220f938-pages__general-information-and-resources__tech-policies__open-source.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/general-information-and-resources/tech-policies/password-requirements.md",
+       "name": "tts-c220f938-pages__general-information-and-resources__tech-policies__password-requirements.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/general-information-and-resources/tech-policies/records-management.md",
+       "name": "tts-c220f938-pages__general-information-and-resources__tech-policies__records-management.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/general-information-and-resources/tech-policies/responding-to-public-disclosure-vulnerabilities.md",
+       "name": "tts-c220f938-pages__general-information-and-resources__tech-policies__responding-to-public-disclosure-vulnerabilities.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/general-information-and-resources/tech-policies/security-incidents.md",
+       "name": "tts-c220f938-pages__general-information-and-resources__tech-policies__security-incidents.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/general-information-and-resources/washington-dc.md",
+       "name": "tts-c220f938-pages__general-information-and-resources__washington-dc.md"
+      }
+     ],
+     "sha256": "f6a7cd9ff9ddc11e1e1178f2118e591c68d826c847b7e5222b2aba005dd57e20"
+    },
+    {
+     "id": "tts-travel-and-leave",
+     "title": "TTS Handbook: travel and leave",
+     "parser": "markdown",
+     "version": "handbook@c220f938",
+     "files": [
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/travel-and-leave/advanced-sick-leave.md",
+       "name": "tts-c220f938-pages__travel-and-leave__advanced-sick-leave.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/travel-and-leave/fmla.md",
+       "name": "tts-c220f938-pages__travel-and-leave__fmla.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/travel-and-leave/going-out-of-office.md",
+       "name": "tts-c220f938-pages__travel-and-leave__going-out-of-office.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/travel-and-leave/july-13-travel-guidance.md",
+       "name": "tts-c220f938-pages__travel-and-leave__july-13-travel-guidance.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/travel-and-leave/leave.md",
+       "name": "tts-c220f938-pages__travel-and-leave__leave.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/travel-and-leave/overtime.md",
+       "name": "tts-c220f938-pages__travel-and-leave__overtime.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/travel-and-leave/paid-parental-leave.md",
+       "name": "tts-c220f938-pages__travel-and-leave__paid-parental-leave.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/travel-and-leave/travel-and-leave-policies/first-time-travel-complete-concur-profile.md",
+       "name": "tts-c220f938-pages__travel-and-leave__travel-and-leave-policies__first-time-travel-complete-concur-profile.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/travel-and-leave/travel-and-leave-policies/first-time-travel-get-in-concur-pre-olu.md",
+       "name": "tts-c220f938-pages__travel-and-leave__travel-and-leave-policies__first-time-travel-get-in-concur-pre-olu.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/travel-and-leave/travel-and-leave-policies/first-time-travel-get-in-concur.md",
+       "name": "tts-c220f938-pages__travel-and-leave__travel-and-leave-policies__first-time-travel-get-in-concur.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/travel-and-leave/travel-and-leave-policies/first-time-travel-travel-card.md",
+       "name": "tts-c220f938-pages__travel-and-leave__travel-and-leave-policies__first-time-travel-travel-card.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/travel-and-leave/travel-and-leave-policies/moving.md",
+       "name": "tts-c220f938-pages__travel-and-leave__travel-and-leave-policies__moving.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/travel-and-leave/travel-and-leave-policies/travel-guide-2-book-travel.md",
+       "name": "tts-c220f938-pages__travel-and-leave__travel-and-leave-policies__travel-guide-2-book-travel.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/travel-and-leave/travel-and-leave-policies/travel-guide-3-travel.md",
+       "name": "tts-c220f938-pages__travel-and-leave__travel-and-leave-policies__travel-guide-3-travel.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/travel-and-leave/travel-and-leave-policies/travel-guide-4-reimbursement.md",
+       "name": "tts-c220f938-pages__travel-and-leave__travel-and-leave-policies__travel-guide-4-reimbursement.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/travel-and-leave/travel-and-leave-policies/travel-guide-a-amended-authorizations.md",
+       "name": "tts-c220f938-pages__travel-and-leave__travel-and-leave-policies__travel-guide-a-amended-authorizations.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/travel-and-leave/travel-and-leave-policies/travel-guide-b-after-hours-emergency-travel-authorizations.md",
+       "name": "tts-c220f938-pages__travel-and-leave__travel-and-leave-policies__travel-guide-b-after-hours-emergency-travel-authorizations.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/travel-and-leave/travel-and-leave-policies/travel-guide-email-templates.md",
+       "name": "tts-c220f938-pages__travel-and-leave__travel-and-leave-policies__travel-guide-email-templates.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/travel-and-leave/travel-and-leave-policies/travel-guide-faq.md",
+       "name": "tts-c220f938-pages__travel-and-leave__travel-and-leave-policies__travel-guide-faq.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/travel-and-leave/travel-and-leave-policies/unofficial-foreign-travel.md",
+       "name": "tts-c220f938-pages__travel-and-leave__travel-and-leave-policies__unofficial-foreign-travel.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/travel-and-leave/travel-and-leave-policies/working-while-traveling.md",
+       "name": "tts-c220f938-pages__travel-and-leave__travel-and-leave-policies__working-while-traveling.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/travel-and-leave/travel-guide-table-of-contents.md",
+       "name": "tts-c220f938-pages__travel-and-leave__travel-guide-table-of-contents.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/travel-and-leave/voluntary-leave-transfer-program.md",
+       "name": "tts-c220f938-pages__travel-and-leave__voluntary-leave-transfer-program.md"
+      }
+     ],
+     "sha256": "f158ef4bc69e36c7eeb52d9863b742e4d667f8cdfc78ad2feb40ca56c0de035d"
+    },
+    {
+     "id": "tts-tools",
+     "title": "TTS Handbook: tools",
+     "parser": "markdown",
+     "version": "handbook@c220f938",
+     "files": [
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/tools/adobe.md",
+       "name": "tts-c220f938-pages__tools__adobe.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/tools/airtable.md",
+       "name": "tts-c220f938-pages__tools__airtable.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/tools/analytics.md",
+       "name": "tts-c220f938-pages__tools__analytics.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/tools/channels/index.md",
+       "name": "tts-c220f938-pages__tools__channels__index.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/tools/digital-signatures.md",
+       "name": "tts-c220f938-pages__tools__digital-signatures.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/tools/docker-hub.md",
+       "name": "tts-c220f938-pages__tools__docker-hub.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/tools/eventbrite.md",
+       "name": "tts-c220f938-pages__tools__eventbrite.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/tools/figma.md",
+       "name": "tts-c220f938-pages__tools__figma.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/tools/git-signing.md",
+       "name": "tts-c220f938-pages__tools__git-signing.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/tools/github.md",
+       "name": "tts-c220f938-pages__tools__github.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/tools/gmail.md",
+       "name": "tts-c220f938-pages__tools__gmail.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/tools/google-calendar.md",
+       "name": "tts-c220f938-pages__tools__google-calendar.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/tools/google-drive.md",
+       "name": "tts-c220f938-pages__tools__google-drive.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/tools/google-groups.md",
+       "name": "tts-c220f938-pages__tools__google-groups.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/tools/google-meet.md",
+       "name": "tts-c220f938-pages__tools__google-meet.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/tools/hrlinks.md",
+       "name": "tts-c220f938-pages__tools__hrlinks.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/tools/mural.md",
+       "name": "tts-c220f938-pages__tools__mural.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/tools/new-relic.md",
+       "name": "tts-c220f938-pages__tools__new-relic.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/tools/npm.md",
+       "name": "tts-c220f938-pages__tools__npm.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/tools/office.md",
+       "name": "tts-c220f938-pages__tools__office.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/tools/pages.md",
+       "name": "tts-c220f938-pages__tools__pages.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/tools/qualtrics.md",
+       "name": "tts-c220f938-pages__tools__qualtrics.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/tools/sharedcalendars.md",
+       "name": "tts-c220f938-pages__tools__sharedcalendars.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/tools/sketch.md",
+       "name": "tts-c220f938-pages__tools__sketch.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/tools/slack.md",
+       "name": "tts-c220f938-pages__tools__slack.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/tools/slack/external-collaboration.md",
+       "name": "tts-c220f938-pages__tools__slack__external-collaboration.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/tools/slack/getting-started.md",
+       "name": "tts-c220f938-pages__tools__slack__getting-started.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/tools/slack/guidelines.md",
+       "name": "tts-c220f938-pages__tools__slack__guidelines.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/tools/slack/integrations.md",
+       "name": "tts-c220f938-pages__tools__slack__integrations.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/tools/slack/notifications-general-communication.md",
+       "name": "tts-c220f938-pages__tools__slack__notifications-general-communication.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/tools/slack/records.md",
+       "name": "tts-c220f938-pages__tools__slack__records.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/tools/slack/user-management.md",
+       "name": "tts-c220f938-pages__tools__slack__user-management.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/tools/smartsheet.md",
+       "name": "tts-c220f938-pages__tools__smartsheet.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/tools/teams.md",
+       "name": "tts-c220f938-pages__tools__teams.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/tools/text-editors.md",
+       "name": "tts-c220f938-pages__tools__text-editors.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/tools/tock.md",
+       "name": "tts-c220f938-pages__tools__tock.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/tools/trello.md",
+       "name": "tts-c220f938-pages__tools__trello.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/tools/virtual-desktop.md",
+       "name": "tts-c220f938-pages__tools__virtual-desktop.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/tools/vmware-fusion.md",
+       "name": "tts-c220f938-pages__tools__vmware-fusion.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/tools/vmware-horizon.md",
+       "name": "tts-c220f938-pages__tools__vmware-horizon.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/tools/zoom.md",
+       "name": "tts-c220f938-pages__tools__zoom.md"
+      }
+     ],
+     "sha256": "acf3da717f9cc3b7e5426d51e11d549bad5f761650b15db1289c5f7320bfb4be"
+    },
+    {
+     "id": "tts-getting-started",
+     "title": "TTS Handbook: getting started",
+     "parser": "markdown",
+     "version": "handbook@c220f938",
+     "files": [
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/getting-started/classes.md",
+       "name": "tts-c220f938-pages__getting-started__classes.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/getting-started/classes/accessibility.md",
+       "name": "tts-c220f938-pages__getting-started__classes__accessibility.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/getting-started/classes/benefits.md",
+       "name": "tts-c220f938-pages__getting-started__classes__benefits.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/getting-started/classes/gsa-internal-tools.md",
+       "name": "tts-c220f938-pages__getting-started__classes__gsa-internal-tools.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/getting-started/classes/intro-to-TTS-Tech-Portfolio.md",
+       "name": "tts-c220f938-pages__getting-started__classes__intro-to-TTS-Tech-Portfolio.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/getting-started/classes/meetings-and-meeting-tools.md",
+       "name": "tts-c220f938-pages__getting-started__classes__meetings-and-meeting-tools.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/getting-started/classes/travel-101.md",
+       "name": "tts-c220f938-pages__getting-started__classes__travel-101.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/getting-started/classes/writing-lab.md",
+       "name": "tts-c220f938-pages__getting-started__classes__writing-lab.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/getting-started/equipment.md",
+       "name": "tts-c220f938-pages__getting-started__equipment.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/getting-started/how-to-log-in.md",
+       "name": "tts-c220f938-pages__getting-started__how-to-log-in.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/getting-started/index.md",
+       "name": "tts-c220f938-pages__getting-started__index.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/getting-started/piv.md",
+       "name": "tts-c220f938-pages__getting-started__piv.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/getting-started/welcome-letter.md",
+       "name": "tts-c220f938-pages__getting-started__welcome-letter.md"
+      }
+     ],
+     "sha256": "aa93759b2a60b1abb888a342f5bfd16c40eaf9d76f8045ac2c4dc6c493d1a6cf"
+    },
+    {
+     "id": "tts-about-us",
+     "title": "TTS Handbook: about us",
+     "parser": "markdown",
+     "version": "handbook@c220f938",
+     "files": [
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/about-us/centers-of-excellence/about/handbook.md",
+       "name": "tts-c220f938-pages__about-us__centers-of-excellence__about__handbook.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/about-us/centers-of-excellence/about/mission.md",
+       "name": "tts-c220f938-pages__about-us__centers-of-excellence__about__mission.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/about-us/centers-of-excellence/about/planning.md",
+       "name": "tts-c220f938-pages__about-us__centers-of-excellence__about__planning.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/about-us/centers-of-excellence/engagements/index.md",
+       "name": "tts-c220f938-pages__about-us__centers-of-excellence__engagements__index.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/about-us/centers-of-excellence/index.md",
+       "name": "tts-c220f938-pages__about-us__centers-of-excellence__index.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/about-us/centers-of-excellence/operations/brand.md",
+       "name": "tts-c220f938-pages__about-us__centers-of-excellence__operations__brand.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/about-us/centers-of-excellence/operations/collaboration.md",
+       "name": "tts-c220f938-pages__about-us__centers-of-excellence__operations__collaboration.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/about-us/centers-of-excellence/operations/conduct-and-norms.md",
+       "name": "tts-c220f938-pages__about-us__centers-of-excellence__operations__conduct-and-norms.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/about-us/centers-of-excellence/operations/delivery-assurance.md",
+       "name": "tts-c220f938-pages__about-us__centers-of-excellence__operations__delivery-assurance.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/about-us/centers-of-excellence/operations/finance.md",
+       "name": "tts-c220f938-pages__about-us__centers-of-excellence__operations__finance.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/about-us/centers-of-excellence/operations/glossary.md",
+       "name": "tts-c220f938-pages__about-us__centers-of-excellence__operations__glossary.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/about-us/centers-of-excellence/operations/internal-communications.md",
+       "name": "tts-c220f938-pages__about-us__centers-of-excellence__operations__internal-communications.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/about-us/centers-of-excellence/operations/onboarding.md",
+       "name": "tts-c220f938-pages__about-us__centers-of-excellence__operations__onboarding.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/about-us/centers-of-excellence/operations/performance.md",
+       "name": "tts-c220f938-pages__about-us__centers-of-excellence__operations__performance.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/about-us/centers-of-excellence/operations/records.md",
+       "name": "tts-c220f938-pages__about-us__centers-of-excellence__operations__records.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/about-us/centers-of-excellence/operations/regulations.md",
+       "name": "tts-c220f938-pages__about-us__centers-of-excellence__operations__regulations.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/about-us/centers-of-excellence/operations/supervisor-responsibilities.md",
+       "name": "tts-c220f938-pages__about-us__centers-of-excellence__operations__supervisor-responsibilities.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/about-us/centers-of-excellence/operations/tock.md",
+       "name": "tts-c220f938-pages__about-us__centers-of-excellence__operations__tock.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/about-us/centers-of-excellence/operations/training.md",
+       "name": "tts-c220f938-pages__about-us__centers-of-excellence__operations__training.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/about-us/centers-of-excellence/operations/welcome.md",
+       "name": "tts-c220f938-pages__about-us__centers-of-excellence__operations__welcome.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/about-us/code-of-conduct.md",
+       "name": "tts-c220f938-pages__about-us__code-of-conduct.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/about-us/digital-council.md",
+       "name": "tts-c220f938-pages__about-us__digital-council.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/about-us/mission.md",
+       "name": "tts-c220f938-pages__about-us__mission.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/about-us/tts-history.md",
+       "name": "tts-c220f938-pages__about-us__tts-history.md"
+      }
+     ],
+     "sha256": "26dd4edf1a1182aff125fcc847fbc466b63fdb34d0ad04488345bda66a130b49"
+    },
+    {
+     "id": "tts-training-and-development",
+     "title": "TTS Handbook: training and development",
+     "parser": "markdown",
+     "version": "handbook@c220f938",
+     "files": [
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/training-and-development/conferences-events-training.md",
+       "name": "tts-c220f938-pages__training-and-development__conferences-events-training.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/training-and-development/details-professional-development.md",
+       "name": "tts-c220f938-pages__training-and-development__details-professional-development.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/training-and-development/external-speaking-request-playbook.md",
+       "name": "tts-c220f938-pages__training-and-development__external-speaking-request-playbook.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/training-and-development/idp.md",
+       "name": "tts-c220f938-pages__training-and-development__idp.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/training-and-development/index.md",
+       "name": "tts-c220f938-pages__training-and-development__index.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/training-and-development/intro-to-github.md",
+       "name": "tts-c220f938-pages__training-and-development__intro-to-github.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/training-and-development/olu.md",
+       "name": "tts-c220f938-pages__training-and-development__olu.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/training-and-development/pra-for-user-research.md",
+       "name": "tts-c220f938-pages__training-and-development__pra-for-user-research.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/training-and-development/working-groups-and-guilds-101.md",
+       "name": "tts-c220f938-pages__training-and-development__working-groups-and-guilds-101.md"
+      }
+     ],
+     "sha256": "38cc2392a68b2b29bf78aa66c361fcf4a9978f0539ae86a0f7da49c464b73986"
+    },
+    {
+     "id": "tts-hiring-staying-or-changing-jobs",
+     "title": "TTS Handbook: hiring staying or changing jobs",
+     "parser": "markdown",
+     "version": "handbook@c220f938",
+     "files": [
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/hiring-staying-or-changing-jobs/assignee-detail.md",
+       "name": "tts-c220f938-pages__hiring-staying-or-changing-jobs__assignee-detail.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/hiring-staying-or-changing-jobs/external-details.md",
+       "name": "tts-c220f938-pages__hiring-staying-or-changing-jobs__external-details.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/hiring-staying-or-changing-jobs/fair-and-equitable-hiring-practices.md",
+       "name": "tts-c220f938-pages__hiring-staying-or-changing-jobs__fair-and-equitable-hiring-practices.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/hiring-staying-or-changing-jobs/gsa-details.md",
+       "name": "tts-c220f938-pages__hiring-staying-or-changing-jobs__gsa-details.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/hiring-staying-or-changing-jobs/hiring-authorities.md",
+       "name": "tts-c220f938-pages__hiring-staying-or-changing-jobs__hiring-authorities.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/hiring-staying-or-changing-jobs/hiring.md",
+       "name": "tts-c220f938-pages__hiring-staying-or-changing-jobs__hiring.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/hiring-staying-or-changing-jobs/leaving-tts.md",
+       "name": "tts-c220f938-pages__hiring-staying-or-changing-jobs__leaving-tts.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/hiring-staying-or-changing-jobs/promotions.md",
+       "name": "tts-c220f938-pages__hiring-staying-or-changing-jobs__promotions.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/hiring-staying-or-changing-jobs/resume.md",
+       "name": "tts-c220f938-pages__hiring-staying-or-changing-jobs__resume.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/hiring-staying-or-changing-jobs/term-extensions.md",
+       "name": "tts-c220f938-pages__hiring-staying-or-changing-jobs__term-extensions.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/hiring-staying-or-changing-jobs/ttsjobs.md",
+       "name": "tts-c220f938-pages__hiring-staying-or-changing-jobs__ttsjobs.md"
+      }
+     ],
+     "sha256": "0ab2864590c9b34b8302fc544a43ab41c1bbcf95f64ca0a77385edd28bd908b9"
+    },
+    {
+     "id": "tts-performance-management",
+     "title": "TTS Handbook: performance management and supervisor resources",
+     "parser": "markdown",
+     "version": "handbook@c220f938",
+     "files": [
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/performance-management/dates.md",
+       "name": "tts-c220f938-pages__performance-management__dates.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/performance-management/employee-resources.md",
+       "name": "tts-c220f938-pages__performance-management__employee-resources.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/performance-management/end-of-year/hrlinks-steps.md",
+       "name": "tts-c220f938-pages__performance-management__end-of-year__hrlinks-steps.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/performance-management/index.md",
+       "name": "tts-c220f938-pages__performance-management__index.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/performance-management/mid-year.md",
+       "name": "tts-c220f938-pages__performance-management__mid-year.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/performance-management/mid-year/hrlinks-steps.md",
+       "name": "tts-c220f938-pages__performance-management__mid-year__hrlinks-steps.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/performance-management/supervisor-resources.md",
+       "name": "tts-c220f938-pages__performance-management__supervisor-resources.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/supervisor-resources/new-supervisor-playbook.md",
+       "name": "tts-c220f938-pages__supervisor-resources__new-supervisor-playbook.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/supervisor-resources/new-supervisor-playbook/play-1.md",
+       "name": "tts-c220f938-pages__supervisor-resources__new-supervisor-playbook__play-1.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/supervisor-resources/new-supervisor-playbook/play-10.md",
+       "name": "tts-c220f938-pages__supervisor-resources__new-supervisor-playbook__play-10.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/supervisor-resources/new-supervisor-playbook/play-11.md",
+       "name": "tts-c220f938-pages__supervisor-resources__new-supervisor-playbook__play-11.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/supervisor-resources/new-supervisor-playbook/play-12.md",
+       "name": "tts-c220f938-pages__supervisor-resources__new-supervisor-playbook__play-12.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/supervisor-resources/new-supervisor-playbook/play-2.md",
+       "name": "tts-c220f938-pages__supervisor-resources__new-supervisor-playbook__play-2.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/supervisor-resources/new-supervisor-playbook/play-3.md",
+       "name": "tts-c220f938-pages__supervisor-resources__new-supervisor-playbook__play-3.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/supervisor-resources/new-supervisor-playbook/play-4.md",
+       "name": "tts-c220f938-pages__supervisor-resources__new-supervisor-playbook__play-4.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/supervisor-resources/new-supervisor-playbook/play-5.md",
+       "name": "tts-c220f938-pages__supervisor-resources__new-supervisor-playbook__play-5.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/supervisor-resources/new-supervisor-playbook/play-6.md",
+       "name": "tts-c220f938-pages__supervisor-resources__new-supervisor-playbook__play-6.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/supervisor-resources/new-supervisor-playbook/play-7.md",
+       "name": "tts-c220f938-pages__supervisor-resources__new-supervisor-playbook__play-7.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/supervisor-resources/new-supervisor-playbook/play-8.md",
+       "name": "tts-c220f938-pages__supervisor-resources__new-supervisor-playbook__play-8.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/supervisor-resources/new-supervisor-playbook/play-9.md",
+       "name": "tts-c220f938-pages__supervisor-resources__new-supervisor-playbook__play-9.md"
+      }
+     ],
+     "sha256": "d8502b61675bdd3a4be00a475341c0f219b4f0c8eb5e72d233e90dfca95d3e38"
+    },
+    {
+     "id": "tts-18f",
+     "title": "TTS Handbook: 18f",
+     "parser": "markdown",
+     "version": "handbook@c220f938",
+     "files": [
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/18f/chapters/account-manager.md",
+       "name": "tts-c220f938-pages__18f__chapters__account-manager.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/18f/chapters/acqstack.md",
+       "name": "tts-c220f938-pages__18f__chapters__acqstack.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/18f/chapters/design.md",
+       "name": "tts-c220f938-pages__18f__chapters__design.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/18f/chapters/engineering.md",
+       "name": "tts-c220f938-pages__18f__chapters__engineering.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/18f/chapters/product.md",
+       "name": "tts-c220f938-pages__18f__chapters__product.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/18f/history-and-values.md",
+       "name": "tts-c220f938-pages__18f__history-and-values.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/18f/how-18f-works/accessing-dod-systems.md",
+       "name": "tts-c220f938-pages__18f__how-18f-works__accessing-dod-systems.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/18f/how-18f-works/agreements.md",
+       "name": "tts-c220f938-pages__18f__how-18f-works__agreements.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/18f/how-18f-works/business-development.md",
+       "name": "tts-c220f938-pages__18f__how-18f-works__business-development.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/18f/how-18f-works/changing-your-name.md",
+       "name": "tts-c220f938-pages__18f__how-18f-works__changing-your-name.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/18f/how-18f-works/client-accounts.md",
+       "name": "tts-c220f938-pages__18f__how-18f-works__client-accounts.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/18f/how-18f-works/contractors.md",
+       "name": "tts-c220f938-pages__18f__how-18f-works__contractors.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/18f/how-18f-works/one-on-ones.md",
+       "name": "tts-c220f938-pages__18f__how-18f-works__one-on-ones.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/18f/how-18f-works/procurements-over-10000.md",
+       "name": "tts-c220f938-pages__18f__how-18f-works__procurements-over-10000.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/18f/how-18f-works/project-lifecycle.md",
+       "name": "tts-c220f938-pages__18f__how-18f-works__project-lifecycle.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/18f/how-18f-works/research-guidelines.md",
+       "name": "tts-c220f938-pages__18f__how-18f-works__research-guidelines.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/18f/how-18f-works/staffing-projects.md",
+       "name": "tts-c220f938-pages__18f__how-18f-works__staffing-projects.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/18f/how-18f-works/state-local-agreements.md",
+       "name": "tts-c220f938-pages__18f__how-18f-works__state-local-agreements.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/18f/leadership-resources/leadership-candidate-guide.md",
+       "name": "tts-c220f938-pages__18f__leadership-resources__leadership-candidate-guide.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/18f/leadership-resources/leadership-selection.md",
+       "name": "tts-c220f938-pages__18f__leadership-resources__leadership-selection.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/18f/projects-partners/acquisition-engagement-types.md",
+       "name": "tts-c220f938-pages__18f__projects-partners__acquisition-engagement-types.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/18f/projects-partners/consulting-engineering-guide.md",
+       "name": "tts-c220f938-pages__18f__projects-partners__consulting-engineering-guide.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/18f/projects-partners/how-we-relate-to-partners.md",
+       "name": "tts-c220f938-pages__18f__projects-partners__how-we-relate-to-partners.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/18f/projects-partners/leading-projects.md",
+       "name": "tts-c220f938-pages__18f__projects-partners__leading-projects.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/18f/projects-partners/project-teams.md",
+       "name": "tts-c220f938-pages__18f__projects-partners__project-teams.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/18f/projects-partners/projects-in-distress.md",
+       "name": "tts-c220f938-pages__18f__projects-partners__projects-in-distress.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/18f/projects-partners/working-on-an-acquisition-engagement.md",
+       "name": "tts-c220f938-pages__18f__projects-partners__working-on-an-acquisition-engagement.md"
+      }
+     ],
+     "sha256": "5a69f79ba86243f9868ba08f0cd69e201301d1792b74437dbf54570d641f95b6"
+    },
+    {
+     "id": "tts-office-of-operations",
+     "title": "TTS Handbook: office of operations and launching software",
+     "parser": "markdown",
+     "version": "handbook@c220f938",
+     "files": [
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/launching-software/infrastructure.md",
+       "name": "tts-c220f938-pages__launching-software__infrastructure.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/launching-software/laws.md",
+       "name": "tts-c220f938-pages__launching-software__laws.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/launching-software/lifecycle.md",
+       "name": "tts-c220f938-pages__launching-software__lifecycle.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/launching-software/privacy.md",
+       "name": "tts-c220f938-pages__launching-software__privacy.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/launching-software/security.md",
+       "name": "tts-c220f938-pages__launching-software__security.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/office-of-operations/bizops.md",
+       "name": "tts-c220f938-pages__office-of-operations__bizops.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/office-of-operations/blogging.md",
+       "name": "tts-c220f938-pages__office-of-operations__blogging.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/office-of-operations/empmo.md",
+       "name": "tts-c220f938-pages__office-of-operations__empmo.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/office-of-operations/fas-speaker-guide.md",
+       "name": "tts-c220f938-pages__office-of-operations__fas-speaker-guide.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/office-of-operations/market-dev-and-partnerships.md",
+       "name": "tts-c220f938-pages__office-of-operations__market-dev-and-partnerships.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/office-of-operations/outreach.md",
+       "name": "tts-c220f938-pages__office-of-operations__outreach.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/office-of-operations/social-media.md",
+       "name": "tts-c220f938-pages__office-of-operations__social-media.md"
+      },
+      {
+       "url": "https://raw.githubusercontent.com/GSA-TTS/handbook/c220f93896b39e9e4ab0f486a1d5bf346ac06e3e/pages/office-of-operations/talent.md",
+       "name": "tts-c220f938-pages__office-of-operations__talent.md"
+      }
+     ],
+     "sha256": "d4187c87e075abd2a8ef43c687d909a515b28523b672e47dd1efafc8e40106a1"
+    }
+   ]
+  }
+ }
+}

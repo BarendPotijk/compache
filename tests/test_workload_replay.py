@@ -1,7 +1,7 @@
 import unittest
 from datetime import datetime, timedelta
 
-from test_optimizer import END, labels_for, thread
+from helpers import END, labels_for, thread
 
 from compache.optimizer.contracts import ModelSpec
 from compache.optimizer.retention import RetentionRecipe

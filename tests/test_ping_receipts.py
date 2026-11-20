@@ -20,7 +20,7 @@ from compache.optimizer import (
 )
 from compache.traces import ContractError
 from compache.optimizer.distribution import plan_distribution_idle
-from test_optimizer import END, labels_for, thread
+from helpers import END, labels_for, thread
 
 
 class PingReceipts(unittest.TestCase):

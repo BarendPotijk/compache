@@ -14,6 +14,7 @@ from .optimizer.retention import RetentionRecipe
 from .optimizer.shared_prefix import COMPONENTS, SharedPrefixCatalog
 from .optimizer.workload import fit_workload, header_usage
 from .optimizer.workload_replay import replay_workload
+from .optimizer.workload_solve import solve_workload
 from .traces import ContractError, load_threads
 
 
@@ -26,6 +27,10 @@ def register_planner(groups):
         "fit",
         help="Fit demand, retention, and optional header reuse on training traces",
     )
+    solve = commands.add_parser(
+        "solve",
+        help="Fit a policy and choose its cut and ping count by replayed cost on these threads",
+    )
     replay = commands.add_parser(
         "replay", help="Compare a frozen planner with the preserve-all reference"
     )
@@ -33,7 +38,7 @@ def register_planner(groups):
         "headers", help="Price the first request of a new thread with a shared header"
     )
 
-    for command in (fit, replay):
+    for command in (fit, solve, replay):
         command.add_argument(
             "--calls-per-run",
             type=Path,
@@ -64,9 +69,9 @@ def register_planner(groups):
             default="",
             help="Shared cache routing key for this trace cohort",
         )
-    for command in (fit, headers):
+    for command in (fit, solve, headers):
         command.add_argument("--model-spec", type=Path, required=True)
-    for command in (fit, replay, headers):
+    for command in (fit, solve, replay, headers):
         command.add_argument(
             "--header",
             type=Path,
@@ -80,11 +85,44 @@ def register_planner(groups):
             "Default: estimate from the model spec's bytes_per_token.",
         )
 
+    solve.add_argument("--retention-floor", type=float, default=0.95)
+    solve.add_argument(
+        "--tradeoff-floor",
+        type=float,
+        default=0.8,
+        help="Lowest retention a cut may have; below --retention-floor it pays for what it loses",
+    )
+    solve.add_argument(
+        "--unknowns", choices=("excluded", "worst_case"), default="excluded"
+    )
+    solve.add_argument(
+        "--ping-counts",
+        type=int,
+        nargs="+",
+        default=[0, 1, 3],
+        help="Ping limits to price for each idle period",
+    )
+    solve.add_argument(
+        "--folds",
+        type=int,
+        default=3,
+        help="A thread is priced by a demand model fitted on the other folds",
+    )
+    solve.add_argument(
+        "--retention-threads",
+        type=Path,
+        help="Threads that carry the labelled runs, when those differ from --threads",
+    )
     fit.add_argument("--retention-floor", type=float, default=0.95)
     fit.add_argument(
         "--next-endpoint-reuse-fraction",
         type=Path,
         help="JSON object mapping nonterminal training run IDs to the reusable fraction of their published prefix on the next foreground input",
+    )
+    fit.add_argument(
+        "--tradeoff-floor",
+        type=float,
+        help="Let a recipe between this floor and --retention-floor compete, charging each requirement it loses one request to recover it",
     )
     fit.add_argument(
         "--unknowns",
@@ -124,7 +162,11 @@ def register_planner(groups):
     replay.add_argument(
         "--sampler", choices=("brownian", "empirical"), default="brownian"
     )
-    replay.add_argument("--max-pings", type=int, default=1)
+    replay.add_argument(
+        "--max-pings",
+        type=int,
+        help="Default: the count a solved policy carries, otherwise 1",
+    )
     replay.add_argument(
         "--modeled-ping-output-tokens",
         type=int,
@@ -334,6 +376,38 @@ def run_planner(args):
         cache_key=args.cache_key,
     )
     labels = _read_jsonl(args.labels) if args.labels is not None else []
+    if args.action == "solve":
+        if counts is not None:
+            raise ContractError("planner solve does not take --calls-per-run")
+        result = solve_workload(
+            threads,
+            labels,
+            spec,
+            observation_end=args.observation_end,
+            **header,
+            tokenize=tokenize,
+            retention_threads=load_threads(args.retention_threads)
+            if args.retention_threads
+            else None,
+            retention_floor=args.retention_floor,
+            tradeoff_floor=args.tradeoff_floor,
+            unknowns=args.unknowns,
+            ping_counts=args.ping_counts,
+            folds=args.folds,
+            provider=args.provider,
+            cache_key=args.cache_key,
+        )
+        result["header_token_ruler"] = ruler
+        _write_json(args.output, result)
+        solved = result["solve"]
+        return {
+            "output": str(args.output),
+            "training_threads": len(threads),
+            "folds": solved["folds"],
+            "candidates": len(solved["candidates"]),
+            "chosen": solved["chosen"],
+            "saving_fraction": solved["saving_fraction"],
+        }
     if args.action == "fit":
         options = {"recipes": _read_recipes(args.recipes)} if args.recipes else {}
         if args.next_endpoint_reuse_fraction:
@@ -360,6 +434,7 @@ def run_planner(args):
             observation_end=args.observation_end,
             horizon_seconds=args.horizon_seconds,
             retention_floor=args.retention_floor,
+            tradeoff_floor=args.tradeoff_floor,
             max_unknown_change_rate=args.max_unknown_change_rate,
             unknowns=args.unknowns,
             select=args.select,
@@ -381,7 +456,9 @@ def run_planner(args):
                         "recipe",
                         "coverage",
                         "coverage_lower_bound",
+                        "min_thread_coverage",
                         "compact_fraction",
+                        "expected_tokens",
                     )
                 }
                 for row in result["recipes"]

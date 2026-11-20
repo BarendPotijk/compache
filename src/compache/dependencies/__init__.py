@@ -16,7 +16,8 @@ def _safe_part(part: dict) -> dict:
 def build_packet(thread: Thread | dict, target_run_id: str) -> dict:
     t = Thread.from_dict(thread) if isinstance(thread, dict) else thread
     if not isinstance(t, Thread): raise ContractError("thread must be Thread or dict")
-    data = t.to_dict(); parts = {}
+    # Read the validated thread in place. Only the packet returned below is copied.
+    data = t._data; parts = {}
     for run in data["runs"]:
         for kind, items in (("input", [run["input"]]), ("retrieval", run["retrievals"]), ("output", [run["output"]])):
             for part in items:
@@ -146,3 +147,25 @@ def validate_label(label, packet):
         check(set(edge['target_claim_ids']).issubset(claim_ids), 'edge references unknown claim')
         check(set(edge['target_task_requirement_ids']).issubset(task_ids), 'edge references unknown task requirement')
     return errors[:100]
+
+
+def label_index(threads: list[Thread], labels: list[dict]) -> dict:
+    """Validated labels by target run. A packet is built only for a labelled run."""
+    # Python callers can construct individually valid threads without the
+    # cross-thread identity checks made by load_threads(). Labels are keyed by
+    # run ID, so a collision could leak a held-out observation.
+    thread_ids = [t.thread_id for t in threads]
+    run_ids = [r.run_id for t in threads for r in t.runs]
+    if len(set(thread_ids)) != len(thread_ids) or len(set(run_ids)) != len(run_ids):
+        raise ContractError("training/evaluation requires globally unique thread and run IDs")
+    owner = {r.run_id: t for t in threads for r in t.runs}
+    result = {}
+    for label in labels:
+        rid = label.get("target_run_id") if isinstance(label, dict) else None
+        if rid not in owner or rid in result:
+            raise ContractError("label targets must be unique runs in the supplied traces")
+        errors = validate_label(label, build_packet(owner[rid], rid))
+        if errors:
+            raise ContractError(f"invalid label for {rid}: " + "; ".join(errors[:3]))
+        result[rid] = label
+    return result

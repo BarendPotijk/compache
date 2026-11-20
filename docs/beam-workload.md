@@ -52,4 +52,41 @@ An answer takes one second plus its length at 60 tokens a second. These are assu
 
 - **Recency does not help.** For about 1% of assessed questions the whole evidence lies in the last tenth of the runs, and for about 10% in the last half.
 - **Kind does.** 83% of assessed questions cite user messages only, so keeping every user message keeps them answerable with no assistant text at all.
-- **Measured on the 13 smallest training threads.** Keeping every user message and no earlier assistant text keeps 80% of assessed questions answerable at 11% of the tokens. Keeping the last 100 runs of both keeps 33% at 85%. Neither reaches a 95% floor, and the fit's default grid cannot yet propose the first cut because it gives inputs and outputs one shared window.
+
+## First fit
+
+Fitted on the 59 training conversations (1,033 assessed questions, 143 candidate cuts) with `--retention-floor 0.95 --tradeoff-floor 0.8`, then scored on the 31 test conversations. Tokens are a share of the full history. Expected tokens add one more request for every question a cut leaves unanswerable.
+
+| Cut | Train: answerable | Train: tokens (expected) | Test: answerable | Test: tokens (expected) |
+|---|---|---|---|---|
+| Keep every user message, drop earlier assistant text (admitted) | 82.5% | 8.5% (10.8%) | 83.0% | 8.2% (10.4%) |
+| Also keep 200 runs of assistant text | 86.8% | 44% (51%) | | |
+| Also keep 500 runs of assistant text | 90.1% | 78% (89%) | | |
+| Also keep 1,000 runs of assistant text | 97.6% | 98% (104%) | 97.4% | 97% (102%) |
+
+- At a 95% floor alone the only passing cut is the last row, which costs more than it saves once recovery is priced.
+- The admitted cut holds between 80% and 85% in every size bucket of both splits. Its weakest conversation keeps 72%.
+- These are retention and token counts on recorded text. What a model recovers by reopening an archived message needs a live run.
+
+## Solved policies
+
+`planner solve` ran on the training conversations of one size and one return scenario, and its policy was then priced on that size's test conversations. Prices are 1.25 for a cache write, 0.1 for a read and 5 for output, on a 1M-token window. The saving is against keeping everything and includes the modeled cost of recovering what the cut loses.
+
+| Size | Cache lifetime | Returns | Pings chosen | Keep everything, per turn | Saving on test |
+|---|---|---|---|---|---|
+| 500K | 5 min | fast | up to 3 | 52k | 79% |
+| 500K | 5 min | mixed | up to 3 | 188k | 91% |
+| 500K | 5 min | slow | none | 349k | 89% |
+| 500K | 30 min | fast | up to 1 | 41k | 76% |
+| 500K | 30 min | mixed | up to 3 | 58k | 81% |
+| 500K | 30 min | slow | up to 3 | 206k | 91% |
+| 100K | 5 min | fast | up to 1 | 19k | 61% |
+| 100K | 5 min | mixed | up to 3 | 59k | 83% |
+| 100K | 5 min | slow | none | 102k | 85% |
+| 100K | 30 min | fast | none | 17k | 57% |
+| 100K | 30 min | mixed | up to 3 | 21k | 63% |
+| 100K | 30 min | slow | up to 3 | 62k | 84% |
+
+- Every solved policy uses the same cut: keep every user message and drop earlier assistant text. The ping count is what changes with behaviour.
+- The solver's choice was the cheapest candidate on the test conversations in 10 of the 12 cases and within 0.03% in the other two.
+- A size threshold, which never archives a small part, lifts the middle of the retention frontier by about three points at equal tokens. It is never the cheapest policy here.

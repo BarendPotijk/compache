@@ -10,11 +10,11 @@ from compache.traces import ContractError
 from .cache_breaks import CacheBreakChecker, CacheScope
 from .contracts import digest, number, seconds
 from .distribution import repeat_input_usage, validate_calls_per_run
-from .fit import label_index
-from .gate import Request, Source
+from compache.dependencies import label_index
+
+from .parts import Request, Source
 from .host_ledger import compare_host_ledger, host_contract
-from .replay import assess
-from .retention import RetentionRecipe, matched_prefix_tokens, render_recipe
+from .retention import RetentionRecipe, assess, matched_prefix_tokens, render_recipe
 from .shared_prefix import SharedPrefixCatalog
 from .workload import WorkloadPolicy, WorkloadSession
 

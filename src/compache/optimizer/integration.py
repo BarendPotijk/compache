@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from compache.traces import ContractError
-from .gate import Request, expand
+from .parts import Request, expand
 
 RETRIEVE_SCHEMA = {
     "name": "retrieve",

@@ -17,4 +17,4 @@ requires = ["uv_build>=0.13.7,<0.14.0"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
-source-include = ["docs/**", "examples/fitted_policy/**", "examples/workflows/**", "examples/headroom/**", "examples/rag_workload/**", "examples/rag_scaled/**", "examples/rag_long/README.md", "examples/rag_long/manifest.json", "examples/rag_long/results/**", "examples/rag_long/cold-compaction-results/**", "scripts/**", "skills/**", "benchmarks/**", "tests/**"]
+source-include = ["docs/**", "examples/fitted_policy/**", "examples/quickstart/**", "examples/headroom/**", "examples/rag_workload/**", "examples/rag_scaled/**", "examples/rag_long/README.md", "examples/rag_long/manifest.json", "examples/rag_long/results/**", "examples/rag_long/cold-compaction-results/**", "scripts/**", "skills/**", "benchmarks/**", "tests/**"]

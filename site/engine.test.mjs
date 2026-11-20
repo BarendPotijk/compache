@@ -32,7 +32,7 @@ test('prices sum and long tiers apply to fresh, cache, and output',()=>{
 test('compaction preserves current dependencies and recalls previously dropped retrievals',()=>{
   const c=config({systemTokens:100,cacheMinTokens:0,cacheBlockTokens:1,safetyReserve:0,target:.2, model:{context:1000,maxInput:1000},ttlMinutes:1});
   const w=workload([t(0,0),t(1,2),t(2,4,100,[{kind:'retrieval',turn:0},{kind:'input',turn:0},{kind:'output',turn:0}])]);
-  const r=runArm(w,c,'compache'); assert.ok(r.compactions>0); assert.equal(r.recalls,1); assert.equal(r.dependencies.required,3);assert.equal(r.dependencies.covered,3); assert.equal(r.dependencyCoverage,1); assert.equal(r.complete,true);
+  const r=runArm(w,c,'compache'); assert.ok(r.compactions>0); assert.equal(r.recalls,1); assert.equal(r.byRole.recovery.calls,1); assert.equal(r.byRole.answer.calls,3); assert.equal(r.retention.observed,2/3); assert.equal(r.dependencies.required,3);assert.equal(r.dependencies.covered,3); assert.equal(r.dependencyCoverage,1); assert.equal(r.complete,true);
 });
 test('summary and flush are separate charged calls with separate prefix identities',()=>{
   const c=config({systemTokens:100,cacheMinTokens:1,cacheBlockTokens:1,safetyReserve:0,tailTokens:100,summaryTokens:80,flushOutputTokens:5,model:{context:1000,maxInput:1000},ttlMinutes:10});
@@ -50,7 +50,7 @@ test('zero costs and zero dependencies have null denominators',()=>{
   assert.equal(r.savings.absolute,0); assert.equal(r.savings.percent,null); assert.equal(r.compache.dependencyCoverage,null);
 });
 test('negative savings are retained and not clamped after optimization',()=>{
-  const r=simulate({threads:1,plannedTurns:60,plannedTurnsP95:60,maxTurns:60,lengthDistribution:'fixed',continuationProbability:1,tokenMedian:25000,tokenP95:25000,companyVariation:0,dependencyProbability:.25,gapMedianMinutes:100,gapP95Minutes:100,keepWarm:false});
+  const r=simulate({threads:1,plannedTurns:60,plannedTurnsP95:60,maxTurns:60,lengthDistribution:'fixed',continuationProbability:1,tokenMedian:25000,tokenP95:25000,companyVariation:0,dependencyProbability:.25,gapMedianMinutes:100,gapP95Minutes:100,keepWarm:false,retentionRequirement:1});
   assert.ok(r.optimization.feasible && r.compache.complete && r.openclaw.complete); assert.ok(r.savings.absolute<0);
 });
 test('configuration bounds reject impossible values',()=>{
@@ -247,4 +247,33 @@ test('failed admission with decisions but no ledger remains safe',()=>{
   const c=config({systemTokens:100,safetyReserve:0,model:{context:1000,maxInput:100}});
   const r=runArm(workload([t(0,0,100)]),c,'compache',{collectLedger:false,collectDecisions:true});
   assert.equal(r.complete,false);assert.equal(r.ledger.length,0);assert.equal(r.decisions.length,1);assert.equal(r.decisions[0].admitted,false);
+});
+test('a fetched-back source costs one extra call that reads the prefix and a short reply',()=>{
+  const c=config({systemTokens:100,cacheMinTokens:0,safetyReserve:0,target:.2,recoveryOutputTokens:7,model:{context:1000,maxInput:1000},ttlMinutes:100});
+  const turns=[t(0,0),t(1,2),t(2,4,100,[{kind:'retrieval',turn:0}])], plain=[t(0,0),t(1,2),t(2,4,100)];
+  const r=runArm(workload(turns),c,'compache'), call=r.ledger.find(x=>x.role==='recovery'), answer=r.ledger.filter(x=>x.role==='answer').at(-1);
+  assert.equal(call.outputTokens,7); assert.equal(call.turn,2); assert.ok(call.cachedTokens>0);
+  assert.equal(answer.inputTokens,call.inputTokens+7+300); assert.equal(answer.cachedTokens,call.inputTokens);
+  assert.ok(r.totals.cost>runArm(workload(plain),c,'compache').totals.cost);
+});
+test('OpenClaw default clearing keeps the three newest tool results and fetches a cleared one again when needed',()=>{
+  const c=config({systemTokens:100,cacheMinTokens:0,safetyReserve:0,toolClearing:true,clearedTokens:5,model:{context:200000,maxInput:200000},ttlMinutes:100});
+  const turns=[t(0,0,20000),t(1,1,20000),t(2,2,20000),t(3,3,20000),t(4,4,20000,[{kind:'retrieval',turn:0},{kind:'retrieval',turn:3}])];
+  const off=runArm(workload(turns),{...c,toolClearing:false},'openclaw'), on=runArm(workload(turns),c,'openclaw');
+  assert.equal(off.clearings,0); assert.equal(off.recalls,0); assert.equal(off.retention.observed,1);
+  // Above 30% of the window (60,000 tokens) every result but the newest three is cleared: the first at run four, the second at run five.
+  assert.equal(on.clearings,2); assert.equal(on.recalls,1); assert.equal(on.byRole.recovery.calls,1);
+  assert.equal(on.retention.observed,.5); assert.equal(on.rawSourceAvailability,1);
+  const fourth=on.ledger.find(x=>x.role==='answer'&&x.turn===3); assert.equal(fourth.inputTokens,100+4*10+3*20+5+3*20000);
+  assert.equal(runArm(workload(turns),c,'compache').clearings,0);
+});
+test('the policy is fitted on one set of threads and both arms are costed on another',()=>{
+  const base={threads:4,plannedTurns:20,plannedTurnsP95:20,maxTurns:20,lengthDistribution:'fixed',continuationProbability:1,tokenMedian:60000,tokenP95:90000,seed:7};
+  const r=simulate(base), fitted=generateWorkload(configure(base)), held=generateWorkload(configure({...base,seed:8}));
+  assert.deepEqual(r.workload,held); assert.notDeepEqual(r.workload.threads,fitted.threads);
+  assert.equal(r.optimization.fittedThreads,4); assert.equal(r.optimization.fittedRuns,fitted.totalRuns);
+  const chosen=r.optimization.candidates.find(x=>x.feasible&&x.target===r.config.target&&x.warmTrigger===r.config.warmTrigger&&x.retrievalRetentionRuns===r.config.retrievalRetentionRuns);
+  assert.equal(chosen.cost,runArm(fitted,r.config,'compache',{collectDecisions:false,collectLedger:false}).totals.cost);
+  assert.equal(r.optimization.fittedRetention,chosen.retention);
+  assert.equal(r.compache.totals.cost,runArm(held,r.config,'compache').totals.cost);
 });

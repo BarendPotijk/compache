@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 import json
 from compache.optimizer.contracts import number
-from compache.optimizer.gate import Source
+from compache.optimizer.parts import Source
 from compache.traces import ContractError
 
 TEMPLATE = 'Output exactly the Markdown structure shown inside <template> and keep the section order unchanged. Do not include the <template> tags in your response.\n<template>\n## Objective\n- [one or two brief sentences describing what the user is trying to accomplish]\n\n## Important Details\n- [constraints/preferences, decisions and why, important facts/assumptions, exact context needed to continue, or "(none)"]\n\n## Work State\n### Completed\n- [finished work, verified facts, or changes made; otherwise "(none)"]\n\n### Active\n- [current work, partial changes, or investigation state; otherwise "(none)"]\n\n### Blocked\n- [blockers, failing commands, or unknowns; otherwise "(none)"]\n\n## Next Move\n1. [immediate concrete action, or "(none)"]\n2. [next action if known, or "(none)"]\n\n## Relevant Files\n- [file or directory path: why it matters, or "(none)"]\n</template>\n\nRules:\n- Keep every section, even when empty.\n- Use terse bullets, not prose paragraphs.\n- Preserve exact file paths, symbols, commands, error strings, URLs, and identifiers when known.\n- Do not mention the summary process or that context was compacted.'

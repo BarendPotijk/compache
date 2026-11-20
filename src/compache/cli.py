@@ -1,4 +1,4 @@
-"""Local-only RAG evidence, workload fitting, optimization and replay commands."""
+"""Local-only trace, dependency-label and workload planner commands."""
 
 from __future__ import annotations
 
@@ -53,13 +53,11 @@ def _write_jsonl(path: Path, values: list[dict]) -> None:
 
 
 def _parser() -> argparse.ArgumentParser:
-    from .setup_cli import register_setup
     from .workload_cli import register_planner
 
     parser = argparse.ArgumentParser(description=__doc__)
     groups = parser.add_subparsers(dest="group", required=True)
     register_planner(groups)
-    register_setup(groups)
     traces = groups.add_parser(
         "traces", help="Validate and convert offline RAG trace files"
     ).add_subparsers(dest="action", required=True)
@@ -87,222 +85,16 @@ def _parser() -> argparse.ArgumentParser:
         required=True,
         help="Exactly one JSONL label for this packet",
     )
-    comparison = groups.add_parser("compare", help="Replay a frozen policy against pinned Headroom lossless library arms")
-    for name in ("threads", "labels", "policy", "profile", "output"):
-        comparison.add_argument(f"--{name}", type=Path, required=True)
-    comparison.add_argument("--observation-end", required=True)
-    comparison.add_argument("--runtime-overhead-tokens", type=int, default=0)
-    comparison.add_argument("--headroom-tokenizer-model", default="gpt-4o",
-                            help="Headroom's local tokenizer selection; no model call is made")
-    for name in ("fit", "solve", "replay", "prepare"):
-        command = groups.add_parser(
-            name,
-            help={
-                "fit": "Fit a content-free workload profile",
-                "solve": "Fit on training threads, optimize, then evaluate held-out threads",
-                "replay": "Replay a saved policy with a modeled cache",
-                "prepare": "Project a thread through the deterministic request gate",
-            }[name],
-        )
-        command.add_argument("--threads", type=Path, required=True)
-        command.add_argument("--output", type=Path, required=True)
-        if name in ("fit", "solve", "replay"):
-            command.add_argument("--run-peaks", type=Path,
-                                 help="Optional JSONL run_id/start_input_tokens/peak_context_tokens/status observations")
-            command.add_argument(
-                "--labels",
-                type=Path,
-                help="Frozen dependency labels; missing labels retain unknown risk",
-            )
-            command.add_argument(
-                "--observation-end",
-                required=True,
-                help="Explicit observation cutoff, ISO timestamp with timezone",
-            )
-        if name in ("fit", "solve"):
-            command.add_argument(
-                "--model-spec",
-                type=Path,
-                required=True,
-                help="Explicit economic/token-ruler scenario",
-            )
-            command.add_argument("--timing-source", default="supplied_timestamps")
-        if name == "solve":
-            command.add_argument("--max-overflow-probability", type=float,
-                                 help="Use position-conditioned warm compaction with this tail risk tolerance (0 < p < 1)")
-            command.add_argument("--heldout-company")
-            command.add_argument("--heldout-fraction", type=float, default=0.25)
-            command.add_argument(
-                "--max-miss-rate",
-                type=float,
-                default=1.0,
-                help="Optional ceiling on runs with any missing requirement",
-            )
-            command.add_argument(
-                "--min-dependency-coverage",
-                type=float,
-                default=0.95,
-                help="Minimum retained fraction of historical evidence requirements",
-            )
-            command.add_argument("--max-unknown-change-rate", type=float, default=0.0)
-            command.add_argument("--max-pings", type=int, default=6)
-        if name in ("prepare", "replay"):
-            command.add_argument("--policy", type=Path, required=True)
-        if name == "replay":
-            command.add_argument("--profile", type=Path, required=True)
-            command.add_argument(
-                "--recovery-overhead", choices=("priced", "zero"), default="priced"
-            )
-            command.add_argument("--runtime-overhead-tokens", type=int, default=0)
-        if name == "prepare":
-            command.add_argument("--thread-id", required=True)
-            command.add_argument("--run-id", required=True)
     return parser
-
-
-def _optimizer_command(args):
-    from dataclasses import asdict
-    from .optimizer import (
-        Constraints,
-        ModelSpec,
-        Policy,
-        Request,
-        ThreadState,
-        fit_profile,
-        optimize,
-        prepare,
-        replay,
-    )
-    from .optimizer.contracts import seconds
-
-    threads = load_threads(args.threads)
-    labels = _read_jsonl(args.labels) if getattr(args, "labels", None) else []
-    peaks = _read_jsonl(args.run_peaks) if getattr(args, "run_peaks", None) else None
-    if args.group in ("fit", "solve"):
-        spec = ModelSpec.from_dict(
-            json.loads(args.model_spec.read_text(encoding="utf-8"))
-        )
-        if args.group == "fit":
-            result = fit_profile(
-                threads,
-                labels,
-                spec,
-                observation_end=args.observation_end,
-                timing_source=args.timing_source,
-                peak_observations=peaks,
-            )
-            _write_json(args.output, result)
-            return {
-                "output": str(args.output),
-                "threads": result["threads"],
-                "runs": result["runs"],
-                "dependency": result["dependency"],
-            }
-        result = optimize(
-            threads,
-            labels,
-            spec,
-            observation_end=args.observation_end,
-            constraints=Constraints(
-                max_miss_rate=args.max_miss_rate,
-                max_unknown_change_rate=args.max_unknown_change_rate,
-                min_historical_dependency_coverage=args.min_dependency_coverage,
-            ),
-            heldout_company=args.heldout_company,
-            heldout_fraction=args.heldout_fraction,
-            timing_source=args.timing_source,
-            max_pings=args.max_pings,
-            max_overflow_probability=args.max_overflow_probability,
-            peak_observations=peaks,
-        )
-        _write_json(args.output / "profile.json", result["profile"])
-        _write_json(args.output / "candidate-policy.json", result["policy"])
-        _write_json(args.output / "policy.json", result["recommended_policy"])
-        _write_json(args.output / "report.json", result)
-        _write_jsonl(args.output / "heldout-ledger.jsonl", result["heldout"]["ledger"])
-        return {
-            "output": str(args.output),
-            "selection": {
-                "candidates": result["selection"]["candidate_count"],
-                "feasible": result["selection"]["feasible_count"],
-            },
-            **result["result"],
-        }
-    policy = Policy.from_dict(json.loads(args.policy.read_text(encoding="utf-8")))
-    if args.group == "replay":
-        profile = json.loads(args.profile.read_text(encoding="utf-8"))
-        result = replay(
-            threads,
-            labels,
-            policy,
-            profile,
-            observation_end=args.observation_end,
-            recovery_overhead=args.recovery_overhead,
-            overhead_tokens=args.runtime_overhead_tokens,
-            peak_observations=peaks,
-        )
-        _write_json(args.output, result)
-        return result["summary"]
-    thread = next((t for t in threads if t.thread_id == args.thread_id), None)
-    if thread is None or args.run_id not in {r.run_id for r in thread.runs}:
-        raise ContractError("unknown thread/run")
-    state = ThreadState(thread.thread_id)
-    for run in thread.runs:
-        result = prepare(
-            Request.from_thread(thread, run.run_id),
-            policy,
-            state,
-            seconds(run.generation.started_at),
-        )
-        if not result.admitted:
-            raise ContractError(result.reason)
-        if run.run_id == args.run_id:
-            break
-    _write_json(
-        args.output,
-        {
-            "parts": [asdict(p) for p in result.parts],
-            "full_part_ids": sorted(result.full_part_ids),
-            "removed_part_ids": sorted(result.removed_part_ids),
-            **result.telemetry(),
-        },
-    )
-    return result.telemetry()
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
-        if args.group == "setup":
-            from .setup_cli import format_setup, run_setup
-
-            report = run_setup(args)
-            print(json.dumps(report, ensure_ascii=False) if args.json else format_setup(report))
-        elif args.group == "planner":
+        if args.group == "planner":
             from .workload_cli import run_planner
 
             print(json.dumps(run_planner(args), ensure_ascii=False))
-        elif args.group == "compare":
-            from .baselines.headroom import HeadroomLossless
-            from .comparison import compare_headroom
-            from .optimizer import Policy
-
-            result = compare_headroom(
-                load_threads(args.threads), _read_jsonl(args.labels),
-                Policy.from_dict(json.loads(args.policy.read_text())),
-                json.loads(args.profile.read_text()),
-                HeadroomLossless(args.headroom_tokenizer_model),
-                observation_end=args.observation_end,
-                overhead_tokens=args.runtime_overhead_tokens,
-            )
-            _write_json(args.output, result)
-            print(json.dumps({"output": str(args.output), "baselines": {
-                k: {"comparable_cost": v["comparable_cost"],
-                    "compache_saving_fraction": v["compache_saving_fraction"],
-                    **v["summary"]} for k, v in result["baselines"].items()
-            }}))
-        elif args.group in ("fit", "solve", "replay", "prepare"):
-            print(json.dumps(_optimizer_command(args), ensure_ascii=False))
         elif args.group == "traces":
             if args.action == "normalize":
                 threads = normalize_langfuse(_read_jsonl(args.input))

@@ -17,7 +17,7 @@ from compache.optimizer import (
 )
 from compache.traces import Thread
 from test_distribution_planner import cohort
-from test_optimizer import END, labels_for, thread
+from helpers import END, labels_for, thread
 from test_ping_continuation import continuation, receipt
 
 

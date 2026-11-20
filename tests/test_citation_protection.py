@@ -1,7 +1,7 @@
 import unittest
 
 from compache.optimizer import Request, Source
-from compache.optimizer.gate import protected_sources
+from compache.optimizer.parts import protected_sources
 
 
 def retrieval(pid, run, text, doc="register", version="v1", chunk=""):

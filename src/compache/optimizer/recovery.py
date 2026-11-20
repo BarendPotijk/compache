@@ -5,7 +5,7 @@ from collections.abc import Set
 
 from compache.traces import ContractError
 
-from .gate import Request, Source, expand, handle
+from .parts import Request, Source, expand, handle
 
 _TEXT_PAGE = 4096
 _MATCH_PAGE = 8

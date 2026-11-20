@@ -9,7 +9,7 @@ from compache.optimizer.edit_accounting import (
     PartMeter,
     estimate_input,
 )
-from compache.optimizer.gate import Request, Source
+from compache.optimizer.parts import Request, Source
 from compache.optimizer.retention import (
     RetentionRecipe,
     matched_prefix_tokens,

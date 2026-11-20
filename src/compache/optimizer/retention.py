@@ -1,32 +1,35 @@
 """Render causal checkpoints and evaluate historical evidence retained before recovery."""
 
+from bisect import bisect_left
 from collections import defaultdict
 from dataclasses import asdict, dataclass, replace
 
+from compache.dependencies import label_index
 from compache.traces import ContractError
 
 from .contracts import ModelSpec, number
 from .edit_accounting import PartMeter
-from .fit import label_index
-from .gate import (
+from .parts import (
     Request,
     Source,
     placeholder,
     protected_sources,
     wire_part,
 )
-from .gate import (
+from .parts import (
     expand as reopen_part,
 )
-from .replay import assess
 
 __all__ = [
     "RecipeView",
+    "assess",
     "RetentionRecipe",
+    "evidence_windows",
     "fit_recipe",
     "fit_recipes",
     "matched_prefix_tokens",
     "recipe_grid",
+    "size_ladder",
     "render_recipe",
     "reopen_part",
 ]
@@ -34,14 +37,20 @@ __all__ = [
 
 @dataclass(frozen=True)
 class RetentionRecipe:
-    """Counts of completed runs to retain per type; None keeps all of that type."""
+    """Counts of completed runs to retain per type; None keeps all of that type.
+
+    A part of at most `keep_under_tokens` tokens is never archived: a small part
+    costs little to keep, and under a placeholder's size it costs less.
+    """
 
     input_runs: int | None = None
     output_runs: int | None = None
     retrieval_runs: int | None = None
     protect_query_matches: bool = False
+    keep_under_tokens: int = 0
 
     def __post_init__(self):
+        number(self.keep_under_tokens, "keep_under_tokens", integer=True)
         for name in ("input_runs", "output_runs", "retrieval_runs"):
             value = getattr(self, name)
             if value is not None:
@@ -50,20 +59,37 @@ class RetentionRecipe:
             raise ContractError("protect_query_matches must be boolean")
 
 
-def recipe_grid(longest_thread_runs=None, *, protect_query_matches=(True, False)):
-    """Candidate cuts: every pairing of a dialogue window with a retrieval window.
+def recipe_grid(
+    longest_thread_runs=None,
+    *,
+    kinds=("input", "output", "retrieval"),
+    protect_query_matches=(True, False),
+    keep_under_tokens=(0,),
+    extra_windows=None,
+):
+    """Candidate cuts: every combination of one window for each kind of part.
 
-    A dialogue window keeps the inputs and outputs of that many completed runs.
-    A retrieval window keeps that many completed retrieval groups, and zero keeps
-    only the current one. Windows follow 1, 2, 5, 10, 20, 50 and so on, and stop
-    below the longest training thread because a longer window never cuts there.
+    A window keeps that kind's parts from that many completed runs, counted in
+    retrieval groups for retrievals. Zero keeps only the current run's parts.
+    Windows follow 1, 2, 5, 10, 20, 50 and so on, and stop below the longest
+    training thread because a longer window never cuts there. A kind missing
+    from `kinds` is always kept whole. Query-match protection only concerns
+    retrievals, so it is varied only where a retrieval window can cut.
+    `extra_windows` adds windows per kind, for example the look-backs that
+    `evidence_windows` reads off the labels. Each combination is repeated for
+    every size in `keep_under_tokens`, under which a part is never archived.
     The grid contains the narrowest combination of any two of its members, so
     checking a combined cut never needs a recipe outside it.
     """
+    sizes = tuple(keep_under_tokens)
+    if not sizes or len(set(sizes)) != len(sizes):
+        raise ContractError("keep_under_tokens must list distinct sizes")
     if longest_thread_runs is None:
         longest_thread_runs = 100
     number(longest_thread_runs, "longest_thread_runs", 1, integer=True)
-    flags = tuple(protect_query_matches)
+    kinds, flags = set(kinds), tuple(protect_query_matches)
+    if not kinds or kinds - {"input", "output", "retrieval"}:
+        raise ContractError("kinds must name input, output or retrieval parts")
     if (
         not flags
         or len(set(flags)) != len(flags)
@@ -74,15 +100,107 @@ def recipe_grid(longest_thread_runs=None, *, protect_query_matches=(True, False)
     while scale < longest_thread_runs:
         windows.extend(n * scale for n in (1, 2, 5) if n * scale < longest_thread_runs)
         scale *= 10
-    dialogue = (None, *reversed(windows))
-    retrieval = (None, *reversed(windows), 0)
+    extra = dict(extra_windows or {})
+    if set(extra) - {"input", "output", "retrieval"}:
+        raise ContractError("extra_windows must be keyed by input, output or retrieval")
+
+    def cuts(kind):
+        added = set(extra.get(kind, ()))
+        for window in added:
+            number(window, "extra window", integer=True)
+        return tuple(sorted({0, *windows, *added}, reverse=True))
+
+    inputs = (None, *cuts("input")) if "input" in kinds else (None,)
+    outputs = (None, *cuts("output")) if "output" in kinds else (None,)
+    retrievals = [(None, min(flags))]
+    if "retrieval" in kinds:
+        retrievals.extend(
+            (window, flag) for flag in flags for window in cuts("retrieval")
+        )
     return tuple(
-        RetentionRecipe(d, d, r, protect)
-        for protect in flags
-        for d in dialogue
-        for r in retrieval
-        if (d, r) != (None, None)
+        RetentionRecipe(i, o, r, flag, size)
+        for size in sizes
+        for r, flag in retrievals
+        for i in inputs
+        for o in outputs
+        if (i, o, r) != (None, None, None)
     )
+
+
+def evidence_windows(threads, labels, quantiles=(0.8, 0.85, 0.9, 0.95, 0.975, 1.0)):
+    """Look-backs worth trying per kind, read off where labelled evidence lies.
+
+    For every requirement that needs history, the smallest window on one kind
+    that could still satisfy it is how far back its evidence of that kind lies.
+    The windows returned are the look-backs that cover each quantile of those
+    requirements. A fixed ladder can step straight over the range where
+    retention moves from one floor to the other. These do not.
+    """
+    by_run = {}
+    for label in labels:
+        by_run[label["target_run_id"]] = label
+    needs = {"input": [], "output": [], "retrieval": []}
+    for thread in threads:
+        origin, groups = {}, []
+        for run in thread.runs:
+            origin[run.input.part_id] = ("input", run.run_index)
+            origin[run.output.part_id] = ("output", run.run_index)
+            exposed = [p for p in run.retrievals if p.exposed_to_model]
+            for part in exposed:
+                origin[part.part_id] = ("retrieval", run.run_index)
+            if exposed:
+                groups.append(run.run_index)
+        for run in thread.runs:
+            label = by_run.get(run.run_id)
+            for req in label["task_requirements"] if label else ():
+                if req["historical_context_needed"] != "yes" or not req["alternatives"]:
+                    continue
+                best = {}
+                for alternative in req["alternatives"]:
+                    far = {"input": 0, "output": 0, "retrieval": 0}
+                    for source in alternative["sources"]:
+                        kind, turn = origin[source["part_id"]]
+                        if turn >= run.run_index:
+                            continue
+                        if kind == "retrieval":
+                            # Later retrieval groups before this run, plus its own.
+                            lag = 1 + sum(turn < g < run.run_index for g in groups)
+                        else:
+                            lag = run.run_index - turn
+                        far[kind] = max(far[kind], lag)
+                    for kind, lag in far.items():
+                        best[kind] = min(best.get(kind, lag), lag)
+                for kind, lag in best.items():
+                    needs[kind].append(lag)
+    windows = {}
+    for kind, lags in needs.items():
+        lags.sort()
+        windows[kind] = tuple(
+            sorted({lags[min(len(lags) - 1, int(q * len(lags)))] for q in quantiles})
+            if lags
+            else ()
+        )
+    return windows
+
+
+def size_ladder(threads, spec, quantiles=(0.25, 0.5, 0.75)):
+    """Sizes worth trying for `keep_under_tokens`: zero and quantiles of the parts seen.
+
+    Small parts are many and cheap, so keeping every part up to a size keeps far
+    more of them than the same tokens spent on recent large ones.
+    """
+    sizes = sorted(
+        spec.part_tokens(part.text)
+        for thread in threads
+        for run in thread.runs
+        for part in (run.input, run.output, *run.retrievals)
+        if part.text is not None
+    )
+    if not sizes:
+        return (0,)
+    picked = {sizes[int(q * (len(sizes) - 1))] for q in quantiles}
+    # A size no part exceeds would keep everything, which is not a cut.
+    return (0, *sorted(n for n in picked if 0 < n < sizes[-1]))
 
 
 @dataclass(frozen=True)
@@ -101,30 +219,20 @@ class RecipeView:
     part_wire_bytes: tuple[int, ...] = ()
 
 
-def _retrieval_turns(request):
-    return sorted(
+def _checkpoint(request, recipe, archived, pins, spec):
+    """Apply one cut to the mutable `archived` and `pins` sets and return `archived`."""
+    archived.difference_update(pins)
+    if recipe.protect_query_matches:
+        pins.update(protected_sources(request) - archived)
+    # Empty retrieval turns do not displace a retained group. Every exposed
+    # chunk in one completed retrieval turn shares the same retention window.
+    retrieval_turns = sorted(
         {
             p.run_index
             for p in request.parts
             if p.kind == "retrieval" and p.run_index < request.run_index
         }
     )
-
-
-def _checkpoint(request, recipe, archived, pins, *, matches=None, retrieval_turns=None):
-    """Apply one cut to the mutable `archived` and `pins` sets and return `archived`.
-
-    Rendering and fitting share this rule. A fit that scores many recipes on one
-    request passes that request's query matches and retrieval turns once.
-    """
-    archived.difference_update(pins)
-    if recipe.protect_query_matches:
-        found = protected_sources(request) if matches is None else matches
-        pins.update(found - archived)
-    # Empty retrieval turns do not displace a retained group. Every exposed
-    # chunk in one completed retrieval turn shares the same retention window.
-    if retrieval_turns is None:
-        retrieval_turns = _retrieval_turns(request)
     thresholds = {
         "input": request.run_index - recipe.input_runs
         if recipe.input_runs is not None
@@ -141,10 +249,13 @@ def _checkpoint(request, recipe, archived, pins, *, matches=None, retrieval_turn
         and len(retrieval_turns) >= recipe.retrieval_runs
     ):
         thresholds["retrieval"] = retrieval_turns[-recipe.retrieval_runs]
+    small = recipe.keep_under_tokens
     archived.update(
         p.part_id
         for p in request.parts
-        if p.part_id not in pins and p.run_index < thresholds[p.kind]
+        if p.part_id not in pins
+        and p.run_index < thresholds[p.kind]
+        and (not small or spec.part_tokens(p.text) > small)
     )
     return archived
 
@@ -183,7 +294,7 @@ def render_recipe(
     if pins & archived and not cut:
         raise ContractError("restoring an archived pin requires a new checkpoint")
     if cut:
-        _checkpoint(request, recipe, archived, pins)
+        _checkpoint(request, recipe, archived, pins, spec)
     if part_meter is not None:
         if part_meter.spec != spec:
             raise ContractError(
@@ -253,6 +364,143 @@ def matched_prefix_tokens(
     return common
 
 
+_NEVER = float("inf")
+_COUNTERS = (
+    "turns",
+    "historical_required",
+    "historical_retained",
+    "changed_historical_required",
+    "changed_historical_retained",
+    "direct_required",
+    "direct_retained",
+    "unknown_requirements",
+    "unknown_changed_requirements",
+    "unknown_runs",
+    "unknown_changed_runs",
+    "unlabeled_runs",
+    "unlabeled_changed_runs",
+    "changed_runs",
+    "canonical_tokens",
+    "projected_tokens",
+    "recovery_tokens",
+    "recovery_view_tokens",
+    "recovery_restored_tokens",
+)
+
+
+class _Window:
+    """When each part of one kind is archived under one window, and what that saves."""
+
+    def __init__(self, archived_at, saving, total):
+        self.turn = {p: t for p, t in archived_at.items() if t <= total}
+        self.first = min(self.turn.values(), default=_NEVER)
+        gain = [0] * (total + 2)
+        for part_id, turn in self.turn.items():
+            gain[turn] += saving[part_id]
+        # saved[n] is what the archive has removed from the request of run n.
+        self.saved, running = [0] * (total + 1), 0
+        for n in range(1, total + 1):
+            running += gain[n]
+            self.saved[n] = running
+        self.total = sum(self.saved)
+
+
+def _key(window, recipe):
+    """A window that never cuts is the same table at every size."""
+    return (window, recipe.keep_under_tokens if window is not None else 0)
+
+
+def _retrieval_key(recipe):
+    window = recipe.retrieval_runs
+    if window is None:
+        return (None, False, 0)
+    return (window, recipe.protect_query_matches, recipe.keep_under_tokens)
+
+
+def _thread_windows(thread, spec, recipes):
+    """Archive turns for every window the recipes use, from one pass over the thread.
+
+    A cut applied at every turn archives a part once it leaves its kind's window
+    and never restores it. So a part's archive turn follows from how far back it
+    lies: no turn-by-turn replay is needed, and the kinds do not interact.
+    """
+    runs, total = thread.runs, len(thread.runs)
+    canonical = Request.from_thread(thread, runs[-1].run_id).parts
+    full, saving, size, by_kind = [0] * (total + 2), {}, {}, defaultdict(list)
+    for part in canonical:
+        if part.text is None:
+            raise ContractError(
+                "recipe projection requires complete visible source text"
+            )
+        tokens = spec.part_tokens(part.text)
+        size[part.part_id] = tokens
+        saving[part.part_id] = tokens - spec.part_tokens(
+            placeholder(thread.thread_id, part)
+        )
+        # An answer first appears in the request of the following run.
+        full[part.run_index + (part.kind == "output")] += tokens
+        by_kind[part.kind].append(part)
+    for n in range(1, total + 1):
+        full[n] += full[n - 1]
+    table = {"input": {}, "output": {}, "retrieval": {}}
+
+    def large(parts, small):
+        return [p for p in parts if not small or size[p.part_id] > small]
+
+    for kind, name in (("input", "input_runs"), ("output", "output_runs")):
+        for window, small in {_key(getattr(r, name), r) for r in recipes}:
+            table[kind][(window, small)] = _Window(
+                {}
+                if window is None
+                else {
+                    p.part_id: p.run_index + window + 1
+                    for p in large(by_kind[kind], small)
+                },
+                saving,
+                total,
+            )
+    groups = sorted({p.run_index for p in by_kind["retrieval"]})
+    rank = {turn: j for j, turn in enumerate(groups)}
+    wanted = {_retrieval_key(r) for r in recipes}
+    leaving = {}
+    for window in {w for w, _, _ in wanted if w is not None}:
+        leaving[window] = {
+            p.part_id: groups[rank[p.run_index] + window] + 1
+            for p in by_kind["retrieval"]
+            if rank[p.run_index] + window < len(groups)
+        }
+    matches = {}
+    protected = [w for w, flag, _ in wanted if flag and leaving[w]]
+    if protected:
+        # A source the current question matches stays until a turn that does not.
+        start = min(min(leaving[w].values()) for w in protected)
+        for run in runs[start - 1 :]:
+            request = Request(
+                thread.thread_id,
+                run.run_id,
+                run.run_index,
+                run.generation.model,
+                canonical[: len(run.generation.request_part_ids)],
+            )
+            matches[run.run_index] = protected_sources(request)
+    for window, flag, small in wanted:
+        archived_at = (
+            {}
+            if window is None
+            else {
+                p: t for p, t in leaving[window].items() if not small or size[p] > small
+            }
+        )
+        if flag:
+            for part_id, turn in archived_at.items():
+                while turn <= total and part_id in matches[turn]:
+                    turn += 1
+                archived_at[part_id] = turn
+        table["retrieval"][(window, flag, small)] = _Window(archived_at, saving, total)
+    kind_of = {p.part_id: p.kind for p in canonical}
+    return table, full, saving, kind_of
+
+
 def _measure_recipes(
     threads,
     labels,
@@ -262,12 +510,14 @@ def _measure_recipes(
     retention_floor,
     max_unknown_change_rate,
     unknowns="excluded",
+    tradeoff_floor=None,
 ):
     """Evaluate each irreversible checkpoint rule on training inputs and frozen outcomes.
 
     Each recipe cuts at every training turn and carries its own archive across
     turns. No future labels enter the cut. An unaltered full history is the
-    fallback. The floor is an empirical coverage criterion.
+    fallback. The floor is an empirical coverage criterion. Threads are scored
+    one at a time, so `threads` may be a generator over a corpus too large to hold.
 
     `unknowns` says how evidence nobody could assess enters the floor.
     With "excluded" the floor applies to assessed requirements only. With
@@ -278,8 +528,17 @@ def _measure_recipes(
     `max_unknown_change_rate` is an optional stricter cap on the share of
     unassessable turns, unlabelled ones included, that a recipe may change. Zero
     is the original rule, under which a single such turn rejects the recipe.
+
+    `tradeoff_floor` admits a recipe between it and `retention_floor` as a
+    candidate that must pay for what it loses. Every lost requirement is priced
+    as one more request of that turn's size plus the archived sources it needs
+    back, and that rate is carried from the labelled turns to all turns.
     """
     number(retention_floor, "retention_floor", 0, 1)
+    minimum = retention_floor
+    if tradeoff_floor is not None:
+        number(tradeoff_floor, "tradeoff_floor", 0, retention_floor)
+        minimum = tradeoff_floor
     if unknowns not in ("worst_case", "excluded"):
         raise ContractError("unknowns must be 'worst_case' or 'excluded'")
     if max_unknown_change_rate is not None:
@@ -291,154 +550,148 @@ def _measure_recipes(
         or len(set(recipes)) != len(recipes)
     ):
         raise ContractError("supply distinct retention recipes")
-    threads = list(threads)
-    if not threads:
-        raise ContractError("fit requires training threads")
     by_thread = defaultdict(list)
     for label in labels:
         if not isinstance(label, dict) or not isinstance(label.get("thread_id"), str):
             raise ContractError("invalid training label")
         by_thread[label["thread_id"]].append(label)
-    thread_ids = [t.thread_id for t in threads]
-    run_ids = [r.run_id for t in threads for r in t.runs]
-    if (
-        len(set(thread_ids)) != len(threads)
-        or len(set(run_ids)) != len(run_ids)
-        or set(by_thread) - set(thread_ids)
-    ):
-        raise ContractError(
-            "fitting requires unique training identities and in-split labels"
-        )
     reports = [
         {
             "recipe": asdict(recipe),
-            "turns": 0,
-            "historical_required": 0,
-            "historical_retained": 0,
-            "changed_historical_required": 0,
-            "changed_historical_retained": 0,
-            "direct_required": 0,
-            "direct_retained": 0,
-            "unknown_requirements": 0,
-            "unknown_changed_requirements": 0,
-            "unknown_runs": 0,
-            "unknown_changed_runs": 0,
-            "unlabeled_runs": 0,
-            "unlabeled_changed_runs": 0,
-            "changed_runs": 0,
-            "canonical_tokens": 0,
-            "projected_tokens": 0,
+            **dict.fromkeys(_COUNTERS, 0),
             "retention_floor": retention_floor,
+            "tradeoff_floor": tradeoff_floor,
             "max_unknown_change_rate": max_unknown_change_rate,
             "unknowns": unknowns,
         }
         for recipe in recipes
     ]
-    protecting = any(r.protect_query_matches for r in recipes)
+    weakest = [None] * len(recipes)
+    seen_threads, seen_runs = set(), set()
     for thread in threads:
+        run_ids = {r.run_id for r in thread.runs}
+        if (
+            thread.thread_id in seen_threads
+            or len(run_ids) != len(thread.runs)
+            or run_ids & seen_runs
+        ):
+            raise ContractError(
+                "fitting requires unique training identities and in-split labels"
+            )
+        seen_threads.add(thread.thread_id)
+        seen_runs |= run_ids
+        if any(r.generation.model != spec.model_id for r in thread.runs):
+            raise ContractError("recipe token ruler belongs to a different model")
         # Bound packet materialization to one thread and validate quote spans once.
-        indexed = (
-            label_index([thread], by_thread[thread.thread_id])
-            if by_thread[thread.thread_id]
-            else {}
-        )
-        canonical = Request.from_thread(thread, thread.runs[-1].run_id).parts
-        # A recipe's projected size is the full request minus what its archive saves.
-        # Count every part once per thread instead of once per turn and recipe.
-        saving = {}
-        archived = [set() for _ in recipes]
-        saved = [0] * len(recipes)
-        ids, counted, full_tokens = set(), 0, 0
+        own = by_thread.get(thread.thread_id, [])
+        indexed = label_index([thread], own) if own else {}
+        table, full, saving, kind_of = _thread_windows(thread, spec, recipes)
+        total = len(thread.runs)
+        canonical_tokens = sum(full[1 : total + 1])
+        labelled, unlabelled, unsure, unknown_total = [], [], [], 0
         for run in thread.runs:
-            count = len(run.generation.request_part_ids)
-            request = Request(
-                thread.thread_id,
-                run.run_id,
-                run.run_index,
-                run.generation.model,
-                canonical[:count],
-            )
-            if request.model != spec.model_id:
-                raise ContractError("recipe token ruler belongs to a different model")
-            if count < counted:
-                raise ContractError(
-                    "fitting requires each request to extend the previous one"
-                )
-            for part in canonical[counted:count]:
-                if part.text is None:
-                    raise ContractError(
-                        "recipe projection requires complete visible source text"
-                    )
-                tokens = spec.part_tokens(part.text)
-                full_tokens += tokens
-                saving[part.part_id] = tokens - spec.part_tokens(
-                    placeholder(thread.thread_id, part)
-                )
-                ids.add(part.part_id)
-            counted = count
             label = indexed.get(run.run_id)
-            reqs = label["task_requirements"] if label else []
-            unknown_count = sum(
-                r["historical_context_needed"] == "unknown" or not r["alternatives"]
-                for r in reqs
+            if label is None:
+                unlabelled.append(run.run_index)
+                continue
+            needs, unknown = [], 0
+            for req in label["task_requirements"]:
+                if (
+                    req["historical_context_needed"] == "unknown"
+                    or not req["alternatives"]
+                ):
+                    unknown += 1
+                    continue
+                needs.append(
+                    (
+                        req["historical_context_needed"] == "yes",
+                        [
+                            [s["part_id"] for s in a["sources"]]
+                            for a in req["alternatives"]
+                        ],
+                    )
+                )
+            unknown_total += unknown
+            if label["status"] != "complete" or unknown:
+                # A partial or unassessable label can hide a requirement that it
+                # does not list.
+                unsure.append((run.run_index, max(1, unknown)))
+            labelled.append((run.run_index, needs))
+        unsure_turns = [n for n, _ in unsure]
+        for i, (recipe, report) in enumerate(zip(recipes, reports)):
+            windows = (
+                table["input"][_key(recipe.input_runs, recipe)],
+                table["output"][_key(recipe.output_runs, recipe)],
+                table["retrieval"][_retrieval_key(recipe)],
             )
-            known_direct = [
-                r
-                for r in reqs
-                if r["historical_context_needed"] == "no" and r["alternatives"]
-            ]
-            matches = protected_sources(request) if protecting else None
-            turns = _retrieval_turns(request)
-            for i, (recipe, report) in enumerate(zip(recipes, reports)):
-                before = len(archived[i])
-                held = _checkpoint(
-                    request,
-                    recipe,
-                    archived[i],
-                    set(),
-                    matches=matches,
-                    retrieval_turns=turns,
-                )
-                if len(held) != before:
-                    # Nothing is pinned during a fit, so an archive only grows.
-                    saved[i] = sum(saving[part_id] for part_id in held)
-                changed = bool(held)
-                grade = assess(label, ids - held if changed else ids)
-                missed = set(grade["missed_requirements"])
-                required = grade["historical_requirements_assessed"]
-                retained = grade["historical_requirements_retained"]
-                report["turns"] += 1
-                report["historical_required"] += required
-                report["historical_retained"] += retained
-                report["direct_required"] += len(known_direct)
-                report["direct_retained"] += sum(
-                    r["requirement_id"] not in missed for r in known_direct
-                )
-                report["unknown_requirements"] += unknown_count
-                report["unknown_runs"] += int(not grade["assessable"])
-                report["unlabeled_runs"] += int(label is None)
-                if changed:
-                    report["changed_runs"] += 1
-                    report["changed_historical_required"] += required
-                    report["changed_historical_retained"] += retained
-                    if label is None:
-                        report["unlabeled_changed_runs"] += 1
-                    if not grade["assessable"]:
-                        report["unknown_changed_runs"] += 1
-                        if label is not None:
-                            # A partial or unassessable label can hide a requirement
-                            # that it does not list.
-                            report["unknown_changed_requirements"] += max(
-                                1, unknown_count
+            at = {
+                "input": windows[0].turn,
+                "output": windows[1].turn,
+                "retrieval": windows[2].turn,
+            }
+            first = min(w.first for w in windows)
+            required = retained = 0
+            for n, needs in labelled:
+                changed = n >= first
+                for historical, alternatives in needs:
+                    kept = any(
+                        all(at[kind_of[p]].get(p, _NEVER) > n for p in sources)
+                        for sources in alternatives
+                    )
+                    if not historical:
+                        report["direct_required"] += 1
+                        report["direct_retained"] += kept
+                        continue
+                    required += 1
+                    retained += kept
+                    if changed:
+                        report["changed_historical_required"] += 1
+                        report["changed_historical_retained"] += kept
+                    if not kept:
+                        # One more request of this size, plus the cheapest sources to reopen.
+                        view = full[n] - sum(w.saved[n] for w in windows)
+                        restored = min(
+                            sum(
+                                saving[p]
+                                for p in sources
+                                if at[kind_of[p]].get(p, _NEVER) <= n
                             )
-                report["canonical_tokens"] += full_tokens
-                report["projected_tokens"] += full_tokens - saved[i]
-    for recipe, report in zip(recipes, reports):
+                            for sources in alternatives
+                        )
+                        report["recovery_view_tokens"] += view
+                        report["recovery_restored_tokens"] += restored
+                        report["recovery_tokens"] += view + restored
+            report["historical_required"] += required
+            report["historical_retained"] += retained
+            if required and (weakest[i] is None or retained / required < weakest[i]):
+                weakest[i] = retained / required
+            changed_unlabelled = len(unlabelled) - bisect_left(unlabelled, first)
+            changed_unsure = unsure[bisect_left(unsure_turns, first) :]
+            report["turns"] += total
+            report["unknown_requirements"] += unknown_total
+            report["unknown_runs"] += len(unlabelled) + len(unsure)
+            report["unlabeled_runs"] += len(unlabelled)
+            report["changed_runs"] += max(0, total - first + 1) if first <= total else 0
+            report["unlabeled_changed_runs"] += changed_unlabelled
+            report["unknown_changed_runs"] += changed_unlabelled + len(changed_unsure)
+            report["unknown_changed_requirements"] += sum(c for _, c in changed_unsure)
+            report["canonical_tokens"] += canonical_tokens
+            report["projected_tokens"] += canonical_tokens - sum(
+                w.total for w in windows
+            )
+    if not seen_threads:
+        raise ContractError("fit requires training threads")
+    if set(by_thread) - seen_threads:
+        raise ContractError(
+            "fitting requires unique training identities and in-split labels"
+        )
+    for recipe, report, worst in zip(recipes, reports, weakest):
         required = report["historical_required"]
         retained = report["historical_retained"]
         coverage = retained / required if required else None
         at_risk = required + report["unknown_changed_requirements"]
         lower_bound = retained / at_risk if required else None
+        measure = lower_bound if unknowns == "worst_case" else coverage
         unknown_rate = (
             report["unknown_changed_runs"] / report["unknown_runs"]
             if report["unknown_runs"]
@@ -451,28 +704,72 @@ def _measure_recipes(
             admission = "keeps_everything"
         elif coverage is None:
             admission = "no_assessed_requirements"
-        elif coverage < retention_floor:
+        elif coverage < minimum:
             admission = "below_retention_floor"
-        elif unknowns == "worst_case" and lower_bound < retention_floor:
+        elif measure < minimum:
             admission = "unknown_requirements_could_break_floor"
         elif (
             max_unknown_change_rate is not None
             and unknown_rate > max_unknown_change_rate
         ):
             admission = "above_unknown_change_cap"
+        elif measure < retention_floor:
+            admission = "within_tradeoff"
         else:
             admission = "passes"
+        labeled = report["turns"] - report["unlabeled_runs"]
         report.update(
             coverage=coverage,
             coverage_lower_bound=lower_bound,
+            min_thread_coverage=worst,
             unknown_change_rate=unknown_rate,
-            eligible=admission in ("keeps_everything", "passes"),
+            eligible=admission in ("keeps_everything", "passes", "within_tradeoff"),
             admission=admission,
             compact_fraction=report["projected_tokens"] / report["canonical_tokens"]
             if report["canonical_tokens"]
             else None,
+            # Labelled turns stand for the unlabelled ones.
+            expected_tokens=report["projected_tokens"]
+            + (report["recovery_tokens"] * report["turns"] / labeled if labeled else 0),
         )
     return reports
+
+
+def assess(label, full_ids):
+    """Which labelled requirements a set of visible parts still satisfies."""
+    if label is None:
+        return {
+            "assessable": False,
+            "missed_requirements": [],
+            "restore_alternatives": [],
+            "historical_requirements_assessed": 0,
+            "historical_requirements_retained": 0,
+        }
+    assessable = label["status"] == "complete" and all(
+        t["historical_context_needed"] != "unknown" and t["alternatives"]
+        for t in label["task_requirements"]
+    )
+    missed = []
+    alternatives = []
+    historical_total = historical_retained = 0
+    for req in label["task_requirements"]:
+        if req["historical_context_needed"] == "unknown" or not req["alternatives"]:
+            continue
+        sets = [{s["part_id"] for s in a["sources"]} for a in req["alternatives"]]
+        retained = any(s <= full_ids for s in sets)
+        if req["historical_context_needed"] == "yes":
+            historical_total += 1
+            historical_retained += int(retained)
+        if not retained:
+            missed.append(req["requirement_id"])
+            alternatives.append([s - full_ids for s in sets])
+    return {
+        "assessable": assessable,
+        "missed_requirements": missed,
+        "restore_alternatives": alternatives,
+        "historical_requirements_assessed": historical_total,
+        "historical_requirements_retained": historical_retained,
+    }
 
 
 def _narrower(left, right):
@@ -498,6 +795,7 @@ def fit_recipes(
     recipes,
     *,
     retention_floor=0.95,
+    tradeoff_floor=None,
     max_unknown_change_rate=None,
     unknowns="excluded",
     select="supplied",
@@ -509,16 +807,23 @@ def fit_recipes(
     applied at every turn, bound the surviving evidence for any mixture.
 
     `select="supplied"` admits candidates in the supplied order while that bound
-    holds. `select="cheapest"` admits at most one recipe: the passing candidate
-    with the fewest projected training tokens, among those that save tokens and
-    whose cut met at least one assessed requirement. It sits at the floor by
-    construction, so check its retention on held-out threads.
+    holds. `select="cheapest"` admits at most one recipe: the cheapest candidate
+    among those that save tokens and whose cut met at least one assessed
+    requirement. Without `tradeoff_floor` every candidate passes `retention_floor`
+    and the cheapest has the fewest projected training tokens. With it, a recipe
+    down to that lower floor also competes, and the cheapest has the fewest
+    expected tokens once each requirement it loses is charged a request to
+    recover it. The winner sits near a floor by construction, so check its
+    retention on held-out threads.
     """
     if select not in ("supplied", "cheapest"):
         raise ContractError("select must be 'supplied' or 'cheapest'")
-    threads, labels, recipes = list(threads), list(labels), list(recipes)
+    labels, recipes = list(labels), list(recipes)
+    if select == "supplied":
+        threads = list(threads)
     limits = {
         "retention_floor": retention_floor,
+        "tradeoff_floor": tradeoff_floor,
         "max_unknown_change_rate": max_unknown_change_rate,
         "unknowns": unknowns,
     }
@@ -527,17 +832,19 @@ def fit_recipes(
         report["individual_eligible"] = report["eligible"]
         report["joint_envelope"] = None
     if select == "cheapest":
+        cost = "projected_tokens" if tradeoff_floor is None else "expected_tokens"
         passing = [
-            (report["projected_tokens"], i)
+            (report[cost], i)
             for i, report in enumerate(reports)
-            if report["admission"] == "passes"
+            if report["admission"] in ("passes", "within_tradeoff")
         ]
 
         def shortfall(report):
             if not report["changed_historical_required"]:
                 return "cut_met_no_assessed_requirement"
-            if report["projected_tokens"] >= report["canonical_tokens"]:
-                # A placeholder can outweigh the short message it replaces.
+            if report[cost] >= report["canonical_tokens"]:
+                # A placeholder can outweigh the short message it replaces, and
+                # recovering lost evidence can outweigh what a cut removes.
                 return "saves_no_tokens"
             return None
 
@@ -574,6 +881,7 @@ def fit_recipes(
                 _narrower(accepted.output_runs, recipe.output_runs),
                 _narrower(accepted.retrieval_runs, recipe.retrieval_runs),
                 protects,
+                min(accepted.keep_under_tokens, recipe.keep_under_tokens),
             )
         if envelope not in metrics:
             metrics[envelope] = _measure_recipes(

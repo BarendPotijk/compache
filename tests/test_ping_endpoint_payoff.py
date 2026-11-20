@@ -5,7 +5,7 @@ import unittest
 from dataclasses import replace
 
 from test_distribution_planner import SPEC, cohort, view
-from test_optimizer import END, thread
+from helpers import END, thread
 
 from compache.optimizer.distribution import (
     fit_distribution,
