@@ -8,6 +8,8 @@ Compache uses historical threads, dependency labels and return timing to choose 
 
 **Experimental.** The calculator is live. The Python implementation is in [PR #2](https://github.com/BarendPotijk/compache/pull/2), based on [PR #1](https://github.com/BarendPotijk/compache/pull/1). Production provider adapters and a live ping scheduler are not shipped.
 
+**Continuing the benchmark work?** Start with the [agent handover](docs/benchmark-handover.md) for the recorded traces, the original 5- and 30-minute policy fits, and the next offline experiment.
+
 ## Quickstart
 
 Python 3.11+. Use the implementation branch while the PRs are open:

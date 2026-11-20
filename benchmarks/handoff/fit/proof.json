@@ -1,0 +1,19 @@
+{
+  "generator_revision": "24e6ff652b5181ceaca1005fda2a7c3cc7f58025",
+  "corpus_schema": "compache-scaled-rag-revised-v1",
+  "seed": 20261116,
+  "company_count": 30,
+  "episodes_per_company": 10,
+  "total_turns": 23760,
+  "fit_company_range_inclusive": [
+    1,
+    20
+  ],
+  "fit_turns": 15840,
+  "manifest_sha256": "37869766ec144de75329718d6f38fba4a4afc8a1eaea829a3aca074a967db120",
+  "shards_sha256": "e76183375707fe4e9dea2e9aa85fda6da3f337decd15a0c15c81279da9df0ae9",
+  "policy_json_sha256": {
+    "5": "89a4c2cecc5fd2c6e53f0461d3a4c6e530212202dc916a87a60993582a5c2ace",
+    "30": "96b16e6026698aef2845197377cf80d0d96596a43b5f32c3e50dd8d4286c4248"
+  }
+}

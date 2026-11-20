@@ -1,0 +1,21 @@
+{
+  "family": "fictional-bike-workshop",
+  "thread": "workshop",
+  "turns": [
+    {
+      "start_s": 0, "end_s": 9,
+      "input": "Map the repair card to its workbench.",
+      "retrieved": [{"id": "workshop/1/r1", "text": "Repair card KITE belongs on workbench six."}],
+      "output": "Workbench six."
+    },
+    {
+      "start_s": 150, "end_s": 164,
+      "input": "Print the card's identifier for the shelf label.",
+      "retrieved": [],
+      "output": "KITE"
+    }
+  ],
+  "training_labels": [
+    {"turn": 2, "requirement": "repair card identifier", "alternatives": [["workshop/1/r1"]]}
+  ]
+}

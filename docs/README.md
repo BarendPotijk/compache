@@ -1,5 +1,7 @@
 # compache
 
+[Benchmark handover for agents](benchmark-handover.md) · [Illustrated HTML brief](benchmark-handover.html)
+
 A harness-agnostic optimizer for long agent conversations. It keeps a conversation inside the model's context window without rewriting the provider's cached prefix by accident, and decides at every run end whether keeping that prefix warm is worth paying for.
 
 **Status:** design only, no code yet.
