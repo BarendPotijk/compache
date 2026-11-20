@@ -7,6 +7,7 @@ import json
 import math
 from dataclasses import asdict, dataclass, fields
 from datetime import datetime
+from functools import cached_property
 
 from compache.traces import ContractError
 
@@ -23,6 +24,28 @@ def canonical(value: object) -> str:
 
 def digest(value: object) -> str:
     return hashlib.sha256(canonical(value).encode()).hexdigest()
+
+
+class FrozenDict(dict):
+    """Immutable JSON object with shareable nested arrays for repeated gate calls."""
+
+    def _refuse(self, *args, **kwargs):
+        raise TypeError("immutable fitted artifact")
+
+    __setitem__ = __delitem__ = clear = pop = popitem = setdefault = update = __ior__ = _refuse
+
+    def __deepcopy__(self, memo):
+        return self
+
+
+def freeze_json(value):
+    if isinstance(value, FrozenDict):
+        return value
+    if isinstance(value, dict):
+        return FrozenDict((key, freeze_json(item)) for key, item in value.items())
+    if isinstance(value, (tuple, list)):
+        return tuple(freeze_json(item) for item in value)
+    return value
 
 
 def seconds(value: str) -> float:
@@ -79,12 +102,31 @@ class ModelSpec(Artifact):
     byte_limit: int = 16_000_000
     assumption_note: str = "Caller-supplied illustrative economics; not verified provider prices or billing."
     schema_version: str = "compache-model-spec-v1"
+    long_input_threshold: int | None = None
+    long_input_factor: float = 1.0
+    long_output_factor: float = 1.0
+
+    def to_dict(self):
+        result = super().to_dict()
+        if self.schema_version == "compache-model-spec-v1":
+            for key in ("long_input_threshold", "long_input_factor", "long_output_factor"):
+                del result[key]
+        return result
+
+    @classmethod
+    def from_dict(cls, data):
+        if isinstance(data, dict) and data.get("schema_version") == "compache-model-spec-v1":
+            tier = dict(long_input_threshold=None, long_input_factor=1.0, long_output_factor=1.0)
+            if tier.keys() & data.keys():
+                raise ContractError("tiered rates require compache-model-spec-v2")
+            data = {**data, **tier}
+        return super().from_dict(data)
 
     def __post_init__(self):
         if not isinstance(self.model_id, str) or not self.model_id.strip():
             raise ContractError("model_id must be nonempty")
         if (
-            self.schema_version != "compache-model-spec-v1"
+            self.schema_version not in ("compache-model-spec-v1", "compache-model-spec-v2")
             or not isinstance(self.assumption_note, str)
             or not self.assumption_note.strip()
         ):
@@ -103,6 +145,25 @@ class ModelSpec(Artifact):
         number(self.read_multiplier, "read_multiplier", 0, 1)
         number(self.write_multiplier, "write_multiplier", 1)
         number(self.output_multiplier, "output_multiplier")
+        if self.schema_version == "compache-model-spec-v2":
+            number(self.long_input_threshold, "long_input_threshold", 1, integer=True)
+            number(self.long_input_factor, "long_input_factor", 1)
+            number(self.long_output_factor, "long_output_factor", 1)
+        elif self.long_input_threshold is not None or self.long_input_factor != 1 or self.long_output_factor != 1:
+            raise ContractError("tiered rates require compache-model-spec-v2")
+
+    def input_price_factor(self, size):
+        return self.long_input_factor if self.long_input_threshold is not None and size > self.long_input_threshold else 1.0
+
+    def output_rate(self, size):
+        if self.long_input_threshold is not None and size > self.long_input_threshold:
+            return self.output_multiplier * self.long_output_factor
+        return self.output_multiplier
+
+    def token_charge(self, fresh, writes, reads, output):
+        size = fresh + writes + reads
+        input_cost = fresh + writes * self.write_multiplier + reads * self.read_multiplier
+        return input_cost * self.input_price_factor(size) + output * self.output_rate(size)
 
     def text_tokens(self, text: str | None) -> int:
         return math.ceil(len((text or "").encode()) / self.bytes_per_token)
@@ -125,13 +186,51 @@ class Policy(Artifact):
     max_pings: int = 0
     protect_query_matches: bool = True
     schema_version: str = "compache-policy-v1"
+    ingress_match_min_chars: int | None = None
+    position_growth: dict | None = None
+    max_overflow_probability: float | None = None
+
+    def to_dict(self):
+        if self.schema_version == "compache-policy-v3":
+            result = json.loads(canonical({f.name: getattr(self, f.name) for f in fields(self)}))
+        else:
+            result = super().to_dict()
+        if self.schema_version != "compache-policy-v2":
+            del result["ingress_match_min_chars"]
+        if self.schema_version != "compache-policy-v3":
+            del result["position_growth"], result["max_overflow_probability"]
+        return result
+
+    @classmethod
+    def from_dict(cls, data):
+        if isinstance(data, dict) and data.get("schema_version") in ("compache-policy-v1", "compache-policy-v3"):
+            if "ingress_match_min_chars" in data:
+                raise ContractError("ingress compaction requires a v2 policy")
+            data = {**data, "ingress_match_min_chars": None}
+        if isinstance(data, dict) and data.get("schema_version") in ("compache-policy-v1", "compache-policy-v2"):
+            if {"position_growth", "max_overflow_probability"} & data.keys():
+                raise ContractError("position risk requires a v3 policy")
+            data = {**data, "position_growth": None, "max_overflow_probability": None}
+        return super().from_dict(data)
 
     def __post_init__(self):
         ModelSpec.from_dict(self.model_spec)
-        if self.schema_version != "compache-policy-v1" or not isinstance(
-            self.profile_hash, str
-        ):
+        if self.schema_version not in ("compache-policy-v1", "compache-policy-v2", "compache-policy-v3") or not isinstance(self.profile_hash, str):
             raise ContractError("invalid policy version/profile hash")
+        if self.schema_version == "compache-policy-v2":
+            number(self.ingress_match_min_chars, "ingress_match_min_chars", 1, integer=True)
+        elif self.ingress_match_min_chars is not None:
+            raise ContractError("ingress compaction requires a v2 policy")
+        if self.schema_version == "compache-policy-v3":
+            from .position import validate_growth
+            validate_growth(self.position_growth)
+            number(self.max_overflow_probability, "max_overflow_probability", 0, 1)
+            if not 0 < self.max_overflow_probability < 1:
+                raise ContractError("max_overflow_probability must be strictly between 0 and 1")
+            object.__setattr__(self, "position_growth", freeze_json(self.position_growth))
+            object.__setattr__(self, "model_spec", freeze_json(self.model_spec))
+        elif self.position_growth is not None or self.max_overflow_probability is not None:
+            raise ContractError("position risk requires a v3 policy")
         if self.retrieval_grace_runs is not None:
             number(self.retrieval_grace_runs, "retrieval_grace_runs", integer=True)
         for name in ("cold_trigger", "target", "warm_trigger", "reserve"):
@@ -154,6 +253,10 @@ class Policy(Artifact):
 
     @property
     def hash(self):
+        return self._fitted_hash if self.position_growth is not None else digest(self.to_dict())
+
+    @cached_property
+    def _fitted_hash(self):
         return digest(self.to_dict())
 
 

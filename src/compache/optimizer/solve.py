@@ -7,7 +7,8 @@ from dataclasses import replace
 
 from compache.traces import ContractError, Thread
 from .contracts import Constraints, ModelSpec, Policy, digest, number
-from .fit import fit_profile, label_index
+from .fit import fit_profile, index_run_peaks, label_index
+from .position import position_risk_policy
 from .replay import replay
 
 
@@ -37,7 +38,17 @@ def split_threads(
     )
 
 
-def feasible(summary, constraints):
+def feasible(summary, constraints, *, require_warm_validation=True):
+    validation = summary.get("warm_outcome_validation", {}).get("status")
+    return (
+        dependency_admission_feasible(summary, constraints)
+        and not summary.get("warm_risk_gate", {}).get("remaining_above_budget", 0)
+        and validation != "exceeds_budget"
+        and (not require_warm_validation or validation in (None, "within_empirical_budget"))
+    )
+
+
+def dependency_admission_feasible(summary, constraints):
     return (
         not summary["admission_failures"]
         and not summary["skipped_runs"]
@@ -51,7 +62,23 @@ def feasible(summary, constraints):
     )
 
 
-def candidates(profile, spec, max_pings=6):
+def ingress_variants(policy):
+    """Long retention candidates copy exact lines before considering lossy eviction."""
+    if policy.spec.cache_ttl_seconds >= 1800:
+        for minimum in (256, 2048):
+            yield replace(policy, schema_version="compache-policy-v2",
+                          ingress_match_min_chars=minimum)
+
+
+def candidates(profile, spec, max_pings=6, *, max_overflow_probability=None):
+    if max_overflow_probability is not None:
+        for base in _fixed_candidates(profile, spec, max_pings, allow_ingress=False):
+            yield position_risk_policy(base, profile, max_overflow_probability=max_overflow_probability)
+        return
+    yield from _fixed_candidates(profile, spec, max_pings, allow_ingress=True)
+
+
+def _fixed_candidates(profile, spec, max_pings, *, allow_ingress):
     ph = digest(profile)
     distances = sorted(
         {
@@ -73,7 +100,17 @@ def candidates(profile, spec, max_pings=6):
     )
     ping_counts = sorted({0, min(1, max_pings), min(3, max_pings), max_pings})
     for n in ping_counts:
-        yield Policy(spec.to_dict(), ph, max_pings=n)
+        preserve = Policy(spec.to_dict(), ph, max_pings=n)
+        yield preserve
+        if allow_ingress:
+            yield from ingress_variants(preserve)
+        if allow_ingress and profile["dependency"]["assessable_runs"]:
+            for target in (.10, .15, .20, .25):
+                for warm in (.50, .60):
+                    yield from ingress_variants(replace(
+                        preserve, retrieval_grace_runs=1, target=target,
+                        cold_trigger=target + .02, warm_trigger=warm,
+                    ))
     if not profile["dependency"]["assessable_runs"]:
         return
     for g in grace:
@@ -102,6 +139,8 @@ def optimize(
     heldout_fraction=0.25,
     timing_source="supplied_timestamps",
     max_pings=6,
+    max_overflow_probability=None,
+    peak_observations=None,
 ) -> dict:
     constraints = constraints or Constraints()
     number(max_pings, "max_pings", 0, 100, integer=True)
@@ -114,15 +153,24 @@ def optimize(
         return [index[r.run_id] for t in ts for r in t.runs if r.run_id in index]
 
     train_labels, test_labels = selected(train), selected(test)
+    peaks = index_run_peaks(peak_observations, {r.run_id for t in threads for r in t.runs})
+
+    def selected_peaks(partition):
+        if peaks is None:
+            return None
+        return [peaks[r.run_id] for t in partition for r in t.runs if r.run_id in peaks]
+
+    train_peaks, test_peaks = selected_peaks(train), selected_peaks(test)
     profile = fit_profile(
         train,
         train_labels,
         spec,
         observation_end=observation_end,
         timing_source=timing_source,
+        peak_observations=train_peaks,
     )
     evaluated = []
-    for policy in candidates(profile, spec, max_pings):
+    for policy in candidates(profile, spec, max_pings, max_overflow_probability=max_overflow_probability):
         result = replay(
             train,
             train_labels,
@@ -130,18 +178,19 @@ def optimize(
             profile,
             observation_end=observation_end,
             include_ledger=False,
+            peak_observations=train_peaks,
         )["summary"]
         evaluated.append(
             {
                 "policy": policy.to_dict(),
                 "training": result,
-                "feasible": feasible(result, constraints),
+                "feasible": feasible(result, constraints, require_warm_validation=False),
             }
         )
     eligible = [e for e in evaluated if e["feasible"]]
     if not eligible:
         raise ContractError(
-            "no feasible policy: even the preserve-all baseline cannot satisfy constraints/admission"
+            "no feasible training policy under the supplied constraints, admission and warm-risk settings"
         )
 
     def key(e):
@@ -154,15 +203,18 @@ def optimize(
             p["max_pings"],
             -p["target"],
             -p["warm_trigger"],
+            p["schema_version"] != "compache-policy-v1",
             digest(p),
         )
 
     winner = min(eligible, key=key)
     policy = Policy.from_dict(winner["policy"])
     heldout = replay(
-        test, test_labels, policy, profile, observation_end=observation_end
+        test, test_labels, policy, profile, observation_end=observation_end, peak_observations=test_peaks
     )
     baseline = Policy(spec.to_dict(), digest(profile))
+    if max_overflow_probability is not None:
+        baseline = position_risk_policy(baseline, profile, max_overflow_probability=max_overflow_probability)
     no_cache = replay(
         test,
         test_labels,
@@ -170,9 +222,10 @@ def optimize(
         profile,
         observation_end=observation_end,
         caching=False,
+        peak_observations=test_peaks,
     )
     caching_only = replay(
-        test, test_labels, baseline, profile, observation_end=observation_end
+        test, test_labels, baseline, profile, observation_end=observation_end, peak_observations=test_peaks
     )
     compaction_only = replay(
         test,
@@ -180,16 +233,21 @@ def optimize(
         replace(policy, max_pings=0),
         profile,
         observation_end=observation_end,
+        peak_observations=test_peaks,
     )
     original = caching_only["summary"]["cost_input_equivalents"]
     optimized = heldout["summary"]["cost_input_equivalents"]
     checks = {
-        "dependency_and_admission_constraints": feasible(
+        "dependency_and_admission_constraints": dependency_admission_feasible(
             heldout["summary"], constraints
         ),
         "complete_cost_coverage": heldout["summary"]["runs_with_unavailable_text"] == 0,
         "lower_modeled_cost_than_baseline": optimized < original - 1e-9,
     }
+    if max_overflow_probability is not None:
+        checks["supported_warm_forecasts_within_budget"] = not heldout["summary"]["warm_risk_gate"]["remaining_above_budget"]
+        checks["supported_warm_frozen_outcomes_within_budget"] = (
+            heldout["summary"]["warm_outcome_validation"]["status"] == "within_empirical_budget")
     promoted = all(checks.values())
     recommended = (
         policy
@@ -217,6 +275,10 @@ def optimize(
             "training": winner["training"],
             "candidates": evaluated,
             "heldout_used_for_selection": False,
+            **({"warm_boundary": "position_conditioned_run_peak_growth",
+                "max_overflow_probability": max_overflow_probability,
+                "fallback": "legacy_fixed_boundary_at_underpowered_or_unseen_positions",
+                "incoming_retrievals": "verbatim"} if max_overflow_probability is not None else {}),
         },
         "heldout": heldout,
         "baselines": {
@@ -250,8 +312,12 @@ def optimize(
         if promoted
         else "baseline_retained"
         if recommended
+        else "no_risk_validated_policy"
+        if max_overflow_probability is not None and not checks["supported_warm_frozen_outcomes_within_budget"]
         else "no_admissible_policy"
     )
+    if max_overflow_probability is not None:
+        report["result"]["heldout_warm_outcome_validation"] = heldout["summary"]["warm_outcome_validation"]
     report["result"]["recommended_modeled_saving_vs_cache_only"] = (
         original - optimized if promoted else 0 if recommended else None
     )

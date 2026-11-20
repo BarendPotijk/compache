@@ -17,6 +17,48 @@
 
 **Optional:** source extraction (tool return to documents and keys, answer text to cited keys), protected evidence, and deferred tools. Source extraction is the one domain-specific part.
 
+## Give the model a reopen tool
+
+Register `compache.optimizer.REOPEN_TOOL` alongside your host's other Chat Completions tools and add `REOPEN_INSTRUCTIONS` to your system or developer message. When a detail is missing, the model should first copy the missing earlier subject's external identifier from the question. For example, when comparing a current and an earlier order, use the earlier order number. The IDs of the current prompt and retrieval describe those messages. Use a historical handle or part ID only when it is known to identify the requested subject. A distinctive phrase from the conversation can help when the subject has no named identifier. Keep both the guidance and the tool declaration in the same positions on answer requests, continuations and cache refreshes that should share a prefix.
+
+```python
+import json
+
+from compache.optimizer import REOPEN_INSTRUCTIONS, REOPEN_TOOL, Request, reopen
+from compache.traces import ContractError
+
+tools = [*usual_tools, REOPEN_TOOL]
+system_message = {"role": "system",
+                  "content": usual_system_instructions + "\n\n" + REOPEN_INSTRUCTIONS}
+
+# Bind these on the host after authorizing the conversation and run.
+request = Request.from_thread(thread, run_id)
+archived_ids = recipe_view.archived_ids
+
+def handle_reopen(call):
+    try:
+        result = reopen(request, json.loads(call.function.arguments),
+                        archived_ids=archived_ids)
+    except (json.JSONDecodeError, ContractError) as error:
+        result = {"status": "invalid_arguments", "error": str(error)}
+    return {"role": "tool", "tool_call_id": call.id,
+            "content": json.dumps(result, ensure_ascii=False)}
+```
+
+Send the system message, projected conversation and tool declarations with automatic tool choice. If an evaluation wraps a historical transcript containing obsolete tool instructions, identify that transcript as historical in the wrapper. The exported guidance applies to the current host. When the assistant emits tool calls, append that assistant message, dispatch each `reopen` to the handler above and append the tool result with its matching call ID. Dispatch other names to their usual handlers. Continue the model call with the same declarations and your host's normal admission and tool-call limits. Record the usage from each provider response, including the continuation that reads the returned evidence.
+
+Supply the canonical `Request` as the archive. `Request.from_thread` includes only retrievals exposed to the model and stops at the target run. The handler considers only earlier runs with available text. With a gate projection, compute the archive as historical canonical part IDs absent from `prepared.full_part_ids`. For a host-generated summary, use the historical canonical IDs whose original bodies were omitted from the outgoing view. Passing an empty set disables all reads. Omitting `archived_ids` enables all available earlier parts, including those still visible. The model supplies only a reference and an optional offset.
+
+| Reference | Result |
+|---|---|
+| Canonical `ctx:` handle or exact part ID | Read any eligible earlier input, output or retrieval. A handle binds to the thread, source identity and content fingerprint. |
+| Exact document or chunk ID | Read the original retrieval, or receive candidates when several occurrences or versions match. |
+| Literal identifier, word or phrase | Search original retrieval text case-insensitively with whole-identifier boundaries. A unique hit opens near the first occurrence, even deep in a long source. |
+
+A successful read returns `status="ok"`, the handle, source kind, run index, available short source IDs, total character length, starting offset and up to 4,096 verbatim characters. A `matches` result lists up to eight candidates in canonical order, each with a 512-character maximum excerpt, provenance, handle and reading offset. Select the appropriate handle and offset. For either kind of result, use `next_reference` and `next_offset` together to continue when present. Offsets count Unicode code points. Use the handle with offset zero to read a matched source from the beginning.
+
+A `not_found` result includes the same generic retry hint for every unsuccessful lookup. It points the model back to the user's words for a supported earlier reference. If the conversation supplies no other reference, the model should report which fact remains unresolved.
+
 ## Providers
 
 | Type | Notes |

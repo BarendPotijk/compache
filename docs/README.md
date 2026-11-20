@@ -29,6 +29,8 @@ They cooperate: the planner prices a cold return at the gate's own cold plan, an
 
 ## Docs
 
+[Run the trace-fitted workload planner](workload-planner.md) · [Try both frozen cache-window fits](../examples/fitted_policy/README.md) · [Configure a workload](setup.md)
+
 [Comparison scopes and Headroom replay](comparisons.md) · [Application structure](application-structure.md)
 
 | Doc | Covers |

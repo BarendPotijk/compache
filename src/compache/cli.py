@@ -53,8 +53,13 @@ def _write_jsonl(path: Path, values: list[dict]) -> None:
 
 
 def _parser() -> argparse.ArgumentParser:
+    from .setup_cli import register_setup
+    from .workload_cli import register_planner
+
     parser = argparse.ArgumentParser(description=__doc__)
     groups = parser.add_subparsers(dest="group", required=True)
+    register_planner(groups)
+    register_setup(groups)
     traces = groups.add_parser(
         "traces", help="Validate and convert offline RAG trace files"
     ).add_subparsers(dest="action", required=True)
@@ -102,6 +107,8 @@ def _parser() -> argparse.ArgumentParser:
         command.add_argument("--threads", type=Path, required=True)
         command.add_argument("--output", type=Path, required=True)
         if name in ("fit", "solve", "replay"):
+            command.add_argument("--run-peaks", type=Path,
+                                 help="Optional JSONL run_id/start_input_tokens/peak_context_tokens/status observations")
             command.add_argument(
                 "--labels",
                 type=Path,
@@ -121,6 +128,8 @@ def _parser() -> argparse.ArgumentParser:
             )
             command.add_argument("--timing-source", default="supplied_timestamps")
         if name == "solve":
+            command.add_argument("--max-overflow-probability", type=float,
+                                 help="Use position-conditioned warm compaction with this tail risk tolerance (0 < p < 1)")
             command.add_argument("--heldout-company")
             command.add_argument("--heldout-fraction", type=float, default=0.25)
             command.add_argument(
@@ -168,6 +177,7 @@ def _optimizer_command(args):
 
     threads = load_threads(args.threads)
     labels = _read_jsonl(args.labels) if getattr(args, "labels", None) else []
+    peaks = _read_jsonl(args.run_peaks) if getattr(args, "run_peaks", None) else None
     if args.group in ("fit", "solve"):
         spec = ModelSpec.from_dict(
             json.loads(args.model_spec.read_text(encoding="utf-8"))
@@ -179,6 +189,7 @@ def _optimizer_command(args):
                 spec,
                 observation_end=args.observation_end,
                 timing_source=args.timing_source,
+                peak_observations=peaks,
             )
             _write_json(args.output, result)
             return {
@@ -201,6 +212,8 @@ def _optimizer_command(args):
             heldout_fraction=args.heldout_fraction,
             timing_source=args.timing_source,
             max_pings=args.max_pings,
+            max_overflow_probability=args.max_overflow_probability,
+            peak_observations=peaks,
         )
         _write_json(args.output / "profile.json", result["profile"])
         _write_json(args.output / "candidate-policy.json", result["policy"])
@@ -226,6 +239,7 @@ def _optimizer_command(args):
             observation_end=args.observation_end,
             recovery_overhead=args.recovery_overhead,
             overhead_tokens=args.runtime_overhead_tokens,
+            peak_observations=peaks,
         )
         _write_json(args.output, result)
         return result["summary"]
@@ -259,7 +273,16 @@ def _optimizer_command(args):
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
-        if args.group == "compare":
+        if args.group == "setup":
+            from .setup_cli import format_setup, run_setup
+
+            report = run_setup(args)
+            print(json.dumps(report, ensure_ascii=False) if args.json else format_setup(report))
+        elif args.group == "planner":
+            from .workload_cli import run_planner
+
+            print(json.dumps(run_planner(args), ensure_ascii=False))
+        elif args.group == "compare":
             from .baselines.headroom import HeadroomLossless
             from .comparison import compare_headroom
             from .optimizer import Policy
