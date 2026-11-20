@@ -14,7 +14,7 @@ from compache.optimizer import (
     fit_workload,
 )
 from compache.traces import ContractError
-from test_optimizer import END, labels_for, thread
+from helpers import END, labels_for, thread
 
 
 class WorkloadAccountingTests(unittest.TestCase):

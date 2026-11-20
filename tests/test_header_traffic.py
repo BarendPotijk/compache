@@ -9,7 +9,7 @@ from compache.optimizer.header_traffic import (
     header_traffic_signature,
 )
 from compache.traces import ContractError, Thread
-from test_optimizer import thread
+from helpers import thread
 
 
 SPEC = ModelSpec("test", cache_min_tokens=4, cache_block_tokens=4, cache_ttl_seconds=50)

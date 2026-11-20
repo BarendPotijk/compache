@@ -8,11 +8,11 @@ from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from test_optimizer import END, labels_for, thread
+from helpers import END, labels_for, thread
 
 from compache.cli import main
 from compache.optimizer.contracts import ModelSpec
-from compache.optimizer.retention import recipe_grid
+from compache.optimizer.retention import evidence_windows, recipe_grid, size_ladder
 from compache.traces import Thread, write_threads
 
 
@@ -245,11 +245,17 @@ class WorkloadCLITests(unittest.TestCase):
             END,
         ]
         fit = self.call([*common, "--output", self.base / "grid.json"])
-        self.assertEqual(fit["candidate_recipes"], len(recipe_grid(5)))
+        candidates = recipe_grid(
+            5,
+            keep_under_tokens=size_ladder([t], self.spec),
+            extra_windows=evidence_windows([t], labels_for(t, need_old=True)),
+        )
+        self.assertEqual(fit["candidate_recipes"], len(candidates))
         self.assertEqual(
             fit["recipe_selection"],
             {
                 "select": "cheapest",
+                "tradeoff_floor": None,
                 "unknowns": "excluded",
                 "max_unknown_change_rate": None,
             },
@@ -272,6 +278,8 @@ class WorkloadCLITests(unittest.TestCase):
                 "worst_case",
                 "--max-unknown-change-rate",
                 "0",
+                "--tradeoff-floor",
+                "0.9",
                 "--output",
                 self.base / "strict.json",
             ]
@@ -280,6 +288,7 @@ class WorkloadCLITests(unittest.TestCase):
             strict["recipe_selection"],
             {
                 "select": "cheapest",
+                "tradeoff_floor": 0.9,
                 "unknowns": "worst_case",
                 "max_unknown_change_rate": 0,
             },

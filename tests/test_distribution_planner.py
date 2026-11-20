@@ -12,7 +12,7 @@ from compache.optimizer.distribution import (
     request_charge,
 )
 from compache.traces import ContractError
-from test_optimizer import END, thread
+from helpers import END, thread
 
 SPEC = ModelSpec(
     "test",

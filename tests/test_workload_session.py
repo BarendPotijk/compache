@@ -3,11 +3,11 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 
-from test_optimizer import END, labels_for, thread
+from helpers import END, labels_for, thread
 
 from compache.optimizer.cache_breaks import CacheBreakChecker, CacheScope
 from compache.optimizer.contracts import ModelSpec
-from compache.optimizer.gate import Request, Source
+from compache.optimizer.parts import Request, Source
 from compache.optimizer.workload import WorkloadPolicy, WorkloadSession, fit_workload
 from compache.traces import ContractError
 

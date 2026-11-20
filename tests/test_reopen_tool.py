@@ -4,7 +4,7 @@ from dataclasses import replace
 
 from compache.optimizer import REOPEN_INSTRUCTIONS, REOPEN_TOOL, Request, Source, handle, reopen
 from compache.traces import ContractError, Thread
-from test_optimizer import thread
+from helpers import thread
 
 
 def retrieval(part_id, text, *, run=1, version="v1"):

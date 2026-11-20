@@ -7,7 +7,6 @@ From the root of this checkout, with Python 3.11 or newer:
 ```sh
 PYTHONPATH=src python3 -B examples/fitted_policy/run.py
 PYTHONPATH=src python3 -B -m compache planner --help
-PYTHONPATH=src python3 -B -m compache setup --workflow support --demo
 ```
 
 The first command checks the SHA-256 of each decompressed artifact, constructs real `WorkloadPolicy` and `WorkloadSession` objects and prepares two requests that use a fictional harbor notice. The second question arrives six minutes after the first completes. Both policies report 200 training threads, 15,840 training turns, two candidate recipes and zero admitted recipes. The tiny input falls below the model's cacheable prefix minimum. The printed token count uses the package's local estimate. Every answer and time in the demonstration is authored, and no provider receipt or charge is generated.

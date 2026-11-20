@@ -13,7 +13,7 @@ from compache.optimizer.distribution import (
 from compache.optimizer.workload import fit_workload
 from compache.traces import ContractError
 from test_distribution_planner import SPEC, cohort, view
-from test_optimizer import END, labels_for, thread
+from helpers import END, labels_for, thread
 
 
 def with_counts(profile, **counts):

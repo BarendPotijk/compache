@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from compache.traces import ContractError
 
 from .contracts import ModelSpec, number
-from .gate import Source, placeholder, wire_part
+from .parts import Source, placeholder, wire_part
 
 if TYPE_CHECKING:
     from .retention import RecipeView

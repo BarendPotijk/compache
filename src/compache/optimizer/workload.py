@@ -15,15 +15,17 @@ from .distribution import (
     repeat_ping_charge,
 )
 from .edit_accounting import EditErrorHistory, InputAnchor, PartMeter, estimate_input
-from .gate import Request, Source, wire_part
+from .parts import Request, Source, wire_part
 from .header_traffic import fit_shared_header_traffic, header_traffic_signature
 from .retention import (
     RecipeView,
     RetentionRecipe,
+    evidence_windows,
     fit_recipes,
     matched_prefix_tokens,
     recipe_grid,
     render_recipe,
+    size_ladder,
 )
 from .shared_prefix import SharedPrefix, SharedPrefixCatalog, SharedReuse, _wire
 from .usage import response_usage
@@ -37,6 +39,7 @@ def fit_workload(
     observation_end,
     recipes=None,
     retention_floor=0.95,
+    tradeoff_floor=None,
     max_unknown_change_rate=None,
     unknowns="excluded",
     select=None,
@@ -50,12 +53,24 @@ def fit_workload(
     """Fit external demand and assess checkpoint recipes on training threads only.
 
     Without `recipes` the candidates are `recipe_grid` up to the longest training
-    thread, and the cheapest passing one is admitted. A supplied list is admitted
-    in its own order. `select` overrides either default.
+    thread, over the kinds and sizes of part those threads contain, and the
+    cheapest passing one is admitted. A supplied list is admitted in its own order.
+    `select` overrides either default. `tradeoff_floor` lets a recipe between it
+    and `retention_floor` compete once its lost requirements are priced.
     """
-    threads = list(threads)
+    threads, labels = list(threads), list(labels)
     if recipes is None:
-        recipes = recipe_grid(max((len(t.runs) for t in threads), default=1))
+        kinds = {"input", "output"}
+        if any(
+            p.exposed_to_model for t in threads for r in t.runs for p in r.retrievals
+        ):
+            kinds.add("retrieval")
+        recipes = recipe_grid(
+            max((len(t.runs) for t in threads), default=1),
+            kinds=kinds,
+            keep_under_tokens=size_ladder(threads, spec),
+            extra_windows=evidence_windows(threads, labels),
+        )
         select = select or "cheapest"
     select = select or "supplied"
     forecasts = fit_distribution(
@@ -72,6 +87,7 @@ def fit_workload(
         spec,
         recipes,
         retention_floor=retention_floor,
+        tradeoff_floor=tradeoff_floor,
         max_unknown_change_rate=max_unknown_change_rate,
         unknowns=unknowns,
         select=select,
@@ -90,6 +106,7 @@ def fit_workload(
         "retention_floor": retention_floor,
         "recipe_selection": {
             "select": select,
+            "tradeoff_floor": tradeoff_floor,
             "unknowns": unknowns,
             "max_unknown_change_rate": max_unknown_change_rate,
         },
@@ -108,7 +125,7 @@ class WorkloadPolicy:
         branches=3,
         seed=0,
         sampler="brownian",
-        max_pings=1,
+        max_pings=None,
         ping_lead_seconds=45,
         reserve_tokens=0,
         overhead_tokens=0,
@@ -140,6 +157,9 @@ class WorkloadPolicy:
         self.ambient_hit_probability = ambient_hit_probability
         number(overhead_tokens, "overhead_tokens", integer=True)
         self.overhead_tokens = overhead_tokens
+        if max_pings is None:
+            # A solved policy carries the ping count that was cheapest on its threads.
+            max_pings = (artifact.get("planner_options") or {}).get("max_pings", 1)
         self.options = {
             "lookahead": lookahead,
             "branches": branches,

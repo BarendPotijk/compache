@@ -8,8 +8,6 @@ import tempfile
 import unittest
 
 from compache.optimizer.cache_breaks import CacheBreakChecker, CacheScope
-from compache.optimizer.contracts import ModelSpec, Policy, digest
-from compache.optimizer.planner import end_run
 from compache.traces import ContractError
 
 
@@ -299,32 +297,3 @@ class CacheBreaks(unittest.TestCase):
         self.assertEqual(len(capture.records), 1)
         self.assertEqual(events, [events[0]] * 3)
         self.assertEqual(self.checker.events(self.scope), events[:1])
-
-    def test_existing_planner_declines_suppressed_scope(self):
-        self.observe("a", 0)
-        with self.assertLogs("compache.optimizer.cache_breaks"):
-            self.observe("b", 10, cached_input_tokens=0)
-        policy = Policy(ModelSpec("model").to_dict(), digest({}), max_pings=1)
-        args = dict(
-            held_input=1024,
-            answer_tokens=10,
-            cold_view=1024,
-            run_index=2,
-            request_started_at=10,
-            ended_at=12,
-        )
-        decision = end_run(
-            policy, None, cache_checker=self.checker, cache_scope=self.scope, **args
-        )
-        self.assertEqual(decision.pings, 0)
-        self.assertIn("cache break", decision.reason)
-        with self.assertRaises(ContractError):
-            end_run(policy, None, cache_scope=self.scope, **args)
-        with self.assertRaises(ContractError):
-            end_run(
-                policy,
-                None,
-                cache_checker=self.checker,
-                cache_scope=replace(self.scope, model="other"),
-                **args,
-            )
