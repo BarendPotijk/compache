@@ -11,7 +11,7 @@ from compache.optimizer.distribution import (
     plan_distribution_idle,
     request_charge,
 )
-from compache.traces import ContractError
+from compache.errors import ContractError
 from helpers import END, thread
 
 SPEC = ModelSpec(

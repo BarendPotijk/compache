@@ -813,7 +813,7 @@ def needed(check):
     return ("yes", [check["sets"][n] for n in names]) if names else ("unknown", [])
 
 
-# Assemble: threads in the trace contract, labels, grading notes, split and manifest.
+# Assemble: threads in the canonical format, labels, grading notes, split and manifest.
 
 
 def idle_seconds(clock, *key):
@@ -934,62 +934,24 @@ def assemble_thread(plan, written, checks, chunks, *, clock, seed, model):
             ),
             None,
         )
-        here = [source(gold or again or ids[0], record["quotes"])]
-        alternatives = [
-            {
-                "sources": [
-                    source(part[tuple(p)], done[p[0]]["quotes"] + record["quotes"])
-                    for p in earlier
-                ]
-                + (here if gold or not earlier else [])
-            }
-            for earlier in sets
-        ]
-        kinds = {
-            visible[s["part_id"]]["kind"] for a in alternatives for s in a["sources"]
-        }
+        # The excerpt the turn was written from is part of every set that made the answer right.
+        here = [source(gold or again or ids[0], record["quotes"])] if gold else []
         labels.append(
             {
-                "schema_version": "compache-dependency-label-v1",
                 "thread_id": tid,
-                "target_run_id": run_id,
-                "status": "complete",
-                "coverage_notes": [
-                    "Reference answer written from planned evidence. A live run must grade its own answer."
+                "run_id": run_id,
+                # Each alternative let a model answer correctly with the rest of the history withheld.
+                "needs": None
+                if need == "unknown"
+                else [
+                    [
+                        source(part[tuple(p)], done[p[0]]["quotes"] + record["quotes"])
+                        for p in earlier
+                    ]
+                    + here
+                    for earlier in sets
+                    if earlier
                 ],
-                "task_requirements": [
-                    {
-                        "requirement_id": "req-1",
-                        "description": f"Answer the {record['intent']} message.",
-                        "source_kind": "unknown"
-                        if not kinds
-                        else "mixed"
-                        if len(kinds) > 1
-                        else kinds.pop(),
-                        "necessity": "unknown" if need == "unknown" else "inferred",
-                        "alternatives": alternatives,
-                        "evidence_note": "Each alternative let a model answer correctly with the rest of the history withheld. "
-                        "With no history shown the answer "
-                        + (
-                            "was already correct."
-                            if need == "no"
-                            else "was not correct."
-                        ),
-                        "question_quote": record["question"],
-                        "fulfillment": "fulfilled",
-                        "historical_context_needed": need,
-                    }
-                ],
-                "claims": [
-                    {
-                        "claim_id": "claim-1",
-                        "target_quote": record["answer"],
-                        "relation": "uncertain",
-                        "requirements": [],
-                    }
-                ],
-                "historical_dependencies": [],
-                "unresolved": [],
             }
         )
         notes.append(
@@ -1026,44 +988,11 @@ def assemble_thread(plan, written, checks, chunks, *, clock, seed, model):
 
 
 def check_contract(thread, labels):
-    """The trace contract, and every label against what its run could see."""
-    from compache.dependencies import validate_label
-    from compache.traces import Thread
+    """The thread format, and every label against what its turn could see."""
+    from compache.labels import label_index
+    from compache.threads import Thread
 
-    Thread.from_dict(thread)
-    wanted = {label["target_run_id"]: label for label in labels}
-    visible = []
-    for run in thread["runs"]:
-
-        def rows(kind, parts):
-            return [
-                {
-                    "part_id": p["part_id"],
-                    "origin_run_id": run["run_id"],
-                    "origin_run_index": run["run_index"],
-                    "kind": kind,
-                    "text": p["text"],
-                    "content_status": "available",
-                }
-                for p in parts
-            ]
-
-        now = rows("input", [run["input"]]) + rows("retrieval", run["retrievals"])
-        packet = {
-            "schema_version": "compache-label-input-v1",
-            "thread_id": thread["thread_id"],
-            "target_run_id": run["run_id"],
-            "target_run_index": run["run_index"],
-            "target_question": run["input"],
-            "target_output": run["output"],
-            "request_parts": visible + now,
-            "request_coverage": "complete",
-            "coverage_notes": [],
-        }
-        errors = validate_label(wanted[run["run_id"]], packet)
-        if errors:
-            raise ValueError(f"{run['run_id']}: {errors[0]}")
-        visible += now + rows("output", [run["output"]])
+    label_index([Thread(thread)], labels)
 
 
 def split_documents(sources, salt="docchat-split-v1"):

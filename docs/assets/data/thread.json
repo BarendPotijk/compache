@@ -1,0 +1,356 @@
+{
+ "thread_id": "med-zoloft-m1",
+ "domain": "healthcare",
+ "document": "med-zoloft",
+ "recipe": {
+  "input_runs": 49,
+  "output_runs": 59,
+  "retrieval_runs": 1,
+  "protect_query_matches": true,
+  "keep_under_tokens": 0
+ },
+ "turns": [
+  {
+   "turn": 1,
+   "tokens": {
+    "input": 51,
+    "retrieval": 3208,
+    "output": 133
+   },
+   "needs": "nothing earlier"
+  },
+  {
+   "turn": 2,
+   "tokens": {
+    "input": 25,
+    "retrieval": 3404,
+    "output": 118
+   },
+   "needs": "unknown"
+  },
+  {
+   "turn": 3,
+   "tokens": {
+    "input": 31,
+    "retrieval": 3672,
+    "output": 168
+   },
+   "needs": "nothing earlier"
+  },
+  {
+   "turn": 4,
+   "tokens": {
+    "input": 21,
+    "retrieval": 3638,
+    "output": 89
+   },
+   "needs": {
+    "in_view": true,
+    "parts": [
+     [
+      "retrieval",
+      3
+     ]
+    ]
+   }
+  },
+  {
+   "turn": 5,
+   "tokens": {
+    "input": 39,
+    "retrieval": 3776,
+    "output": 175
+   },
+   "needs": {
+    "in_view": true,
+    "parts": [
+     [
+      "input",
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "turn": 6,
+   "tokens": {
+    "input": 27,
+    "retrieval": 3798,
+    "output": 98
+   },
+   "needs": {
+    "in_view": true,
+    "parts": [
+     [
+      "retrieval",
+      5
+     ]
+    ]
+   }
+  },
+  {
+   "turn": 7,
+   "tokens": {
+    "input": 33,
+    "retrieval": 3793,
+    "output": 187
+   },
+   "needs": "unknown"
+  },
+  {
+   "turn": 8,
+   "tokens": {
+    "input": 36,
+    "retrieval": 3221,
+    "output": 93
+   },
+   "needs": "nothing earlier"
+  },
+  {
+   "turn": 9,
+   "tokens": {
+    "input": 28,
+    "retrieval": 3623,
+    "output": 131
+   },
+   "needs": "nothing earlier"
+  },
+  {
+   "turn": 10,
+   "tokens": {
+    "input": 31,
+    "retrieval": 3663,
+    "output": 129
+   },
+   "needs": {
+    "in_view": false,
+    "parts": [
+     [
+      "retrieval",
+      7
+     ]
+    ]
+   }
+  },
+  {
+   "turn": 11,
+   "tokens": {
+    "input": 33,
+    "retrieval": 3701,
+    "output": 116
+   },
+   "needs": {
+    "in_view": true,
+    "parts": [
+     [
+      "output",
+      8
+     ]
+    ]
+   }
+  },
+  {
+   "turn": 12,
+   "tokens": {
+    "input": 31,
+    "retrieval": 3793,
+    "output": 112
+   },
+   "needs": "nothing earlier"
+  },
+  {
+   "turn": 13,
+   "tokens": {
+    "input": 39,
+    "retrieval": 3794,
+    "output": 163
+   },
+   "needs": "nothing earlier"
+  },
+  {
+   "turn": 14,
+   "tokens": {
+    "input": 25,
+    "retrieval": 4087,
+    "output": 188
+   },
+   "needs": "nothing earlier"
+  },
+  {
+   "turn": 15,
+   "tokens": {
+    "input": 20,
+    "retrieval": 3601,
+    "output": 120
+   },
+   "needs": "nothing earlier"
+  },
+  {
+   "turn": 16,
+   "tokens": {
+    "input": 25,
+    "retrieval": 3399,
+    "output": 108
+   },
+   "needs": "nothing earlier"
+  },
+  {
+   "turn": 17,
+   "tokens": {
+    "input": 42,
+    "retrieval": 3325,
+    "output": 115
+   },
+   "needs": {
+    "in_view": false,
+    "parts": [
+     [
+      "input",
+      12
+     ],
+     [
+      "output",
+      12
+     ],
+     [
+      "retrieval",
+      12
+     ]
+    ]
+   }
+  },
+  {
+   "turn": 18,
+   "tokens": {
+    "input": 21,
+    "retrieval": 4176,
+    "output": 106
+   },
+   "needs": "nothing earlier"
+  },
+  {
+   "turn": 19,
+   "tokens": {
+    "input": 28,
+    "retrieval": 3590,
+    "output": 203
+   },
+   "needs": "nothing earlier"
+  },
+  {
+   "turn": 20,
+   "tokens": {
+    "input": 25,
+    "retrieval": 4072,
+    "output": 127
+   },
+   "needs": {
+    "in_view": true,
+    "parts": [
+     [
+      "input",
+      19
+     ]
+    ]
+   }
+  },
+  {
+   "turn": 21,
+   "tokens": {
+    "input": 32,
+    "retrieval": 3692,
+    "output": 146
+   },
+   "needs": "nothing earlier"
+  },
+  {
+   "turn": 22,
+   "tokens": {
+    "input": 32,
+    "retrieval": 3777,
+    "output": 104
+   },
+   "needs": "nothing earlier"
+  },
+  {
+   "turn": 23,
+   "tokens": {
+    "input": 37,
+    "retrieval": 4139,
+    "output": 118
+   },
+   "needs": {
+    "in_view": true,
+    "parts": [
+     [
+      "output",
+      6
+     ]
+    ]
+   }
+  },
+  {
+   "turn": 24,
+   "tokens": {
+    "input": 23,
+    "retrieval": 3544,
+    "output": 137
+   },
+   "needs": "unknown"
+  },
+  {
+   "turn": 25,
+   "tokens": {
+    "input": 30,
+    "retrieval": 4065,
+    "output": 123
+   },
+   "needs": "nothing earlier"
+  },
+  {
+   "turn": 26,
+   "tokens": {
+    "input": 39,
+    "retrieval": 4125,
+    "output": 119
+   },
+   "needs": "unknown"
+  },
+  {
+   "turn": 27,
+   "tokens": {
+    "input": 47,
+    "retrieval": 3860,
+    "output": 187
+   },
+   "needs": "nothing earlier"
+  },
+  {
+   "turn": 28,
+   "tokens": {
+    "input": 34,
+    "retrieval": 3408,
+    "output": 86
+   },
+   "needs": "nothing earlier"
+  },
+  {
+   "turn": 29,
+   "tokens": {
+    "input": 38,
+    "retrieval": 4128,
+    "output": 112
+   },
+   "needs": "nothing earlier"
+  },
+  {
+   "turn": 30,
+   "tokens": {
+    "input": 31,
+    "retrieval": 3295,
+    "output": 119
+   },
+   "needs": "nothing earlier"
+  }
+ ]
+}

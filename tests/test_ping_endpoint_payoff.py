@@ -12,7 +12,7 @@ from compache.optimizer.distribution import (
     freeze_distribution,
     plan_distribution_idle,
 )
-from compache.traces import ContractError
+from compache.errors import ContractError
 
 
 def fitted(returns, stops=0):

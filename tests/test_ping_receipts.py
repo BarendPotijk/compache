@@ -18,7 +18,7 @@ from compache.optimizer import (
     WorkloadSession,
     fit_workload,
 )
-from compache.traces import ContractError
+from compache.errors import ContractError
 from compache.optimizer.distribution import plan_distribution_idle
 from helpers import END, labels_for, thread
 
@@ -534,7 +534,7 @@ class PingReceipts(unittest.TestCase):
                 return plan_distribution_idle(*args, **kwargs)
 
             with patch(
-                "compache.optimizer.workload.plan_distribution_idle",
+                "compache.optimizer.session.plan_distribution_idle",
                 side_effect=return_during_reprice,
             ):
                 self.assertTrue(

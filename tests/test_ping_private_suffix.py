@@ -15,7 +15,7 @@ from compache.optimizer import (
     WorkloadSession,
     fit_workload,
 )
-from compache.traces import Thread
+from compache.threads import Thread
 from test_distribution_planner import cohort
 from helpers import END, labels_for, thread
 from test_ping_continuation import continuation, receipt

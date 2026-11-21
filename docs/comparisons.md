@@ -1,43 +1,47 @@
-# Comparisons
+# Other tools compared
 
-Compare named configurations on the same workload. Compression ratio, modeled cost and answer accuracy are different measurements.
+Every tool below ships fixed rules. compache fits the rule to recorded traffic and decides compaction and cache keep-warm together. That is the difference, and the table says what was and was not measured.
 
-| Baseline | Available scope | Not established |
-|---|---|---|
-| OpenClaw | Browser model of pinned client-summary behavior | Actual answers or billing |
-| OpenCode | Pinned policy and recorded subscription experiments | General performance across workloads |
-| Headroom 0.44.0 | Native verified-lossless library compression, with frozen-prefix and cold-refresh variants | Default proxy/CCR/Kompress, native cold hook, net-cost gate or answer quality |
-
-OpenClaw and OpenCode are distinct baselines: [calculator methodology](https://barendpotijk.github.io/compache/methodology.html), [OpenCode protocol](https://github.com/BarendPotijk/compache/blob/codex/rag-optimizer/docs/opencode-baseline.md).
+| Tool | What it does by default | Fitted to traffic | Keeps the cache warm | Compared how |
+|---|---|---|---|---|
+| OpenClaw | Clears old tool results or summarizes at fixed shares of the context window | No | No | Modeled in the [calculator](calculator.md) |
+| Headroom | Compresses the content of new tool output, keeps every message, one of four fixed profiles | No | No | Not run head to head |
+| Provider compaction | Compacts on the server at a context-size threshold | No | No | Not modeled |
 
 ## OpenClaw
 
-`node scripts/openclaw_comparison.mjs` prints the README table: modeled cost per 1,000 turns for seven model presets at three thread lengths, on the calculator's default workload. `--requirement` sets the least share of what later turns need that Compache must keep in view (default 0.8). `--svg` redraws the chart.
+Defaults as documented at revision [`c49b553`](https://github.com/openclaw/openclaw/commit/c49b553b85b82bc700465d4607949574f892366c):
+
+| With | Default |
+|---|---|
+| A Claude API key | Server-side tool-result clearing once the request reaches the larger of 50,000 tokens and 30% of the window. The three newest results stay, and at least the larger of 12,500 tokens and 5% of the window must come free. Server-side compaction follows at 70% and a client summary at 75% |
+| An OpenAI API key | OpenAI's own compaction endpoint at 75% of the window |
+| Both | A five-minute cache and no keep-warm requests |
+
+`node scripts/openclaw_comparison.mjs` prices both sides with the calculator's model for seven model presets and three thread lengths. Neither tool is executed. For OpenAI the calculator prices OpenClaw's client-side summary, because the compaction endpoint's output cannot be priced from documentation.
 
 | Models | 8-turn threads | 30-turn threads | 80-turn threads |
 |---|---|---|---|
-| Claude (four presets) | 44% to 60% cheaper | 47% to 62% cheaper | 30% to 55% cheaper |
-| OpenAI (three presets) | 28% cheaper | 61% cheaper | 62% cheaper |
+| Claude Fable 5.2, Opus 5.5, Sonnet 5.5 | 58% to 59% cheaper | 61% to 63% cheaper | 60% to 63% cheaper |
+| Claude Haiku 5.5 | 90% cheaper | 91% cheaper | 88% cheaper |
+| GPT-6 Astra, GPT-5.6 Terra, GPT-6 Luna | 59% cheaper | 80% cheaper | 82% cheaper |
 
-- Neither tool is executed. Compache's policy is the cheapest of 90 candidates on one set of threads and is priced on a second set.
-- OpenClaw follows its documented defaults at a pinned revision and sends no keep-warm requests. With a Claude API key it clears old tool results on the server above 30% of the window, keeping the newest three. With OpenAI it is priced on its client-side summary at 75% of the window. Its default there calls OpenAI's own compaction at the same point, which is not modeled.
-- A needed source that was archived or cleared is fetched back with one extra call, on both sides. With Claude both then have every needed source in view. With OpenAI, OpenClaw's summaries stand in for 11% of what 30-turn threads need and 27% of what 80-turn threads need.
-- Still in view before fetching back: Compache 81% to 97%, OpenClaw 73% to 100%.
+- The workload is the calculator's default: 25k retrieved tokens per turn, users back after a median of four minutes, and what later turns need as measured on DocChat. compache's policy is fitted on one set of threads and priced on another.
+- compache leaves 81% to 93% of what turns need in the request and fetches the rest back, on 3% to 9% of turns. OpenClaw leaves 92% to 99% in the request. With OpenAI its summaries stand in for up to 8% of what 80-turn threads need.
+- Haiku charges five times as much for a request above 100k tokens. OpenClaw's thresholds let requests grow past that, and the fitted policy stays under it.
 
-## Headroom overlap
+## Headroom
 
-Headroom has a TTL learner, optional cold-prefix recompaction, a cache-aware mutation cost gate and observation-based compression recommendations. Its gate defaults to ten expected future reads and can derive cache-survival weight from idle time. At the reviewed commit its old request-time recommendation API returns `None`; the Rust loader says its dispatcher does not consume published recommendations yet. Do not present every documented learning feature as enabled runtime behavior.
+Read first-hand on 2026-11-21 from the README, documentation and source of [headroomlabs-ai/headroom](https://github.com/headroomlabs-ai/headroom), release 0.44.0.
 
-Compache's intended distinction is fitting whole-thread decisions to dependencies and return timing under an explicit dependency-retention requirement. This is a scope distinction, not a superiority claim.
+- **Adoption.** `compress(messages, model=...)` in process, a proxy behind a base-URL change, or `headroom wrap <agent>`. It needs no recorded traffic.
+- **Rules.** Four profiles (`coding`, `balanced`, `agent-90`, `general`) with fixed thresholds. It records statistics about tool output, and its documentation says those do not change request-time decisions.
+- **History.** "Headroom never drops messages from the conversation history." It shrinks what a tool returned: 21% to 57% fewer input tokens on its four agent scenarios, over 90% on repeated JSON and log lines, little on prose.
+- **Cache.** The default mode compresses only the newest part of each turn and forwards earlier turns byte for byte, so it does not break the cached prefix. It sends no keep-warm request. Recompacting a cold prefix and estimating the cache lifetime from traffic exist as options that are off by default.
+- **Recovery.** Compressed content can be fetched back through a retrieve tool, in the proxy.
 
-Reviewed source: [`18067b1`](https://github.com/headroomlabs-ai/headroom/tree/18067b1d19f6606bae3b4d6b50efeeaa48dc477e), 2026-11-17. Executed release: `headroom-ai==0.44.0`. Reports fingerprint the installed module separately; a release wheel is not assumed identical to that Git commit.
+The two are not alternatives. Headroom makes a single tool result smaller. compache decides which whole parts stay in the request and when the cache is kept warm, from how your users return and what your turns need. No head-to-head run exists, so no number is claimed here.
 
-## Headroom replay
+## Provider-side compaction
 
-An earlier offline replay ran Headroom's lossless `compress(mode="agent")` and a fitted Compache policy over the same recorded threads, with one token ruler, cache ledger and price list. On that small prose fixture neither changed anything: 25,864 base-input-token equivalents in every arm over 11 complete-text held-out threads. It checked the replay path, not behaviour under long-context pressure. The harness left the package with the first-generation optimiser. [Frozen reports, policy, profile and environment](https://github.com/BarendPotijk/compache/tree/codex/rag-optimizer/examples/headroom/results).
-
-## Full proxy comparison: not run
-
-Evaluate default cache/CCR mode, optional cold recompaction and optional net-cost policy separately on the same long RAG payloads. Record recovery, retrieval, summary and ping calls; cache usage; rejected requests; source availability; and independent answer scores. Tune only outside the final evaluation split. The calculator does not assign Headroom an invented percentage reduction.
-
-Sources: [cold hook](https://github.com/headroomlabs-ai/headroom/blob/18067b1d19f6606bae3b4d6b50efeeaa48dc477e/headroom/transforms/cold_prefix.py), [TTL learner](https://github.com/headroomlabs-ai/headroom/blob/18067b1d19f6606bae3b4d6b50efeeaa48dc477e/headroom/cache/ttl_estimator.py), [cost gate](https://github.com/headroomlabs-ai/headroom/blob/18067b1d19f6606bae3b4d6b50efeeaa48dc477e/headroom/transforms/content_router.py#L6244-L6349), [recommendation status](https://github.com/headroomlabs-ai/headroom/blob/18067b1d19f6606bae3b4d6b50efeeaa48dc477e/crates/headroom-core/src/transforms/recommendations.rs#L1-L22).
+Anthropic's tool-result clearing and compaction, and OpenAI's compaction endpoint, act at a context-size threshold. They do not know how your users return or which earlier parts later turns need, and they send no keep-warm request. The calculator models Anthropic's clearing as OpenClaw configures it.

@@ -1,23 +1,45 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="640" height="264" viewBox="0 0 640 264" role="img" aria-labelledby="oc-title oc-desc">
-<title id="oc-title">Cost per 1,000 turns on Claude Sonnet 5.5: OpenClaw against compache</title>
-<desc id="oc-desc">Modeled cost per 1,000 turns at three thread lengths. 8-turn threads: OpenClaw $216, compache $121; 30-turn threads: OpenClaw $257, compache $137; 80-turn threads: OpenClaw $287, compache $144.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="312" viewBox="0 0 880 312" role="img" aria-labelledby="t d">
+<title id="t">Cost per 1,000 turns on Claude Sonnet 5.5: OpenClaw against compache</title>
+<desc id="d">Modeled cost per 1,000 turns at three thread lengths. 8-turn threads: OpenClaw $208, compache $86; 30-turn threads: OpenClaw $260, compache $100; 80-turn threads: OpenClaw $278, compache $110.</desc>
 <style>
-  text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif; }
-  .bg { fill: #ffffff; } .t { fill: #1f2328; } .s { fill: #656d76; }
-  .oc { fill: #8c959f; } .cp { fill: #2a78d6; } .base { stroke: #d0d7de; }
-  .head { font-size: 15px; font-weight: 600; } .sub, .key, .val { font-size: 12.5px; } .row { font-size: 13px; }
-  @media (prefers-color-scheme: dark) {
-    .bg { fill: #0d1117; } .t { fill: #e6edf3; } .s { fill: #9198a1; }
-    .oc { fill: #6e7681; } .cp { fill: #3987e5; } .base { stroke: #30363d; }
-  }
+text{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;font-size:12px;fill:#0b0b0b}
+.surface{fill:#fcfcfb;stroke:rgba(11,11,11,.1)}
+.t2{fill:#52514e}.tm{fill:#898781}.b{font-weight:600}.h{font-size:13px;font-weight:600}.big{font-size:15px;font-weight:600}
+.grid{stroke:#e1e0d9}.axis{stroke:#c3c2b7}.box{fill:none;stroke:#c3c2b7}
+.c{fill:#2a78d6}.cs{stroke:#2a78d6}.n{fill:#898781}.ns{stroke:#898781}.o{fill:#eb6834}.os{stroke:#eb6834}
+.cell{fill:#e1e0d9}.ring{stroke:#fcfcfb;stroke-width:2}.line{fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.arc{fill:none;stroke-width:1.75;stroke-linecap:round}
+@media (prefers-color-scheme:dark){
+text{fill:#f0efec}.surface{fill:#1a1a19;stroke:rgba(255,255,255,.1)}.t2{fill:#c3c2b7}
+.grid{stroke:#2c2c2a}.axis{stroke:#383835}.box{stroke:#52514e}
+.c{fill:#3987e5}.cs{stroke:#3987e5}.o{fill:#d95926}.os{stroke:#d95926}
+.cell{fill:#383835}.ring{stroke:#1a1a19}
+}
 </style>
-<rect class="bg" width="640" height="264" rx="10"/>
-<text class="t head" x="24" y="34">Cost per 1,000 turns · Claude Sonnet 5.5</text>
-<text class="s sub" x="24" y="54">Modeled on the calculator's default workload, against OpenClaw's defaults.</text>
-<rect class="oc" x="446" y="24" width="10" height="10" rx="2"/><text class="s key" x="462" y="33.5">OpenClaw</text>
-<rect class="cp" x="538" y="24" width="10" height="10" rx="2"/><text class="s key" x="554" y="33.5">compache</text>
-<line class="base" x1="132" y1="78" x2="132" y2="244"/>
-<text class="t row" x="24" y="107.5">8-turn threads</text><path class="oc" d="M132 86h267.0a4 4 0 0 1 4 4v8a4 4 0 0 1-4 4H132z"/><path class="cp" d="M132 104h147.7a4 4 0 0 1 4 4v8a4 4 0 0 1-4 4H132z"/><text class="s val" x="411.0" y="98.5">$216</text><text class="t val" x="291.7" y="116.5"><tspan font-weight="600">$121</tspan><tspan class="s" dx="6">44% less</tspan></text>
-<text class="t row" x="24" y="165.5">30-turn threads</text><path class="oc" d="M132 144h319.4a4 4 0 0 1 4 4v8a4 4 0 0 1-4 4H132z"/><path class="cp" d="M132 162h168.0a4 4 0 0 1 4 4v8a4 4 0 0 1-4 4H132z"/><text class="s val" x="463.4" y="156.5">$257</text><text class="t val" x="312.0" y="174.5"><tspan font-weight="600">$137</tspan><tspan class="s" dx="6">47% less</tspan></text>
-<text class="t row" x="24" y="223.5">80-turn threads</text><path class="oc" d="M132 202h356.0a4 4 0 0 1 4 4v8a4 4 0 0 1-4 4H132z"/><path class="cp" d="M132 220h177.5a4 4 0 0 1 4 4v8a4 4 0 0 1-4 4H132z"/><text class="s val" x="500.0" y="214.5">$287</text><text class="t val" x="321.5" y="232.5"><tspan font-weight="600">$144</tspan><tspan class="s" dx="6">50% less</tspan></text>
+<rect class="surface" x=".5" y=".5" width="879" height="311" rx="10"/>
+<text x="24.0" y="30.0" class="big">Cost per 1,000 turns · Claude Sonnet 5.5</text>
+<text x="24.0" y="49.0" class="t2">The calculator&#x27;s default workload at three thread lengths, against OpenClaw&#x27;s defaults.</text>
+<rect class="n" x="24" y="64" width="10" height="10" rx="2"/>
+<text x="40.0" y="73.5" class="t2">OpenClaw</text>
+<rect class="c" x="116" y="64" width="10" height="10" rx="2"/>
+<text x="132.0" y="73.5" class="t2">compache</text>
+<line class="axis" x1="190" x2="190" y1="90" y2="272"/>
+<text x="176.0" y="123.0" class="b" text-anchor="end">8-turn threads</text>
+<path class="n" d="M190,100 h384.5 a4,4 0 0 1 4,4 v10 a4,4 0 0 1 -4,4 h-384.5 z"/>
+<text x="586.5" y="113.5" class="t2">$208</text>
+<path class="c" d="M190,120 h157.2 a4,4 0 0 1 4,4 v10 a4,4 0 0 1 -4,4 h-157.2 z"/>
+<text x="359.2" y="133.5" class="b">$86</text>
+<text x="856.0" y="123.0" class="h" text-anchor="end">59% less</text>
+<text x="176.0" y="185.0" class="b" text-anchor="end">30-turn threads</text>
+<path class="n" d="M190,162 h481.4 a4,4 0 0 1 4,4 v10 a4,4 0 0 1 -4,4 h-481.4 z"/>
+<text x="683.4" y="175.5" class="t2">$260</text>
+<path class="c" d="M190,182 h182.9 a4,4 0 0 1 4,4 v10 a4,4 0 0 1 -4,4 h-182.9 z"/>
+<text x="384.9" y="195.5" class="b">$100</text>
+<text x="856.0" y="185.0" class="h" text-anchor="end">61% less</text>
+<text x="176.0" y="247.0" class="b" text-anchor="end">80-turn threads</text>
+<path class="n" d="M190,224 h516.0 a4,4 0 0 1 4,4 v10 a4,4 0 0 1 -4,4 h-516.0 z"/>
+<text x="718.0" y="237.5" class="t2">$278</text>
+<path class="c" d="M190,244 h202.6 a4,4 0 0 1 4,4 v10 a4,4 0 0 1 -4,4 h-202.6 z"/>
+<text x="404.6" y="257.5" class="b">$110</text>
+<text x="856.0" y="247.0" class="h" text-anchor="end">60% less</text>
 </svg>

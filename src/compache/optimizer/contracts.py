@@ -8,7 +8,7 @@ import math
 from dataclasses import asdict, dataclass, fields
 from datetime import datetime
 
-from compache.traces import ContractError
+from compache.errors import ContractError
 
 
 def canonical(value: object) -> str:
@@ -31,7 +31,9 @@ class FrozenDict(dict):
     def _refuse(self, *args, **kwargs):
         raise TypeError("immutable fitted artifact")
 
-    __setitem__ = __delitem__ = clear = pop = popitem = setdefault = update = __ior__ = _refuse
+    __setitem__ = __delitem__ = clear = pop = popitem = setdefault = update = (
+        __ior__
+    ) = _refuse
 
     def __deepcopy__(self, memo):
         return self
@@ -108,14 +110,23 @@ class ModelSpec(Artifact):
     def to_dict(self):
         result = super().to_dict()
         if self.schema_version == "compache-model-spec-v1":
-            for key in ("long_input_threshold", "long_input_factor", "long_output_factor"):
+            for key in (
+                "long_input_threshold",
+                "long_input_factor",
+                "long_output_factor",
+            ):
                 del result[key]
         return result
 
     @classmethod
     def from_dict(cls, data):
-        if isinstance(data, dict) and data.get("schema_version") == "compache-model-spec-v1":
-            tier = dict(long_input_threshold=None, long_input_factor=1.0, long_output_factor=1.0)
+        if (
+            isinstance(data, dict)
+            and data.get("schema_version") == "compache-model-spec-v1"
+        ):
+            tier = dict(
+                long_input_threshold=None, long_input_factor=1.0, long_output_factor=1.0
+            )
             if tier.keys() & data.keys():
                 raise ContractError("tiered rates require compache-model-spec-v2")
             data = {**data, **tier}
@@ -125,7 +136,8 @@ class ModelSpec(Artifact):
         if not isinstance(self.model_id, str) or not self.model_id.strip():
             raise ContractError("model_id must be nonempty")
         if (
-            self.schema_version not in ("compache-model-spec-v1", "compache-model-spec-v2")
+            self.schema_version
+            not in ("compache-model-spec-v1", "compache-model-spec-v2")
             or not isinstance(self.assumption_note, str)
             or not self.assumption_note.strip()
         ):
@@ -148,11 +160,20 @@ class ModelSpec(Artifact):
             number(self.long_input_threshold, "long_input_threshold", 1, integer=True)
             number(self.long_input_factor, "long_input_factor", 1)
             number(self.long_output_factor, "long_output_factor", 1)
-        elif self.long_input_threshold is not None or self.long_input_factor != 1 or self.long_output_factor != 1:
+        elif (
+            self.long_input_threshold is not None
+            or self.long_input_factor != 1
+            or self.long_output_factor != 1
+        ):
             raise ContractError("tiered rates require compache-model-spec-v2")
 
     def input_price_factor(self, size):
-        return self.long_input_factor if self.long_input_threshold is not None and size > self.long_input_threshold else 1.0
+        return (
+            self.long_input_factor
+            if self.long_input_threshold is not None
+            and size > self.long_input_threshold
+            else 1.0
+        )
 
     def output_rate(self, size):
         if self.long_input_threshold is not None and size > self.long_input_threshold:
@@ -161,8 +182,12 @@ class ModelSpec(Artifact):
 
     def token_charge(self, fresh, writes, reads, output):
         size = fresh + writes + reads
-        input_cost = fresh + writes * self.write_multiplier + reads * self.read_multiplier
-        return input_cost * self.input_price_factor(size) + output * self.output_rate(size)
+        input_cost = (
+            fresh + writes * self.write_multiplier + reads * self.read_multiplier
+        )
+        return input_cost * self.input_price_factor(size) + output * self.output_rate(
+            size
+        )
 
     def text_tokens(self, text: str | None) -> int:
         return math.ceil(len((text or "").encode()) / self.bytes_per_token)

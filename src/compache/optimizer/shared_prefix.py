@@ -15,7 +15,7 @@ import math
 import secrets
 from threading import RLock
 
-from compache.traces import ContractError
+from compache.errors import ContractError
 from .cache_breaks import CacheScope
 from .contracts import ModelSpec, digest, number
 

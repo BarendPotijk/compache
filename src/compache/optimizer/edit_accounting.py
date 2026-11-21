@@ -7,7 +7,7 @@ from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
-from compache.traces import ContractError
+from compache.errors import ContractError
 
 from .contracts import ModelSpec, number
 from .parts import Source, placeholder, wire_part

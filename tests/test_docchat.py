@@ -185,11 +185,14 @@ class Labels(unittest.TestCase):
             "out": [[1, "output"]],
             "full": [[1, "input"], [1, "output"]],
         }
-        check = lambda **passes: {
-            "supported": True,
-            "sets": sets,
-            "passes": {name: False for name in sets} | passes,
-        }  # noqa: E731
+
+        def check(**passes):
+            return {
+                "supported": True,
+                "sets": sets,
+                "passes": {name: False for name in sets} | passes,
+            }
+
         self.assertEqual(d.needed(check(cur=True, out=True)), ("no", [[]]))
         self.assertEqual(d.needed(check(out=True, full=True)), ("yes", [sets["out"]]))
         self.assertEqual(
@@ -213,10 +216,16 @@ class Labels(unittest.TestCase):
         self.assertEqual(need[0], "unknown")
         self.assertEqual(set(need[1:]), {"yes"})
         self.assertTrue(all(min(note["lags"]) >= 1 for note in notes[1:]))
-        kinds = Counter(
-            label["task_requirements"][0]["source_kind"] for label in labels
+        self.assertIsNone(labels[0]["needs"])
+        self.assertTrue(all(label["needs"] for label in labels[1:]))
+        self.assertTrue(
+            any(
+                len(alternative) > 1
+                for label in labels[1:]
+                for alternative in label["needs"]
+            )
         )
-        self.assertGreater(kinds["mixed"], 0)
+        self.assertEqual(set(labels[1]), {"thread_id", "run_id", "needs"})
         first = thread["runs"][0]["generation"]["request_part_ids"]
         self.assertEqual(
             first,
@@ -236,11 +245,7 @@ class Labels(unittest.TestCase):
         )
         d.check_contract(thread, labels)
         self.assertEqual({note["history_needed"] for note in notes}, {"no"})
-        self.assertEqual(
-            {label["task_requirements"][0]["source_kind"] for label in labels}
-            - {"retrieval", "input"},
-            set(),
-        )
+        self.assertTrue(all(label["needs"] == [] for label in labels))
 
     def test_a_planted_fact_is_recorded_on_the_turn_that_states_it(self):
         plan, _, written, _, _ = build(lambda answer: True, tier="long")

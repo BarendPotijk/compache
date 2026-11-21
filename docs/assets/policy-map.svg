@@ -1,0 +1,122 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="424" viewBox="0 0 880 424" role="img" aria-labelledby="t d">
+<title id="t">The cheapest policy depends on how users return</title>
+<desc id="d">Cost per 1,000 turns against the share of history kept in view, without and with keep-warm pings, for three return patterns. Users back after 30 seconds: fitted $19, keep everything without pings $34. Users back after 4 minutes: fitted $24, keep everything without pings $143. Users back after 30 minutes: fitted $43, keep everything without pings $286.</desc>
+<style>
+text{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;font-size:12px;fill:#0b0b0b}
+.surface{fill:#fcfcfb;stroke:rgba(11,11,11,.1)}
+.t2{fill:#52514e}.tm{fill:#898781}.b{font-weight:600}.h{font-size:13px;font-weight:600}.big{font-size:15px;font-weight:600}
+.grid{stroke:#e1e0d9}.axis{stroke:#c3c2b7}.box{fill:none;stroke:#c3c2b7}
+.c{fill:#2a78d6}.cs{stroke:#2a78d6}.n{fill:#898781}.ns{stroke:#898781}.o{fill:#eb6834}.os{stroke:#eb6834}
+.cell{fill:#e1e0d9}.ring{stroke:#fcfcfb;stroke-width:2}.line{fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.arc{fill:none;stroke-width:1.75;stroke-linecap:round}
+@media (prefers-color-scheme:dark){
+text{fill:#f0efec}.surface{fill:#1a1a19;stroke:rgba(255,255,255,.1)}.t2{fill:#c3c2b7}
+.grid{stroke:#2c2c2a}.axis{stroke:#383835}.box{stroke:#52514e}
+.c{fill:#3987e5}.cs{stroke:#3987e5}.o{fill:#d95926}.os{stroke:#d95926}
+.cell{fill:#383835}.ring{stroke:#1a1a19}
+}
+</style>
+<rect class="surface" x=".5" y=".5" width="879" height="423" rx="10"/>
+<text x="24.0" y="30.0" class="big">Cost per 1,000 turns of every policy the fit priced</text>
+<text x="24.0" y="49.0" class="t2">DocChat, 625 held-out turns, Claude Sonnet 5.5 at list price. A point is one policy.</text>
+<line class="line ns" x1="24" x2="42" y1="70" y2="70"/>
+<text x="48.0" y="74.0" class="t2">No keep-warm pings</text>
+<line class="line cs" x1="185.2" x2="203.2" y1="70" y2="70"/>
+<text x="209.2" y="74.0" class="t2">Up to 3 keep-warm pings</text>
+<circle class="c ring" cx="383.4" cy="70" r="5.5"/>
+<text x="394.4" y="74.0" class="t2">The policy compache fitted</text>
+<circle class="n ring" cx="587.8" cy="70" r="5.5"/>
+<text x="598.8" y="74.0" class="t2">Keep everything, no pings</text>
+<text x="52.0" y="110.0" class="h">Users back after 30 seconds</text>
+<text x="52.0" y="126.0" class="tm">keeping everything costs 1.8× as much</text>
+<line class="axis" x1="52.0" x2="302.7" y1="376.0" y2="376.0"/>
+<text x="44.0" y="380.0" class="tm" text-anchor="end">$0</text>
+<line class="grid" x1="52.0" x2="302.7" y1="297.3" y2="297.3"/>
+<text x="44.0" y="301.3" class="tm" text-anchor="end">$100</text>
+<line class="grid" x1="52.0" x2="302.7" y1="218.7" y2="218.7"/>
+<text x="44.0" y="222.7" class="tm" text-anchor="end">$200</text>
+<line class="grid" x1="52.0" x2="302.7" y1="140.0" y2="140.0"/>
+<text x="44.0" y="144.0" class="tm" text-anchor="end">$300</text>
+<text x="52.0" y="393.0" class="tm">0%</text>
+<text x="177.3" y="393.0" class="tm" text-anchor="middle">50%</text>
+<text x="302.7" y="393.0" class="tm" text-anchor="end">100%</text>
+<path class="line ns" d="M89.0,360.7 L112.1,360.3 L123.7,359.5 L140.8,358.4 L186.8,355.3 L280.2,350.2 L302.7,349.1"/>
+<circle class="n" cx="89.0" cy="360.7" r="2.5"/>
+<circle class="n" cx="112.1" cy="360.3" r="2.5"/>
+<circle class="n" cx="123.7" cy="359.5" r="2.5"/>
+<circle class="n" cx="140.8" cy="358.4" r="2.5"/>
+<circle class="n" cx="186.8" cy="355.3" r="2.5"/>
+<circle class="n" cx="280.2" cy="350.2" r="2.5"/>
+<circle class="n" cx="302.7" cy="349.1" r="2.5"/>
+<path class="line cs" d="M89.0,361.1 L112.1,360.3 L123.7,359.6 L140.8,358.5 L186.8,355.7 L280.2,350.8 L302.7,350.5"/>
+<circle class="c" cx="89.0" cy="361.1" r="2.5"/>
+<circle class="c" cx="112.1" cy="360.3" r="2.5"/>
+<circle class="c" cx="123.7" cy="359.6" r="2.5"/>
+<circle class="c" cx="140.8" cy="358.5" r="2.5"/>
+<circle class="c" cx="186.8" cy="355.7" r="2.5"/>
+<circle class="c" cx="280.2" cy="350.8" r="2.5"/>
+<circle class="c" cx="302.7" cy="350.5" r="2.5"/>
+<circle class="n ring" cx="302.7" cy="349.1" r="5.5"/>
+<text x="293.7" y="341.1" class="t2" text-anchor="end">$34</text>
+<circle class="c ring" cx="89.0" cy="360.7" r="6.5"/>
+<text x="78.0" y="364.7" class="b" text-anchor="end">$19</text>
+<text x="330.7" y="110.0" class="h">Users back after 4 minutes</text>
+<text x="330.7" y="126.0" class="tm">keeping everything costs 5.9× as much</text>
+<line class="axis" x1="330.7" x2="581.3" y1="376.0" y2="376.0"/>
+<line class="grid" x1="330.7" x2="581.3" y1="297.3" y2="297.3"/>
+<line class="grid" x1="330.7" x2="581.3" y1="218.7" y2="218.7"/>
+<line class="grid" x1="330.7" x2="581.3" y1="140.0" y2="140.0"/>
+<text x="330.7" y="393.0" class="tm">0%</text>
+<text x="456.0" y="393.0" class="tm" text-anchor="middle">50%</text>
+<text x="581.3" y="393.0" class="tm" text-anchor="end">100%</text>
+<path class="line ns" d="M367.7,353.9 L390.7,344.5 L402.3,339.5 L419.4,332.2 L465.4,312.5 L558.9,272.4 L581.3,263.3"/>
+<circle class="n" cx="367.7" cy="353.9" r="2.5"/>
+<circle class="n" cx="390.7" cy="344.5" r="2.5"/>
+<circle class="n" cx="402.3" cy="339.5" r="2.5"/>
+<circle class="n" cx="419.4" cy="332.2" r="2.5"/>
+<circle class="n" cx="465.4" cy="312.5" r="2.5"/>
+<circle class="n" cx="558.9" cy="272.4" r="2.5"/>
+<circle class="n" cx="581.3" cy="263.3" r="2.5"/>
+<path class="line cs" d="M367.7,357.0 L390.7,351.7 L402.3,348.7 L419.4,344.1 L465.4,331.8 L558.9,307.1 L581.3,303.0"/>
+<circle class="c" cx="367.7" cy="357.0" r="2.5"/>
+<circle class="c" cx="390.7" cy="351.7" r="2.5"/>
+<circle class="c" cx="402.3" cy="348.7" r="2.5"/>
+<circle class="c" cx="419.4" cy="344.1" r="2.5"/>
+<circle class="c" cx="465.4" cy="331.8" r="2.5"/>
+<circle class="c" cx="558.9" cy="307.1" r="2.5"/>
+<circle class="c" cx="581.3" cy="303.0" r="2.5"/>
+<circle class="n ring" cx="581.3" cy="263.3" r="5.5"/>
+<text x="572.3" y="255.3" class="t2" text-anchor="end">$143</text>
+<circle class="c ring" cx="367.7" cy="357.0" r="6.5"/>
+<text x="356.7" y="361.0" class="b" text-anchor="end">$24</text>
+<text x="609.3" y="110.0" class="h">Users back after 30 minutes</text>
+<text x="609.3" y="126.0" class="tm">keeping everything costs 6.6× as much</text>
+<line class="axis" x1="609.3" x2="860.0" y1="376.0" y2="376.0"/>
+<line class="grid" x1="609.3" x2="860.0" y1="297.3" y2="297.3"/>
+<line class="grid" x1="609.3" x2="860.0" y1="218.7" y2="218.7"/>
+<line class="grid" x1="609.3" x2="860.0" y1="140.0" y2="140.0"/>
+<text x="609.3" y="393.0" class="tm">0%</text>
+<text x="734.7" y="393.0" class="tm" text-anchor="middle">50%</text>
+<text x="860.0" y="393.0" class="tm" text-anchor="end">100%</text>
+<path class="line ns" d="M646.3,341.2 L669.4,320.6 L681.0,310.3 L698.1,295.1 L744.1,253.7 L837.6,170.6 L860.0,150.9"/>
+<circle class="n" cx="646.3" cy="341.2" r="2.5"/>
+<circle class="n" cx="669.4" cy="320.6" r="2.5"/>
+<circle class="n" cx="681.0" cy="310.3" r="2.5"/>
+<circle class="n" cx="698.1" cy="295.1" r="2.5"/>
+<circle class="n" cx="744.1" cy="253.7" r="2.5"/>
+<circle class="n" cx="837.6" cy="170.6" r="2.5"/>
+<circle class="n" cx="860.0" cy="150.9" r="2.5"/>
+<path class="line cs" d="M646.3,342.1 L669.4,323.5 L681.0,314.1 L698.1,300.0 L744.1,262.0 L837.6,184.7 L860.0,165.6"/>
+<circle class="c" cx="646.3" cy="342.1" r="2.5"/>
+<circle class="c" cx="669.4" cy="323.5" r="2.5"/>
+<circle class="c" cx="681.0" cy="314.1" r="2.5"/>
+<circle class="c" cx="698.1" cy="300.0" r="2.5"/>
+<circle class="c" cx="744.1" cy="262.0" r="2.5"/>
+<circle class="c" cx="837.6" cy="184.7" r="2.5"/>
+<circle class="c" cx="860.0" cy="165.6" r="2.5"/>
+<circle class="n ring" cx="860.0" cy="150.9" r="5.5"/>
+<text x="851.0" y="142.9" class="t2" text-anchor="end">$286</text>
+<circle class="c ring" cx="646.3" cy="342.1" r="6.5"/>
+<text x="635.3" y="346.1" class="b" text-anchor="end">$43</text>
+<text x="456.0" y="412.0" class="t2" text-anchor="middle">Share of the history kept in view</text>
+</svg>

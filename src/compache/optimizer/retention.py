@@ -4,8 +4,8 @@ from bisect import bisect_left
 from collections import defaultdict
 from dataclasses import asdict, dataclass, replace
 
-from compache.dependencies import label_index
-from compache.traces import ContractError
+from compache.labels import label_index, normalize_label
+from compache.errors import ContractError
 
 from .contracts import ModelSpec, number
 from .edit_accounting import PartMeter
@@ -136,20 +136,26 @@ def evidence_windows(threads, labels, quantiles=(0.8, 0.85, 0.9, 0.95, 0.975, 1.
     requirements. A fixed ladder can step straight over the range where
     retention moves from one floor to the other. These do not.
     """
-    by_run = {}
+    by_thread = defaultdict(list)
     for label in labels:
-        by_run[label["target_run_id"]] = label
+        if not isinstance(label, dict) or not isinstance(label.get("thread_id"), str):
+            raise ContractError("invalid training label")
+        by_thread[label["thread_id"]].append(label)
     needs = {"input": [], "output": [], "retrieval": []}
     for thread in threads:
-        origin, groups = {}, []
-        for run in thread.runs:
-            origin[run.input.part_id] = ("input", run.run_index)
-            origin[run.output.part_id] = ("output", run.run_index)
-            exposed = [p for p in run.retrievals if p.exposed_to_model]
-            for part in exposed:
-                origin[part.part_id] = ("retrieval", run.run_index)
-            if exposed:
-                groups.append(run.run_index)
+        rows = by_thread.get(thread.thread_id)
+        if not rows:
+            continue
+        by_run = {}
+        for row in rows:
+            label = normalize_label(row, thread)
+            by_run[label["target_run_id"]] = label
+        origin = thread.part_origin
+        groups = [
+            run.run_index
+            for run in thread.runs
+            if any(p.exposed_to_model for p in run.retrievals)
+        ]
         for run in thread.runs:
             label = by_run.get(run.run_id)
             for req in label["task_requirements"] if label else ():
@@ -159,7 +165,10 @@ def evidence_windows(threads, labels, quantiles=(0.8, 0.85, 0.9, 0.95, 0.975, 1.
                 for alternative in req["alternatives"]:
                     far = {"input": 0, "output": 0, "retrieval": 0}
                     for source in alternative["sources"]:
-                        kind, turn = origin[source["part_id"]]
+                        # Validation happens when the recipes are scored.
+                        kind, turn = origin.get(
+                            source["part_id"], (None, run.run_index)
+                        )
                         if turn >= run.run_index:
                             continue
                         if kind == "retrieval":

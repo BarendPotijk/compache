@@ -3,7 +3,7 @@
 import re
 from collections.abc import Set
 
-from compache.traces import ContractError
+from compache.errors import ContractError
 
 from .parts import Request, Source, expand, handle
 
@@ -143,8 +143,10 @@ def reopen(
     if archived_ids is not None and not isinstance(archived_ids, Set):
         raise ContractError("archived_ids must be a set of canonical part IDs")
     parts = [
-        p for p in request.parts
-        if p.run_index < request.run_index and p.text is not None
+        p
+        for p in request.parts
+        if p.run_index < request.run_index
+        and p.text is not None
         and (archived_ids is None or p.part_id in archived_ids)
     ]
     if reference.startswith("ctx:"):
@@ -161,9 +163,15 @@ def reopen(
         info = _metadata(request.thread_id, source)
         page = expand(request, info["handle"], offset=start, limit=_TEXT_PAGE)
         return {
-            "status": "ok", **info, "offset": start, "length": len(source.text),
-            "text": page["text"], "next_offset": page["next_offset"],
-            "next_reference": info["handle"] if page["next_offset"] is not None else None,
+            "status": "ok",
+            **info,
+            "offset": start,
+            "length": len(source.text),
+            "text": page["text"],
+            "next_offset": page["next_offset"],
+            "next_reference": info["handle"]
+            if page["next_offset"] is not None
+            else None,
         }
 
     if offset >= len(matches):
@@ -171,13 +179,16 @@ def reopen(
     end = min(offset + _MATCH_PAGE, len(matches))
     candidates = [
         {
-            **_metadata(request.thread_id, source), "offset": start,
-            "excerpt": source.text[start:start + 512],
+            **_metadata(request.thread_id, source),
+            "offset": start,
+            "excerpt": source.text[start : start + 512],
         }
         for source, start in matches[offset:end]
     ]
     return {
-        "status": "matches", "total": len(matches), "matches": candidates,
+        "status": "matches",
+        "total": len(matches),
+        "matches": candidates,
         "next_reference": reference if end < len(matches) else None,
         "next_offset": end if end < len(matches) else None,
     }

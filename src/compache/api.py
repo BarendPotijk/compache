@@ -1,0 +1,524 @@
+"""Fit a policy on recorded threads, price it on others, and apply it to live ones."""
+
+from __future__ import annotations
+
+import json
+import time
+from collections import Counter
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+from .errors import ContractError
+from .models import model_spec, pricing
+from .optimizer.cache_breaks import CacheBreakChecker, CacheScope
+from .optimizer.contracts import ModelSpec, seconds
+from .optimizer.parts import Request, Source
+from .optimizer.recovery import reopen as _reopen
+from .optimizer.replay import replay_workload
+from .optimizer.retention import RetentionRecipe, fit_recipes
+from .optimizer.session import WorkloadPolicy, WorkloadSession
+from .optimizer.solve import solve_workload
+from .threads import canonical_usage, load_threads, read_jsonl, system_prompt_of
+
+__all__ = ["Policy", "Session", "Turn", "fit", "replay"]
+
+_HORIZON_SECONDS = 86400
+
+
+def _rows(source) -> list:
+    if source is None:
+        return []
+    if isinstance(source, (str, Path)):
+        return list(read_jsonl(source))
+    return list(source)
+
+
+def _threads(source, model_id):
+    """Threads priced as `model_id`, and the system prompt most of them start with."""
+    rows = _rows(source)
+    prompts = Counter(p for p in map(system_prompt_of, rows) if p)
+    return load_threads(rows, model=model_id), (
+        prompts.most_common(1)[0][0] if prompts else None
+    )
+
+
+def _observed_until(threads, given):
+    """When the record ends. Unless told otherwise, every thread is taken to be over."""
+    if given is not None:
+        return given
+    last = max(seconds(t.runs[-1].ended_at) for t in threads)
+    end = datetime.fromtimestamp(last, timezone.utc) + timedelta(
+        seconds=_HORIZON_SECONDS
+    )
+    return end.isoformat().replace("+00:00", "Z")
+
+
+def _recovery_cost(spec, row, turns):
+    """What fetching back the lost requirements costs, carried from labelled turns to all."""
+    labelled = row["turns"] - row["unlabeled_runs"]
+    if not labelled:
+        return 0.0
+    lost = row["historical_required"] - row["historical_retained"]
+    return (
+        turns
+        / labelled
+        * (
+            spec.read_multiplier * row["recovery_view_tokens"]
+            + spec.write_multiplier * row["recovery_restored_tokens"]
+            + spec.output_multiplier * spec.expansion_output_tokens * lost
+        )
+    )
+
+
+def fit(
+    threads,
+    labels=None,
+    *,
+    model,
+    system_prompt=None,
+    tools=(),
+    observed_until=None,
+    **options,
+) -> Policy:
+    """Fit what to keep in view and how many keep-warm pings to send.
+
+    `threads` and `labels` are paths to JSONL files (or folders of them), or
+    lists of dicts. `model` names a known model or gives a model spec. Without
+    labels only the pings are fitted and the whole history stays in view.
+
+    Every candidate is replayed against the provider's cache rules at the
+    threads' own timestamps, each thread priced by a model of returns fitted on
+    the others, and the cheapest wins after paying for what it would fetch back.
+    `observed_until` is when the record was cut, for a record that ends while
+    conversations were still going. `options` go to the solver.
+    """
+    spec = model_spec(model)
+    threads, found = _threads(threads, spec.model_id)
+    if system_prompt is None:
+        system_prompt = found or ""
+    tools = list(tools)
+    artifact = solve_workload(
+        threads,
+        _rows(labels),
+        spec,
+        observation_end=_observed_until(threads, observed_until),
+        system_prompt=system_prompt,
+        default_tools=tools,
+        **options,
+    )
+    scored = artifact["recipes"]
+    artifact["fitted"] = {
+        "threads": len(threads),
+        "turns": artifact["solve"]["turns"],
+        "labelled_turns": scored[0]["turns"] - scored[0]["unlabeled_runs"]
+        if scored
+        else 0,
+        "candidate_cuts": len(scored),
+    }
+    # The policy file keeps the cut that won. The priced candidates stay under `solve`.
+    artifact["recipes"] = [row for row in scored if row["eligible"]]
+    artifact["header"] = {
+        "system_prompt": system_prompt,
+        "default_tools": tools,
+        "share_headers": options.get("share_headers", True),
+    }
+    artifact["pricing"] = pricing(model)
+    return Policy(artifact)
+
+
+def replay(policy, threads, labels=None, *, observed_until=None, **options) -> dict:
+    """Price a fitted policy on threads it has not seen, against keeping everything.
+
+    With labels the report also says how much of what those threads needed
+    stays in view, and adds the cost of fetching the rest back.
+    """
+    if not isinstance(policy, Policy):
+        policy = Policy(policy)
+    spec = policy.spec
+    threads, _ = _threads(threads, spec.model_id)
+    labels = _rows(labels)
+    header = policy.artifact.get("header") or {}
+    # Threads share a cached system prompt in the replay if they did in the fit.
+    options.setdefault("share_headers", header.get("share_headers", True))
+    detail = replay_workload(
+        threads,
+        labels,
+        policy.artifact,
+        observation_end=_observed_until(threads, observed_until),
+        system_prompt=header.get("system_prompt", ""),
+        default_tools=header.get("default_tools", []),
+        **options,
+    )
+    turns = detail["baseline"]["answers"]
+    keep = detail["baseline"]["totals"]["cost_input_equivalents"]
+    replayed = detail["candidate"]["totals"]["cost_input_equivalents"]
+    complete = detail["candidate"]["complete"] and detail["baseline"]["complete"]
+    recipe, held, recovery = policy.recipe, None, 0.0
+    if recipe is not None:
+        held = fit_recipes(threads, labels, spec, [recipe], retention_floor=0.0)[0]
+        recovery = _recovery_cost(spec, held, turns)
+    cost = replayed + recovery
+    return {
+        "threads": len(threads),
+        "turns": turns,
+        "complete": complete,
+        "policy_cost": cost,
+        "replayed_cost": replayed,
+        "recovery_cost": recovery,
+        "keep_everything_cost": keep,
+        "saving": 1 - cost / keep if complete and keep else None,
+        "pings": detail["candidate"]["pings"],
+        "needs_history": held["historical_required"] if held and labels else None,
+        "coverage": held["historical_retained"] / held["historical_required"]
+        if held and held["historical_required"]
+        else None,
+        "tokens_kept": held["projected_tokens"] / held["canonical_tokens"]
+        if held and held["canonical_tokens"]
+        else 1.0,
+        "cost_per_1000_turns": policy._per_1000_turns(
+            {"policy": cost, "keep_everything": keep}, turns
+        ),
+        "detail": detail,
+    }
+
+
+def _window(count, noun):
+    if count is None:
+        return f"all {noun}"
+    if count == 0:
+        return f"no earlier {noun}"
+    return f"{noun} from the last {'turn' if count == 1 else f'{count} turns'}"
+
+
+class Policy:
+    """A fitted policy: what stays in view, and how many pings keep the cache warm."""
+
+    def __init__(self, artifact: dict):
+        if (
+            not isinstance(artifact, dict)
+            or artifact.get("schema_version") != "compache-workload-planner-v1"
+        ):
+            raise ContractError("expected a fitted policy")
+        self.artifact = artifact
+        self._compiled = None
+        self._checker = None
+
+    @classmethod
+    def load(cls, path) -> Policy:
+        return cls(json.loads(Path(path).read_text("utf-8")))
+
+    def save(self, path) -> None:
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(self.artifact, ensure_ascii=False, indent=2) + "\n", "utf-8"
+        )
+
+    @property
+    def spec(self) -> ModelSpec:
+        return ModelSpec.from_dict(self.artifact["model_spec"])
+
+    @property
+    def recipe(self) -> RetentionRecipe | None:
+        """The cut the policy applies, or None when it keeps the whole history."""
+        for row in self.artifact["recipes"]:
+            if row["eligible"]:
+                return RetentionRecipe(**row["recipe"])
+        return None
+
+    @property
+    def max_pings(self) -> int:
+        return (self.artifact.get("planner_options") or {}).get("max_pings", 1)
+
+    def _per_1000_turns(self, costs, turns):
+        """Costs per 1,000 turns: in dollars for a known model, else in input tokens."""
+        price = (self.artifact.get("pricing") or {}).get("input_price_per_million")
+        scale = 1000 / turns if turns else 0.0
+        if price is None:
+            return {
+                "unit": "input-token equivalents",
+                **{k: v * scale for k, v in costs.items()},
+            }
+        return {
+            "unit": "USD",
+            **{k: v * scale * price / 1e6 for k, v in costs.items()},
+        }
+
+    @property
+    def summary(self) -> dict:
+        """The decision and what it costs on the fitted threads, as plain numbers."""
+        solved = self.artifact.get("solve") or {}
+        chosen = solved.get("chosen") or {}
+        recipe = self.recipe
+        keep = solved.get("keep_everything_cost")
+        costs = {
+            "policy": chosen.get("expected_cost"),
+            "keep_everything": keep,
+        }
+        fitted = self.artifact.get("fitted") or {}
+        return {
+            "model": self.spec.model_id,
+            "threads": len(self.artifact["training_threads"]),
+            "turns": solved.get("turns"),
+            "labelled_turns": fitted.get("labelled_turns", 0),
+            "keep": None
+            if recipe is None
+            else {
+                "questions": recipe.input_runs,
+                "answers": recipe.output_runs,
+                "retrieved": recipe.retrieval_runs,
+                "matching_retrieved": recipe.protect_query_matches,
+                "always_under_tokens": recipe.keep_under_tokens,
+            },
+            "max_pings": self.max_pings,
+            "coverage": chosen.get("coverage"),
+            "saving": solved.get("saving_fraction"),
+            "cost_per_1000_turns": None
+            if None in costs.values()
+            else self._per_1000_turns(costs, solved.get("turns")),
+        }
+
+    def describe(self) -> str:
+        """The decision in sentences."""
+        summary, recipe = self.summary, self.recipe
+        lines = []
+        if recipe is None:
+            lines.append(
+                "Keep the whole history in view."
+                if summary["labelled_turns"]
+                else "Keep the whole history in view: without labels only the pings are fitted."
+            )
+        else:
+            lines.append(
+                f"Keep {_window(recipe.input_runs, 'questions')}, "
+                f"{_window(recipe.output_runs, 'answers')} and "
+                f"{_window(recipe.retrieval_runs, 'retrieved text')}."
+            )
+            if recipe.protect_query_matches and recipe.retrieval_runs is not None:
+                lines.append(
+                    "Earlier retrieved text that matches the new question stays too."
+                )
+            if recipe.keep_under_tokens:
+                lines.append(
+                    f"Parts of at most {recipe.keep_under_tokens} tokens always stay."
+                )
+        pings = summary["max_pings"]
+        lines.append(
+            f"Send up to {pings} keep-warm ping{'' if pings == 1 else 's'} while a user is away."
+            if pings
+            else "Send no keep-warm pings."
+        )
+        if recipe is not None and summary["coverage"] is not None:
+            lines.append(
+                f"{summary['coverage']:.0%} of the labelled turns that need earlier context "
+                "still have it in view. The rest fetch it back, and that call is in the cost."
+            )
+        costs, saving = summary["cost_per_1000_turns"], summary["saving"]
+        if costs and saving is not None:
+            if costs["unit"] == "USD":
+                lines.append(
+                    f"${costs['policy']:,.2f} per 1,000 turns against "
+                    f"${costs['keep_everything']:,.2f} keeping everything: {saving:.0%} less."
+                )
+            else:
+                lines.append(f"{saving:.0%} cheaper than keeping everything.")
+        return "\n".join(lines)
+
+    def session(self, thread_id: str, *, system_prompt=None, tools=None) -> Session:
+        """The session of one conversation. Keep it for as long as the conversation lives."""
+        if self._compiled is None:
+            self._compiled = WorkloadPolicy(self.artifact)
+            self._checker = CacheBreakChecker()
+        header = self.artifact.get("header") or {}
+        return Session(
+            self,
+            thread_id,
+            header.get("system_prompt", "") if system_prompt is None else system_prompt,
+            header.get("default_tools", []) if tools is None else tools,
+        )
+
+
+@dataclass(frozen=True)
+class Turn:
+    """One request to send: its parts in order, with archived ones reduced to a notice."""
+
+    parts: tuple[Source, ...]
+    archived_ids: frozenset
+    tokens: int
+    action: str
+    plan: object = None
+
+    @property
+    def messages(self) -> list[dict]:
+        """One chat message per part: answers from the assistant, everything else from the user."""
+        return [
+            {"role": "assistant" if p.kind == "output" else "user", "content": p.text}
+            for p in self.parts
+        ]
+
+
+def _counters(usage) -> dict:
+    """Provider usage as the counters the session takes. Unknown shapes count as no usage."""
+    counted = canonical_usage(usage)
+    if counted is None:
+        return {}
+    return {
+        "input_tokens": counted["input"],
+        "cached_input_tokens": counted["cache_read"],
+        "cache_write_input_tokens": counted["cache_write"],
+    }
+
+
+class Session:
+    """One conversation under a policy.
+
+    `prepare` returns the request for a new user message. `complete` records the
+    answer. `next_ping_at` says when a keep-warm ping is due. The session keeps
+    the full history itself, so an archived part can always be reopened.
+    """
+
+    def __init__(self, policy: Policy, thread_id: str, system_prompt, tools):
+        self.policy, self.thread_id = policy, thread_id
+        self.system_prompt, self.tools = system_prompt, tools
+        self._model = policy.spec.model_id
+        self._engine = WorkloadSession(
+            policy._compiled,
+            CacheScope("compache", "declared", self._model, thread_id),
+            policy._checker,
+        )
+        self._history: list[Source] = []
+        self._run = 0
+        self._pending = None
+
+    def _request(self, run, parts):
+        return Request(
+            self.thread_id,
+            f"{self.thread_id}:{run}",
+            run,
+            self._model,
+            tuple(self._history) + tuple(parts),
+        )
+
+    def prepare(
+        self, question: str, retrieved=(), *, at=None, system_prompt=None, tools=None
+    ) -> Turn:
+        """The request to send for a new user message and the text retrieved for it.
+
+        Each retrieved item is text, or a dict with `text` and optionally
+        `document_id`, `version` and `chunk_id`. Call again with the same
+        arguments to retry a request that was never answered.
+        """
+        run = self._run + 1
+        prefix = f"{self.thread_id}:{run}"
+        parts = [Source(f"{prefix}:input", "input", run, question)]
+        for k, item in enumerate(retrieved, 1):
+            fields = {"text": item} if isinstance(item, str) else dict(item)
+            part_id = f"{prefix}:retrieval:{k}"
+            parts.append(
+                Source(
+                    part_id,
+                    "retrieval",
+                    run,
+                    fields.get("text"),
+                    fields.get("document_id", part_id),
+                    fields.get("version", "1"),
+                    fields.get("chunk_id", part_id),
+                )
+            )
+        if any(not isinstance(p.text, str) for p in parts):
+            raise ContractError("a question and every retrieved item need text")
+        request = self._request(run, parts)
+        plan = self._engine.prepare(
+            request,
+            started_at=time.time() if at is None else at,
+            system_prompt=self.system_prompt
+            if system_prompt is None
+            else system_prompt,
+            tools=self.tools if tools is None else tools,
+        )
+        self._pending = (request, tuple(parts))
+        view = plan.view
+        return Turn(
+            view.parts,
+            view.archived_ids,
+            view.tokens,
+            "keep" if plan.decision["action"] == "keep" else "cut",
+            plan,
+        )
+
+    def complete(self, turn: Turn, answer: str, *, at=None, usage=None):
+        """Record the answer to `turn`. Returns when the next ping is due, if one is.
+
+        `usage` is the provider's usage for the answer call, as a dict in
+        Anthropic's or OpenAI's shape. With it the session tracks real input
+        sizes and notices a cache that stopped hitting. Without it the request
+        is taken to be cached the way the model's rules say.
+        """
+        if self._pending is None:
+            raise ContractError("no prepared turn to complete")
+        request, parts = self._pending
+        source = Source(f"{request.run_id}:output", "output", request.run_index, answer)
+        counters = _counters(usage)
+        if not counters:
+            spec = self.policy.spec
+            cached = turn.tokens // spec.cache_block_tokens * spec.cache_block_tokens
+            cacheable = spec.cache_ttl_seconds > 0 and cached >= spec.cache_min_tokens
+            counters = {"reusable_input_tokens": cached if cacheable else 0}
+        self._engine.complete(
+            turn.plan,
+            source,
+            ended_at=time.time() if at is None else at,
+            **counters,
+        )
+        self._history.extend((*parts, source))
+        self._run, self._pending = request.run_index, None
+        return self.next_ping_at
+
+    @property
+    def next_ping_at(self):
+        """Epoch seconds at which the next keep-warm ping is due, or None."""
+        return self._engine.next_ping_at
+
+    def ping(self, *, at=None) -> Turn | None:
+        """The request to send as a keep-warm ping, or None when it is no longer worth sending.
+
+        Send it with the smallest output the provider allows, then call `ping_sent`.
+        """
+        if not self._run:
+            return None
+        view = self._engine.ping_view(
+            run_id=f"{self.thread_id}:{self._run}",
+            at=time.time() if at is None else at,
+        )
+        if view is None:
+            return None
+        return Turn(view.parts, view.archived_ids, view.tokens, "ping")
+
+    def ping_sent(self, *, at, usage=None, completed_at=None) -> bool:
+        """Record a ping sent at `at`. True when it refreshed the cache.
+
+        Pass the ping's own usage. Without it the refresh cannot be confirmed
+        and no further ping is planned for this wait.
+        """
+        counted = canonical_usage(usage) or {}
+        return self._engine.acknowledge_ping(
+            run_id=f"{self.thread_id}:{self._run}",
+            at=at,
+            completed_at=completed_at,
+            output_tokens=counted.get("output"),
+            **_counters(usage),
+        )
+
+    def reopen(self, reference: str, offset: int = 0) -> dict:
+        """Resolve the model's `reopen` tool call against this conversation's archive."""
+        if self._pending is not None:
+            request = self._pending[0]
+        elif self._run:
+            request = self._request(self._run + 1, ())
+        else:
+            raise ContractError("nothing to reopen before the first turn")
+        arguments = {"reference": reference}
+        if offset:
+            arguments["offset"] = offset
+        return _reopen(request, arguments)

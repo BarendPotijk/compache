@@ -5,7 +5,7 @@ from dataclasses import replace
 from compache.optimizer.cache_breaks import CacheScope
 from compache.optimizer.contracts import ModelSpec
 from compache.optimizer.shared_prefix import SharedPrefixCatalog
-from compache.traces import ContractError
+from compache.errors import ContractError
 
 
 class SharedPrefixes(unittest.TestCase):

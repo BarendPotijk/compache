@@ -2,7 +2,6 @@ import unittest
 
 from compache.optimizer.contracts import ModelSpec
 from compache.optimizer.parts import Request, Source, handle
-from compache.optimizer.integration import recover
 from compache.optimizer.retention import assess
 from compache.optimizer.retention import (
     RetentionRecipe,
@@ -15,8 +14,8 @@ from compache.optimizer.retention import (
     reopen_part,
     size_ladder,
 )
-from compache.optimizer.workload import WorkloadPolicy, fit_workload
-from compache.traces import ContractError, Thread
+from compache.optimizer.session import WorkloadPolicy, fit_workload
+from compache.threads import ContractError, Thread
 from helpers import END, labels_for, thread
 
 
@@ -58,12 +57,8 @@ class RecipeTests(unittest.TestCase):
                 self.assertIs(q, p)
             else:
                 self.assertIn(handle(req.thread_id, p), q.text)
-                # Both input and output archives flow through the normal recovery protocol.
-                restored = recover(
-                    req,
-                    {"tool": "reopen", "handle": handle(req.thread_id, p)},
-                    allow_reopen=True,
-                )
+                # Both input and output archives reopen by their handle.
+                restored = reopen_part(req, handle(req.thread_id, p))
                 self.assertEqual(
                     (restored["part_id"], restored["text"]), (p.part_id, p.text)
                 )

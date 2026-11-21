@@ -1,8 +1,39 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="960" height="190" viewBox="0 0 960 190" role="img" aria-labelledby="title desc">
-<title id="title">Compache: fit offline, apply a frozen policy</title><desc id="desc">Threads and labels feed offline fitting and held-out evaluation. A versioned policy drives context preparation and run-end retention decisions.</desc>
-<rect width="960" height="190" rx="12" fill="#f7f8fa"/>
-<g font-family="system-ui,sans-serif" fill="#17202a"><text x="24" y="30" font-size="12" fill="#6c7682">OFFLINE · FIT AND EVALUATE</text><text x="680" y="30" font-size="12" fill="#6c7682">RUNTIME · APPLY</text>
-<g fill="#fff" stroke="#d7dde5"><rect x="24" y="53" width="205" height="100" rx="8"/><rect x="265" y="53" width="205" height="100" rx="8"/><rect x="506" y="53" width="137" height="100" rx="8"/><rect x="679" y="53" width="257" height="100" rx="8"/></g>
-<g font-size="16" font-weight="600"><text x="42" y="83">Threads + labels</text><text x="283" y="83">Fit and select</text><text x="524" y="83">Policy</text><text x="697" y="83">Session</text></g>
-<g font-size="12" fill="#6c7682"><text x="42" y="109">Context dependencies</text><text x="42" y="130">Return timing</text><text x="283" y="109">Retention requirement</text><text x="283" y="130">Held-out cost ledger</text><text x="524" y="109">Versioned</text><text x="524" y="130">Frozen</text><text x="697" y="109">Prepare context · recover by handle</text><text x="697" y="130">Plan keep-warm or lapse</text></g>
-<g font-size="24" fill="#216751"><text x="238" y="110">→</text><text x="479" y="110">→</text><text x="652" y="110">→</text></g><text x="24" y="177" font-size="11" fill="#6c7682">The application owns provider calls, state persistence, recovery tools and ping execution.</text></g></svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="208" viewBox="0 0 880 208" role="img" aria-labelledby="t d">
+<title id="t">How compache works: record, fit, apply</title>
+<desc id="d">Recorded threads with timestamps and labels for a sample of turns go into compache fit, which replays every candidate policy against the cache. The result is a policy file that says what stays in view and how many keep-warm pings to send, applied on every request without a model call.</desc>
+<style>
+text{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;font-size:12px;fill:#0b0b0b}
+.surface{fill:#fcfcfb;stroke:rgba(11,11,11,.1)}
+.t2{fill:#52514e}.tm{fill:#898781}.b{font-weight:600}.h{font-size:13px;font-weight:600}.big{font-size:15px;font-weight:600}
+.grid{stroke:#e1e0d9}.axis{stroke:#c3c2b7}.box{fill:none;stroke:#c3c2b7}
+.c{fill:#2a78d6}.cs{stroke:#2a78d6}.n{fill:#898781}.ns{stroke:#898781}.o{fill:#eb6834}.os{stroke:#eb6834}
+.cell{fill:#e1e0d9}.ring{stroke:#fcfcfb;stroke-width:2}.line{fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.arc{fill:none;stroke-width:1.75;stroke-linecap:round}
+@media (prefers-color-scheme:dark){
+text{fill:#f0efec}.surface{fill:#1a1a19;stroke:rgba(255,255,255,.1)}.t2{fill:#c3c2b7}
+.grid{stroke:#2c2c2a}.axis{stroke:#383835}.box{stroke:#52514e}
+.c{fill:#3987e5}.cs{stroke:#3987e5}.o{fill:#d95926}.os{stroke:#d95926}
+.cell{fill:#383835}.ring{stroke:#1a1a19}
+}
+</style>
+<rect class="surface" x=".5" y=".5" width="879" height="207" rx="10"/>
+<text x="24.0" y="32.0" class="big">Fit once on recorded threads, apply on every request</text>
+<rect class="box" x="24" y="58" width="252" height="118" rx="8"/>
+<text x="42.0" y="86.0" class="tm b">1  Record</text>
+<text x="42.0" y="112.0" class="big">Your threads</text>
+<text x="42.0" y="136.0" class="t2">each message with its time</text>
+<text x="42.0" y="153.0" class="t2">labels for a sample of turns</text>
+<path class="line cs" d="M284,117 h22 m-6,-6 l6,6 l-6,6"/>
+<rect class="box" x="314" y="58" width="252" height="118" rx="8"/>
+<text x="332.0" y="86.0" class="tm b">2  Fit</text>
+<text x="332.0" y="112.0" class="big">compache fit</text>
+<text x="332.0" y="136.0" class="t2">replays every candidate policy</text>
+<text x="332.0" y="153.0" class="t2">against the cache at your timestamps</text>
+<path class="line cs" d="M574,117 h22 m-6,-6 l6,6 l-6,6"/>
+<rect class="box" x="604" y="58" width="252" height="118" rx="8"/>
+<text x="622.0" y="86.0" class="tm b">3  Apply</text>
+<text x="622.0" y="112.0" class="big">policy.json</text>
+<text x="622.0" y="136.0" class="t2">what stays in view, per kind of part</text>
+<text x="622.0" y="153.0" class="t2">how many pings keep the cache warm</text>
+<text x="24.0" y="196.0" class="tm">compache decides what each request holds and when a ping is due. Your application sends the requests and the pings.</text>
+</svg>

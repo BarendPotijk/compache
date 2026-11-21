@@ -1,105 +1,206 @@
-"""Exercise public commands as an installed-style executable."""
+"""The command line: fit, replay, profile, check, packets and models."""
 
+import io
 import json
-import os
-import subprocess
-import sys
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
-from test_traces import sample
+from compache.cli import main
+from compache.threads import Thread, write_threads
 
-REPO = Path(__file__).resolve().parents[1]
+from helpers import labels_for, thread
+from test_api import SPEC, labels, threads
 
 
-class CliTests(unittest.TestCase):
-    def run_cli(self, *args):
-        env = dict(os.environ, PYTHONPATH=str(REPO / "src"))
-        return subprocess.run(
-            [sys.executable, "-m", "compache", *map(str, args)],
-            capture_output=True,
-            text=True,
-            env=env,
+def run(*args):
+    out, err = io.StringIO(), io.StringIO()
+    with redirect_stdout(out), redirect_stderr(err):
+        status = main([str(a) for a in args])
+    return status, out.getvalue(), err.getvalue()
+
+
+class CommandTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = Path(self.tmp.name)
+        sample = threads()
+        write_threads(sample, self.base / "threads.jsonl")
+        (self.base / "labels.jsonl").write_text(
+            "".join(json.dumps(row) + "\n" for row in labels(sample))
+        )
+        held = [Thread.from_dict(thread(tid="held", n=6, gap=400).to_dict())]
+        write_threads(held, self.base / "held.jsonl")
+        (self.base / "held-labels.jsonl").write_text(
+            "".join(
+                json.dumps(row) + "\n"
+                for t in held
+                for row in labels_for(t, need_old=True)
+            )
+        )
+        (self.base / "model.json").write_text(json.dumps(SPEC.to_dict()))
+        (self.base / "system.txt").write_text("Answer from the supplied notes.")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_fit_then_replay(self):
+        base = self.base
+        status, out, _ = run(
+            "fit",
+            base / "threads.jsonl",
+            "--labels",
+            base / "labels.jsonl",
+            "--model",
+            base / "model.json",
+            "--system-prompt",
+            base / "system.txt",
+            "-o",
+            base / "policy.json",
+        )
+        self.assertEqual(status, 0)
+        self.assertIn("Fitted on 4 threads, 24 turns (24 labelled) for test.", out)
+        self.assertIn(
+            "Keep all questions, no earlier answers and all retrieved text.", out
+        )
+        self.assertIn(f"Wrote {base / 'policy.json'}", out)
+        policy = json.loads((base / "policy.json").read_text())
+        self.assertEqual(
+            policy["header"]["system_prompt"], "Answer from the supplied notes."
+        )
+        status, out, _ = run(
+            "replay",
+            base / "held.jsonl",
+            "--policy",
+            base / "policy.json",
+            "--labels",
+            base / "held-labels.jsonl",
+            "-o",
+            base / "report.json",
+        )
+        self.assertEqual(status, 0)
+        self.assertIn("1 threads, 6 turns.", out)
+        self.assertIn("per 1,000 turns with the policy", out)
+        self.assertIn(
+            "100% of the 5 turns that need earlier context have it in view.", out
+        )
+        self.assertIn(
+            "candidate", json.loads((base / "report.json").read_text())["detail"]
+        )
+        status, out, _ = run(
+            "replay", base / "held.jsonl", "--policy", base / "policy.json", "--json"
+        )
+        self.assertEqual(status, 0)
+        self.assertEqual(json.loads(out)["turns"], 6)
+
+    def test_fit_with_a_known_model_prints_dollars(self):
+        status, out, _ = run(
+            "fit",
+            self.base / "threads.jsonl",
+            "--model",
+            "claude-sonnet-5-5",
+            "-o",
+            self.base / "p.json",
+            "--json",
+        )
+        self.assertEqual(status, 0)
+        result = json.loads(out)
+        self.assertEqual(result["cost_per_1000_turns"]["unit"], "USD")
+        self.assertIsNone(result["keep"])
+
+    def test_profile_prints_a_calculator_link(self):
+        status, out, _ = run(
+            "profile",
+            self.base / "threads.jsonl",
+            "--labels",
+            self.base / "labels.jsonl",
+            "--model",
+            "sonnet",
+            "-o",
+            self.base / "profile.json",
+        )
+        self.assertEqual(status, 0)
+        self.assertIn("4 threads, 24 turns.", out)
+        self.assertIn(
+            "earlier retrieved text: 100% of turns, median 3 back (95th percentile 5).",
+            out,
+        )
+        self.assertIn(
+            "https://barendpotijk.github.io/compache/#v=6&model=sonnet&scenario=", out
+        )
+        saved = json.loads((self.base / "profile.json").read_text())
+        self.assertEqual(saved["schema_version"], "compache-profile-v1")
+        self.assertEqual(saved["calculator"]["scenario"]["plannedTurns"], 6)
+
+    def test_check_validates_threads_and_labels(self):
+        status, out, _ = run(
+            "check", self.base / "threads.jsonl", "--labels", self.base / "labels.jsonl"
+        )
+        self.assertEqual(status, 0)
+        self.assertTrue(out.startswith("Valid.\n4 threads, 24 turns."))
+        self.assertIn(
+            "Labels: 24 turns. Of the 20 assessed after a thread's first turn, 100% need earlier context.",
+            out,
+        )
+        bad = self.base / "bad-labels.jsonl"
+        bad.write_text(
+            json.dumps({"thread_id": "t0", "run": 2, "needs": [["t0-r2-out"]]}) + "\n"
+        )
+        status, out, err = run("check", self.base / "threads.jsonl", "--labels", bad)
+        self.assertEqual((status, out), (1, ""))
+        self.assertIn("error: invalid label for t0-r2", err)
+        status, _, err = run("check", self.base / "missing.jsonl")
+        self.assertEqual(status, 1)
+        self.assertIn("error:", err)
+
+    def test_packets_sample_runs_to_label(self):
+        status, out, _ = run(
+            "packets",
+            self.base / "threads.jsonl",
+            "-o",
+            self.base / "packets.jsonl",
+            "--sample",
+            7,
+        )
+        self.assertEqual(status, 0)
+        self.assertIn("Wrote 7 of 20 runs", out)
+        packets = [
+            json.loads(line)
+            for line in (self.base / "packets.jsonl").read_text().splitlines()
+        ]
+        self.assertEqual(len(packets), 7)
+        self.assertTrue(
+            all(p["target_run_index"] > 1 and p["request_parts"] for p in packets)
+        )
+        again = run(
+            "packets",
+            self.base / "threads.jsonl",
+            "-o",
+            self.base / "again.jsonl",
+            "--sample",
+            7,
+        )
+        self.assertEqual(again[0], 0)
+        self.assertEqual(
+            (self.base / "again.jsonl").read_text(),
+            (self.base / "packets.jsonl").read_text(),
         )
 
-    def test_trace_roundtrip_and_packet(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            source = root / "threads.jsonl"
-            source.write_text(json.dumps(sample()) + "\n")
-            rows, normalized, packet = (
-                root / "rows.jsonl",
-                root / "normalized.jsonl",
-                root / "packet.json",
-            )
-            for args in [
-                ("traces", "validate", source),
-                ("traces", "export-langfuse", "--input", source, "--output", rows),
-                ("traces", "normalize", "--input", rows, "--output", normalized),
-                (
-                    "dependencies",
-                    "prepare",
-                    "--threads",
-                    normalized,
-                    "--thread-id",
-                    "t",
-                    "--run-id",
-                    "r",
-                    "--output",
-                    packet,
-                ),
-            ]:
-                result = self.run_cli(*args)
-                self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(json.loads(normalized.read_text()), sample())
-            prepared = json.loads(packet.read_text())
-            self.assertEqual(prepared["target_run_id"], "r")
-            self.assertEqual(prepared["request_coverage"], "complete")
+    def test_models_lists_the_price_sheet(self):
+        status, out, _ = run("models")
+        self.assertEqual(status, 0)
+        self.assertIn("claude-sonnet-5-5", out)
+        self.assertIn("input $2, cache read $0.1, output $10, cache 5 min", out)
+        status, out, _ = run("models", "--json")
+        self.assertIn("gpt-6-luna", json.loads(out))
 
-    def test_errors_are_actionable_and_do_not_write_output(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            bad, output = root / "bad.jsonl", root / "no-output.json"
-            for content in ["{bad json", "[]\n", "{}\n"]:
-                bad.write_text(content)
-                result = self.run_cli(
-                    "traces", "normalize", "--input", bad, "--output", output
-                )
-                self.assertEqual(result.returncode, 1)
-                self.assertNotIn("Traceback", result.stderr)
-                self.assertFalse(json.loads(result.stderr)["valid"])
-                self.assertFalse(output.exists())
-
-    def test_missing_run_and_invalid_labels(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            source, output = root / "threads.jsonl", root / "packet.json"
-            source.write_text(json.dumps(sample()) + "\n")
-            result = self.run_cli(
-                "dependencies",
-                "prepare",
-                "--threads",
-                source,
-                "--thread-id",
-                "t",
-                "--run-id",
-                "missing",
-                "--output",
-                output,
-            )
-            self.assertEqual(result.returncode, 1)
-            self.assertNotIn("Traceback", result.stderr)
-            output.write_text("[]")
-            labels = root / "labels.jsonl"
-            labels.write_text("{}\n")
-            result = self.run_cli(
-                "dependencies", "validate", "--input", output, "--labels", labels
-            )
-            self.assertEqual(result.returncode, 1)
-            self.assertNotIn("Traceback", result.stderr)
-            self.assertIn("packet", result.stderr)
-
+    def test_an_unknown_model_is_an_error_not_a_guess(self):
+        status, _, err = run(
+            "fit", self.base / "threads.jsonl", "--model", "no-such-model"
+        )
+        self.assertEqual(status, 1)
+        self.assertIn("no price sheet for model 'no-such-model'", err)
 
 
 if __name__ == "__main__":
