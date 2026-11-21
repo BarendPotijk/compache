@@ -3,6 +3,8 @@
 
   cost     fit a policy on each build's training threads and price it on its test threads
   answers  a model answers test turns from the full history and from the policy's view; a judge grades both
+  grid     price every candidate the fit considered on the test threads (the policy map figure)
+  thread   one thread's turns, what each needed and what the policy kept (the thread figure)
 
 Builds of one dataset with different --clock values share their text and differ only in timing.
 """
@@ -18,21 +20,20 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import compache
 import docchat
-from compache.optimizer.contracts import ModelSpec
-from compache.optimizer.contracts import ContractError
+from compache.errors import ContractError
+from compache.models import model_spec
 from compache.optimizer.parts import Request, placeholder
 from compache.optimizer.recovery import REOPEN_INSTRUCTIONS, reopen
-from compache.optimizer.retention import RetentionRecipe, fit_recipes, render_recipe
-from compache.optimizer.workload_replay import replay_workload
-from compache.optimizer.workload_solve import solve_workload
-from compache.traces import Thread
+from compache.optimizer.retention import RetentionRecipe, render_recipe
+from compache.threads import Thread
 
 HERE = Path(__file__).resolve().parent
 END = "2026-06-01T00:00:00Z"
 HEADER = {
     "system_prompt": "Answer from the conversation and the retrieved excerpts.",
-    "default_tools": [],
+    "tools": [],
     "share_headers": False,
 }
 PART = {"input": "user", "retrieval": "retrieved excerpt", "output": "assistant"}
@@ -63,9 +64,12 @@ def load(root, split):
     """A build's threads, labels and grading notes for one split."""
     manifest = docchat.read_json(root / "manifest.json")
     rows = [e for e in manifest["threads"] if e["split"] == split]
-    lines = lambda key: [
-        [json.loads(line) for line in gzip.open(root / e[key], "rt")] for e in rows
-    ]  # noqa: E731
+
+    def lines(key):
+        return [
+            [json.loads(line) for line in gzip.open(root / e[key], "rt")] for e in rows
+        ]
+
     return (
         manifest,
         rows,
@@ -76,90 +80,194 @@ def load(root, split):
 
 
 def cost(args):
-    spec = ModelSpec.from_dict(docchat.read_json(args.model_spec))
     results = []
     for root in map(Path, args.data):
         manifest, _, train, train_labels, _ = load(root, "train")
         _, _, test, test_labels, _ = load(root, "test")
-        as_threads = lambda rows: [Thread.from_dict(copy.deepcopy(t)) for t in rows]  # noqa: E731
-        flat = lambda groups: [label for group in groups for label in group]  # noqa: E731
-        policy = solve_workload(
-            as_threads(train), flat(train_labels), spec, observation_end=END, **HEADER
+        policy = compache.fit(
+            train,
+            sum(train_labels, []),
+            model=args.prices,
+            observed_until=END,
+            **HEADER,
         )
-        solved, chosen = policy["solve"], policy["solve"]["chosen"]
-        policy["planner_options"] = {"max_pings": chosen["max_pings"]}
-        for row in policy["recipes"]:
-            row["eligible"] = (
-                chosen["recipe"] is not None and row["recipe"] == chosen["recipe"]
-            )
-        priced = replay_workload(
-            as_threads(test), [], policy, observation_end=END, **HEADER
+        fitted = policy.summary
+        held = compache.replay(
+            policy,
+            test,
+            sum(test_labels, []),
+            observed_until=END,
+            share_headers=HEADER["share_headers"],
         )
-        keep, fitted = (
-            priced["baseline"]["totals"]["cost_input_equivalents"],
-            priced["candidate"]["totals"]["cost_input_equivalents"],
-        )
-        held = (
-            fit_recipes(
-                as_threads(test),
-                flat(test_labels),
-                spec,
-                [RetentionRecipe(**chosen["recipe"])],
-                retention_floor=0.0,
-            )[0]
-            if chosen["recipe"]
-            else None
-        )
-        # What the cut loses on the test threads is priced the way the solver prices it on the training ones.
-        recovery = (
-            spec.read_multiplier * held["recovery_view_tokens"]
-            + spec.write_multiplier * held["recovery_restored_tokens"]
-            + spec.output_multiplier
-            * spec.expansion_output_tokens
-            * (
-                held["changed_historical_required"]
-                - held["changed_historical_retained"]
-            )
-            if held
-            else 0
-        )
-        turns = priced["baseline"]["answers"]
+        turns = held["turns"]
         results.append(
             {
                 "data": str(root),
                 "clock": manifest["clock"],
-                "model": spec.model_id,
+                "model": fitted["model"],
                 "train": {
-                    "threads": len(train),
-                    "turns": solved["turns"],
-                    "saving": solved["saving_fraction"],
-                    "coverage": chosen["coverage"],
+                    "threads": fitted["threads"],
+                    "turns": fitted["turns"],
+                    "saving": fitted["saving"],
+                    "coverage": fitted["coverage"],
                 },
                 "policy": {
-                    "recipe": chosen["recipe"],
-                    "max_pings": chosen["max_pings"],
+                    "recipe": policy.artifact["solve"]["chosen"]["recipe"],
+                    "max_pings": policy.max_pings,
                 },
                 "test": {
-                    "threads": len(test),
+                    "threads": held["threads"],
                     "turns": turns,
-                    "keep_everything_per_turn": keep / turns,
-                    "policy_per_turn": fitted / turns,
-                    "recovery_per_turn": recovery / turns,
-                    "saving": 1 - (fitted + recovery) / keep,
-                    "pings": priced["candidate"]["pings"],
-                    "needs_history": held["historical_required"] if held else None,
-                    "kept_in_view": held["historical_retained"]
-                    / held["historical_required"]
-                    if held and held["historical_required"]
-                    else None,
-                    "tokens_kept": held["projected_tokens"] / held["canonical_tokens"]
-                    if held
-                    else 1.0,
+                    "keep_everything_per_turn": held["keep_everything_cost"] / turns,
+                    "policy_per_turn": held["replayed_cost"] / turns,
+                    "recovery_per_turn": held["recovery_cost"] / turns,
+                    "saving": held["saving"],
+                    "pings": held["pings"],
+                    "needs_history": held["needs_history"],
+                    "kept_in_view": held["coverage"],
+                    "tokens_kept": held["tokens_kept"],
+                    "cost_per_1000_turns": held["cost_per_1000_turns"],
                 },
             }
         )
         print(docchat.compact(results[-1]), flush=True)
     docchat.write_json(args.output, results)
+
+
+def grid(args):
+    """Every candidate cut and ping limit of the fit, priced on the threads it did not see."""
+    clocks = {}
+    for root in map(Path, args.data):
+        manifest, _, train, train_labels, _ = load(root, "train")
+        _, _, test, test_labels, _ = load(root, "test")
+        policy = compache.fit(
+            train,
+            sum(train_labels, []),
+            model=args.prices,
+            observed_until=END,
+            **HEADER,
+        )
+        chosen, rows = policy.artifact["solve"]["chosen"], []
+        for candidate in policy.artifact["solve"]["candidates"]:
+            recipe, pings = candidate["recipe"], candidate["max_pings"]
+            variant = compache.Policy(
+                policy.artifact
+                | {
+                    "recipes": [{"recipe": recipe, "eligible": True}] if recipe else [],
+                    "planner_options": {"max_pings": pings},
+                }
+            )
+            held = compache.replay(
+                variant,
+                test,
+                sum(test_labels, []),
+                observed_until=END,
+                share_headers=HEADER["share_headers"],
+            )
+            rows.append(
+                {
+                    "recipe": recipe,
+                    "max_pings": pings,
+                    "fitted": recipe == chosen["recipe"]
+                    and pings == chosen["max_pings"],
+                    "tokens_kept": held["tokens_kept"],
+                    "in_view": held["coverage"] if recipe else 1.0,
+                    "dollars_per_1000_turns": held["cost_per_1000_turns"]["policy"],
+                }
+            )
+            print(docchat.compact(rows[-1]), flush=True)
+        clocks[manifest["clock"]["scenario"]] = {
+            "median_idle_seconds": manifest["clock"]["median_idle_seconds"],
+            "test_threads": len(test),
+            "test_turns": sum(len(t["runs"]) for t in test),
+            "candidates": rows,
+        }
+        priced = policy.artifact["pricing"] or {}
+        docchat.write_json(
+            args.output,
+            {
+                "model": policy.spec.model_id,
+                "model_name": priced.get("name", policy.spec.model_id),
+                "clocks": clocks,
+            },
+        )
+
+
+def thread_figure(args):
+    """One thread without its text: sizes per turn, what each turn needed, and what stayed in view."""
+    from compache.labels import normalize_label
+    from compache.optimizer.retention import _key, _retrieval_key, _thread_windows
+
+    root, spec = Path(args.data), model_spec(args.prices)
+    recipe = RetentionRecipe(**json.loads(args.recipe))
+    manifest = docchat.read_json(root / "manifest.json")
+    entry = next(e for e in manifest["threads"] if e["thread_id"] == args.thread)
+    data = json.loads(gzip.open(root / entry["trace_path"], "rt").readline())
+    thread = compache.load_threads([data], model=spec.model_id)[0]
+    labels = [json.loads(line) for line in gzip.open(root / entry["labels_path"], "rt")]
+    table, _, _, _ = _thread_windows(thread, spec, [recipe])
+    archived_at = {
+        "input": table["input"][_key(recipe.input_runs, recipe)].turn,
+        "output": table["output"][_key(recipe.output_runs, recipe)].turn,
+        "retrieval": table["retrieval"][_retrieval_key(recipe)].turn,
+    }
+    origin = thread.part_origin
+    index = {run.run_id: run.run_index for run in thread.runs}
+    turns = [
+        {
+            "turn": run.run_index,
+            "tokens": {
+                "input": spec.part_tokens(run.input.text),
+                "retrieval": sum(spec.part_tokens(p.text) for p in run.retrievals),
+                "output": spec.part_tokens(run.output.text),
+            },
+            "needs": "nothing earlier",
+        }
+        for run in thread.runs
+    ]
+    for row in labels:
+        label = normalize_label(row, thread)
+        turn = index[label["target_run_id"]]
+        requirement = label["task_requirements"][0]
+        if (
+            label["status"] != "complete"
+            or requirement["historical_context_needed"] == "unknown"
+        ):
+            turns[turn - 1]["needs"] = "unknown"
+            continue
+        if requirement["historical_context_needed"] != "yes":
+            continue
+        # The alternative that is still in view, else the one whose evidence is nearest.
+        best = None
+        for alternative in requirement["alternatives"]:
+            parts = [
+                (origin[s["part_id"]], s["part_id"])
+                for s in alternative["sources"]
+                if origin[s["part_id"]][1] < turn
+            ]
+            kept = all(
+                archived_at[kind].get(pid, turn + 1) > turn for (kind, _), pid in parts
+            )
+            key = (not kept, max(turn - at for (_, at), _ in parts), len(parts))
+            if best is None or key < best[0]:
+                best = (key, parts, kept)
+        turns[turn - 1]["needs"] = {
+            "in_view": best[2],
+            "parts": sorted(
+                {(kind, at) for (kind, at), _ in best[1]}, key=lambda x: (x[1], x[0])
+            ),
+        }
+    docchat.write_json(
+        args.output,
+        {
+            "thread_id": thread.thread_id,
+            "domain": entry["domain"],
+            "document": entry["document"],
+            "recipe": json.loads(args.recipe),
+            "turns": turns,
+        },
+    )
+    print(docchat.compact({"thread": thread.thread_id, "turns": len(turns)}))
 
 
 def transcript(run, shown):
@@ -226,7 +334,7 @@ def answer(models, model, system, thread, run, recipe, spec):
 
 def answers(args):
     root = Path(args.data)
-    spec = ModelSpec.from_dict(docchat.read_json(args.model_spec))
+    spec = model_spec(args.prices)
     recipe = RetentionRecipe(**json.loads(args.recipe))
     domains = docchat.read_json(HERE / "domains.json")["domains"]
     _, rows, threads, _, grading = load(root, "test")
@@ -327,11 +435,23 @@ def main(argv=None):
     live.add_argument("--turns", type=int, default=60)
     live.add_argument("--seed", type=int, default=20261120)
     live.add_argument("--workers", type=int, default=6)
-    for command in (pricing, live):
-        command.add_argument("--model-spec", default=str(HERE / "sonnet-5-5.json"))
+    priced = commands.add_parser("grid")
+    priced.add_argument("--data", nargs="+", required=True, help="One build per clock")
+    one = commands.add_parser("thread")
+    one.add_argument("--data", required=True)
+    one.add_argument("--thread", required=True, help="A thread ID of the build")
+    one.add_argument("--recipe", required=True, help="The policy's recipe as JSON")
+    for command in (pricing, live, priced, one):
+        command.add_argument(
+            "--prices",
+            default="claude-sonnet-5-5",
+            help="The model whose prices and cache rules apply: a known name or a JSON spec",
+        )
         command.add_argument("--output", required=True)
     args = parser.parse_args(argv)
-    (cost if args.command == "cost" else answers)(args)
+    {"cost": cost, "answers": answers, "grid": grid, "thread": thread_figure}[
+        args.command
+    ](args)
 
 
 if __name__ == "__main__":
