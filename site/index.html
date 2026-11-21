@@ -76,14 +76,17 @@
   <div class="input-grid">
     <fieldset>
       <legend><span>01</span> Context per turn</legend>
-      <label class="inline" title="Median size of what is retrieved for one turn. 0 means no retrieval.">Retrieved tokens
+      <label class="inline" title="Median size of what is retrieved for one turn that retrieves. 0 means no retrieval.">Retrieved tokens
         <input name="tokenMedian" type="number" min="0" max="500000" step="any" required></label>
       <input class="slider" type="range" data-slider="tokenMedian" min="0" max="500000" step="1000" aria-label="Retrieved tokens per turn">
       <div class="pair">
         <label title="Scales with the median. Can be edited on its own.">95th percentile<input name="tokenP95" type="number" min="0" max="1000000" step="any" required></label>
-        <label title="Billed output of one answer, reasoning included.">Answer tokens<input name="outputTokens" type="number" min="0" max="200000" step="1" required></label>
+        <label title="Tokens of one answer. It is billed as output and stays in the thread.">Answer tokens<input name="outputTokens" type="number" min="0" max="200000" step="1" required></label>
       </div>
-      <label>Question tokens<input name="inputTokens" type="number" min="1" max="100000" step="1" required></label>
+      <div class="pair">
+        <label>Question tokens<input name="inputTokens" type="number" min="1" max="100000" step="1" required></label>
+        <label title="Share of turns that retrieve anything. The others add only a question and an answer.">Turns that retrieve %<input name="retrievalShare" data-scale="100" type="number" min="0" max="100" step="any" required></label>
+      </div>
       <div id="growthMini" class="mini"></div>
       <p class="caption" id="retrievalCaption" hidden></p>
     </fieldset>
@@ -111,20 +114,39 @@
 
     <fieldset>
       <legend><span>03</span> Thread length</legend>
-      <label>Distribution<select name="lengthDistribution"><option value="lognormal">Lognormal</option><option value="fixed">Fixed</option><option value="geometric">Geometric</option></select></label>
-      <div class="pair">
-        <label id="lengthLabel">Median turns<input name="plannedTurns" type="number" min="1" max="160" step="any" required></label>
-        <label title="Scales with the median. Can be edited on its own.">95th percentile<input name="plannedTurnsP95" type="number" min="1" max="320" step="any" required></label>
+      <label title="How thread lengths are drawn. By chance of another turn, a thread that has come far is more likely, or less, to go on.">Distribution<select name="lengthDistribution"><option value="lognormal">Lognormal</option><option value="continuation">By chance of another turn</option><option value="fixed">Fixed</option><option value="geometric">Geometric</option></select></label>
+      <div id="lengthByLaw">
+        <div class="pair">
+          <label id="lengthLabel">Median turns<input name="plannedTurns" type="number" min="1" max="160" step="any" required></label>
+          <label title="Scales with the median. Can be edited on its own.">95th percentile<input name="plannedTurnsP95" type="number" min="1" max="320" step="any" required></label>
+        </div>
+        <label title="Chance the user sends another turn, at every turn.">Continues %<input name="continuationProbability" data-scale="100" type="number" min="0" max="100" step="any" required></label>
       </div>
-      <label title="Chance the user sends another turn, at every turn.">Continues %<input name="continuationProbability" data-scale="100" type="number" min="0" max="100" step="any" required></label>
+      <div id="lengthByChance" hidden>
+        <div class="pair">
+          <label title="Chance that a thread gets a second turn.">After turn 1 %<input name="continueFirst" data-scale="100" type="number" min="0" max="100" step="any" required></label>
+          <label title="Chance of another turn once a thread is long.">In long threads %<input name="continueLong" data-scale="100" type="number" min="0" max="100" step="any" required></label>
+        </div>
+        <label title="How many turns after the first it takes the chance to move halfway from the first value to the long-thread value.">Turns to halfway<input name="continueHalfTurn" aria-label="Turns to halfway, chance of another turn" type="number" min="0.1" max="160" step="any" required></label>
+      </div>
       <div id="survivalMini" class="mini"></div>
       <p class="caption" id="survivalCaption"></p>
     </fieldset>
 
     <fieldset>
       <legend><span>04</span> Return delay</legend>
-      <label title="Time between an answer and the user's next message.">Median (minutes)<input name="gapMedianMinutes" type="number" min="0.001" max="100000" step="any" required></label>
-      <label>95th percentile (minutes)<input name="gapP95Minutes" type="number" min="0.001" max="1000000" step="any" required></label>
+      <div class="pair">
+        <label title="Minutes between an answer and the user's next message. In a long thread, when the first return differs.">Median (min)<input name="gapMedianMinutes" type="number" min="0.001" max="100000" step="any" required></label>
+        <label title="Minutes. It scales with the median at every turn.">95th percentile<input name="gapP95Minutes" type="number" min="0.001" max="1000000" step="any" required></label>
+      </div>
+      <div class="pair">
+        <label title="The delay after the first turn as a multiple of the delay in long threads. 1 is the same delay at every turn.">After turn 1 ×<input name="gapFirstFactor" type="number" min="0.01" max="1000" step="any" required></label>
+        <label title="How many turns after the first it takes the delay to move halfway, on a log scale, to its long-thread value.">Turns to halfway<input name="gapHalfTurn" aria-label="Turns to halfway, return delay" type="number" min="0.1" max="160" step="any" required></label>
+      </div>
+      <div class="pair">
+        <label title="Share of returns that come after a long break instead, whatever the turn: the next morning, say.">Long breaks %<input name="breakShare" data-scale="100" type="number" min="0" max="100" step="any" required></label>
+        <label title="Median length of a long break in minutes. Its 95th percentile is four times that.">Break median (min)<input name="breakMedianMinutes" type="number" min="1" max="1000000" step="any" required></label>
+      </div>
       <div id="returnMini" class="mini"></div>
       <p class="caption" id="returnCaption"></p>
     </fieldset>
@@ -162,13 +184,18 @@
       <section>
         <h3>Cache</h3>
         <div class="fields">
-          <label title="An unused cache entry expires after this long.">Lifetime (minutes)<input name="ttlMinutes" data-preset type="number" min="0.01" max="100000" step="any" required></label>
+          <label title="A cache entry expires this long after the last request that wrote or read it was sent.">Lifetime (minutes)<input name="ttlMinutes" data-preset type="number" min="0.01" max="100000" step="any" required></label>
           <label title="A request shorter than this is not cached.">Minimum tokens<input name="cacheMinTokens" data-preset type="number" min="0" max="1000000" step="1" required></label>
           <label title="Cache reads are counted in whole blocks of this many tokens.">Block tokens<input name="cacheBlockTokens" data-preset type="number" min="1" max="100000" step="1" required></label>
+          <label title="Share of a live cache entry that the next request reads. Providers do not guarantee a hit.">Live entry read %<input name="cacheHitShare" data-scale="100" type="number" min="0" max="100" step="any" required></label>
         </div>
         <h3>Request</h3>
         <div class="fields">
           <label title="The start of every request: system prompt and tool definitions.">System prompt and tools<input name="systemTokens" type="number" min="0" max="1000000" step="1" required></label>
+          <label title="Chance that another conversation has the system prompt and tools cached when a thread's own cache is cold.">Cached by others %<input name="sharedPrefixWarm" data-scale="100" type="number" min="0" max="100" step="any" required></label>
+          <label title="Model calls in one turn, on average. Each call after the first sends the request again and reads it from the cache.">Calls per turn<input name="callsPerTurn" type="number" min="1" max="100" step="any" required></label>
+          <label title="How long an answer takes. The cache lifetime runs from when the request was sent, so a slow answer leaves less of it for the wait.">Answer seconds<input name="answerSeconds" type="number" min="0" max="86400" step="any" required></label>
+          <label title="Output billed with each answer that is not kept in the thread, such as reasoning.">Reasoning tokens<input name="reasoningTokens" type="number" min="0" max="1000000" step="1" required></label>
         </div>
         <h3>Sampling</h3>
         <div class="fields">
@@ -185,6 +212,7 @@
           <label title="Output tokens billed for one ping.">Ping reply tokens<input name="pingOutputTokens" type="number" min="0" max="10000" step="1" required></label>
           <label title="Output tokens of the extra call that asks for an archived or cleared source. Both sides pay it.">Fetch-back reply tokens<input name="recoveryOutputTokens" type="number" min="0" max="10000" step="1" required></label>
           <label title="Context kept free for the answer.">Reserve tokens<input name="safetyReserve" type="number" min="0" max="1000000" step="1" required></label>
+          <label title="Tokens of the notice left in place of each archived source.">Archive notice tokens<input name="archivedTokens" type="number" min="0" max="10000" step="1" required></label>
         </div>
       </section>
       <section class="wide">
@@ -279,11 +307,12 @@
     <summary>Assumptions</summary>
     <ul>
       <li>Token counts and list prices. No model is called, and answer quality is not measured.</li>
-      <li>One answer call per turn. A needed source that was archived or cleared costs one extra call, on both sides. A source OpenClaw summarized is not fetched again.</li>
+      <li>A needed source that was archived or cleared costs one extra call, on both sides. A source OpenClaw summarized is not fetched again.</li>
+      <li>Each further model call of a turn sends its request again and reads it from the cache. Reasoning is billed once and never sent again.</li>
       <li>Both sides know which earlier sources a turn needs.</li>
       <li>Compache archives only old retrieved text. Its policy is the cheapest candidate on one set of threads. Costs come from a second set.</li>
       <li>OpenClaw follows its documented defaults and sends no keep-warm requests. Claude: tool results are cleared above 30% of the window, keeping the newest three. OpenAI: older turns are summarized at 75%. Its default there, OpenAI's own compaction, is not modeled.</li>
-      <li>A cache entry needs an identical start of the request and lives exactly the provider's default lifetime.</li>
+      <li>A cache entry needs an identical start of the request and lives exactly its lifetime from when the request was sent. A partly read entry and a system prompt cached by another conversation are priced at their expected value.</li>
       <li>What later turns need, and how far back it lies, defaults to what was measured on the DocChat benchmark. A profile made from your own traces replaces every workload number.</li>
     </ul>
     <p class="caption"><a href="./methodology.html">Full method</a></p>

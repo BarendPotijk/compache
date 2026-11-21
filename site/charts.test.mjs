@@ -13,6 +13,20 @@ test('survival axis responds to short median and tail rather than a fixed 160 ru
  assert.ok(short.max<30);assert.equal(short.reference,8);assert.equal(long.max,160);assert.equal(short.points[0].realized,1);
  const fixed=survivalView({lengthDistribution:'fixed',plannedTurns:5});assert.ok(fixed.max<10);assert.equal(fixed.points[5].realized,0);
 });
+test('by chance of another turn the survival view reads its median and its reach off the curve',()=>{
+ // Half the threads end after one turn. 95% are over by turn 8, so the axis runs to turn 11, which 3.6% reach.
+ const v=survivalView({lengthDistribution:'continuation',continueFirst:.5,continueLong:.97,continueHalfTurn:4});
+ assert.equal(v.oneTurn,.5);assert.equal(v.reference,1);assert.equal(v.referenceLabel,'median');assert.equal(v.max,11);assert.equal(v.points.length,11);
+ assert.ok(Math.abs(v.tail-.0356)<.0005);assert.equal(v.points[0].realized,1);assert.equal(v.points[1].realized,.5);
+ // A steady nine in ten: half are over by turn 7 (0.9^7 = 0.48) and 95% by turn 29.
+ const steady=survivalView({lengthDistribution:'continuation',continueFirst:.9,continueLong:.9,continueHalfTurn:3});
+ assert.equal(steady.reference,7);assert.equal(steady.max,35);assert.ok(Math.abs(steady.oneTurn-.1)<1e-12);assert.ok(Math.abs(steady.tail-.9**34)<1e-12);
+ // Threads that always go on reach the cap.
+ const endless=survivalView({lengthDistribution:'continuation',continueFirst:1,continueLong:1,maxTurns:40});
+ assert.equal(endless.max,40);assert.equal(endless.reference,40);assert.equal(endless.tail,1);assert.equal(endless.oneTurn,0);
+ // The other laws report the share of one-turn threads as well.
+ assert.ok(Math.abs(survivalView({lengthDistribution:'geometric',plannedTurns:4,continuationProbability:1}).oneTurn-.25)<1e-12);
+});
 test('ping average excludes ineligible prefixes and exposes both eligible and total counts',()=>{
  const rows=[{pings:0,expectedGain:0,expectedCost:0,net:0},{pings:1,expectedGain:5,expectedCost:2,net:3},{pings:2,expectedGain:6,expectedCost:4,net:2}];
  const d=(thread,eligible)=>({thread,turn:0,admitted:true,plannedPings:eligible?1:0,actualPings:0,planner:{heldTokens:100,coldTokens:50,returnProbability:.5,reason:eligible?'positive expected value':'disabled',rows:eligible?rows:rows.slice(0,1)}});

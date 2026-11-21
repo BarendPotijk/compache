@@ -10,18 +10,30 @@ export const DEFAULTS = Object.freeze({
   seed: 42, threads: 100, maxTurns: 160,
   // Workload: thread length, what each turn adds, and how long users stay away.
   lengthDistribution: 'lognormal', plannedTurns: 8, plannedTurnsP95: 20, continuationProbability: 0.99,
-  tokenMedian: 25000, tokenP95: 45000, inputTokens: 200, outputTokens: 500, systemTokens: 2048,
-  gapMedianMinutes: 4, gapP95Minutes: 60,
+  // The 'continuation' length law: the chance of another turn after the first turn and in a long thread, and how
+  // many turns after the first it is halfway between the two.
+  continueFirst: 0.6, continueLong: 0.95, continueHalfTurn: 3,
+  // Retrieved tokens describe the turns that retrieve, and retrievalShare is the share of turns that do.
+  tokenMedian: 25000, tokenP95: 45000, retrievalShare: 1, inputTokens: 200, outputTokens: 500, reasoningTokens: 0, systemTokens: 2048,
+  // Return delay in a long thread. After the first turn it is gapFirstFactor times that, and halfway on a log scale
+  // gapHalfTurn turns later. With chance breakShare a return comes after a long break instead, whatever the turn.
+  gapMedianMinutes: 4, gapP95Minutes: 60, gapFirstFactor: 1, gapHalfTurn: 3, breakShare: 0, breakMedianMinutes: 1440,
+  // One turn: how long its answer takes, how many model calls it makes, and the chance another conversation has
+  // already cached the system prompt and tools when this one's own cache is cold.
+  answerSeconds: 0, callsPerTurn: 1, sharedPrefixWarm: 0,
   // What later turns need, per kind: the chance, and how many turns back it lies (median and 95th percentile).
   // Measured on the DocChat benchmark.
   inputDependencyProbability: 0.15, inputDependencyTurnsBack: 1, inputDependencyTurnsBackP95: 20,
   retrievalDependencyProbability: 0.15, retrievalDependencyTurnsBack: 3, retrievalDependencyTurnsBackP95: 30,
   outputDependencyProbability: 0.20, outputDependencyTurnsBack: 1, outputDependencyTurnsBackP95: 35,
-  // Prompt cache.
-  ttlMinutes: 30, cacheMinTokens: 1024, cacheBlockTokens: 1,
+  // Prompt cache: an entry's lifetime from when its request was sent, the least a request must hold, the size of a
+  // cached block, and the share of a live entry that the next request actually reads.
+  ttlMinutes: 30, cacheMinTokens: 1024, cacheBlockTokens: 1, cacheHitShare: 1,
   // Compache: the floor, the fitted policy (chosen by simulate) and its fixed costs.
   retentionRequirement: 0.8, target: 0.20, warmTrigger: 0.5, retrievalRetentionRuns: 0,
   keepWarm: true, maxPings: 12, pingLeadMinutes: 0.75, pingOutputTokens: 16, recoveryOutputTokens: 32, safetyReserve: 32000,
+  // Tokens of the notice left in place of one turn's archived retrieved text: what the package leaves for one part.
+  archivedTokens: 22,
   // OpenClaw's documented defaults. Clearing old tool results is on for its Anthropic provider only.
   toolClearing: false, clearTriggerShare: 0.30, clearTriggerFloor: 50000, clearKeepResults: 3, clearMinFreedShare: 0.05, clearMinFreedFloor: 12500, clearedTokens: 12,
   summaryTriggerShare: 0.75, baselineReserve: 20000, tailTokens: 20000,
@@ -34,12 +46,14 @@ export const DEFAULTS = Object.freeze({
 const RANGES = Object.freeze({
   seed: [0, 4294967295, true], threads: [1, 200, true], maxTurns: [1, 160, true],
   plannedTurns: [1, 160], plannedTurnsP95: [1, 320], continuationProbability: [0, 1],
-  tokenMedian: [0, 500000], tokenP95: [0, 1000000], inputTokens: [1, 100000, true], outputTokens: [0, 200000, true], systemTokens: [0, 1000000, true],
-  gapMedianMinutes: [0.001, 100000], gapP95Minutes: [0.001, 1000000],
+  continueFirst: [0, 1], continueLong: [0, 1], continueHalfTurn: [0.1, 160],
+  tokenMedian: [0, 500000], tokenP95: [0, 1000000], retrievalShare: [0, 1], inputTokens: [1, 100000, true], outputTokens: [0, 200000, true], reasoningTokens: [0, 1000000, true], systemTokens: [0, 1000000, true],
+  gapMedianMinutes: [0.001, 100000], gapP95Minutes: [0.001, 1000000], gapFirstFactor: [0.01, 1000], gapHalfTurn: [0.1, 160], breakShare: [0, 1], breakMedianMinutes: [1, 1000000],
+  answerSeconds: [0, 86400], callsPerTurn: [1, 100], sharedPrefixWarm: [0, 1],
   ...Object.fromEntries(KINDS.flatMap(kind => [[`${kind}DependencyProbability`, [0, 1]], [`${kind}DependencyTurnsBack`, [1, 160]], [`${kind}DependencyTurnsBackP95`, [1, 1000]]])),
-  ttlMinutes: [0.01, 100000], cacheMinTokens: [0, 1000000, true], cacheBlockTokens: [1, 100000, true],
+  ttlMinutes: [0.01, 100000], cacheMinTokens: [0, 1000000, true], cacheBlockTokens: [1, 100000, true], cacheHitShare: [0, 1],
   retentionRequirement: [0, 1], target: [0.01, 0.45], warmTrigger: [0.03, 1], retrievalRetentionRuns: [0, 160, true],
-  maxPings: [0, 60, true], pingLeadMinutes: [0, 100000], pingOutputTokens: [0, 10000, true], recoveryOutputTokens: [0, 10000, true], safetyReserve: [0, 1000000, true],
+  maxPings: [0, 60, true], pingLeadMinutes: [0, 100000], pingOutputTokens: [0, 10000, true], recoveryOutputTokens: [0, 10000, true], safetyReserve: [0, 1000000, true], archivedTokens: [0, 10000, true],
   clearTriggerShare: [0, 1], clearTriggerFloor: [0, 10000000, true], clearKeepResults: [1, 160, true], clearMinFreedShare: [0, 1], clearMinFreedFloor: [0, 10000000, true], clearedTokens: [0, 10000, true],
   summaryTriggerShare: [0.01, 1], baselineReserve: [0, 1000000, true], tailTokens: [0, 1000000, true],
   summaryTokens: [1, 100000, true], summaryInputCap: [1, 1000000, true], toolSummaryTokens: [1, 100000, true], summarySystemTokens: [0, 100000, true], recordTokens: [0, 100000, true], flushOutputTokens: [0, 100000, true]
@@ -64,7 +78,7 @@ export function configure(overrides = {}) {
     if (whole && !Number.isInteger(c[key])) throw new RangeError(`${key} must be a whole number`);
   }
   for (const [key, [min, max]] of Object.entries(MODEL_RANGES)) finite(c.model[key], `model.${key}`, min, max);
-  if (!['fixed','geometric','lognormal'].includes(c.lengthDistribution)) throw new RangeError('lengthDistribution must be fixed, geometric or lognormal');
+  if (!['fixed','geometric','lognormal','continuation'].includes(c.lengthDistribution)) throw new RangeError('lengthDistribution must be fixed, geometric, lognormal or continuation');
   if (c.lengthDistribution === 'fixed' && !Number.isInteger(c.plannedTurns)) throw new RangeError('plannedTurns must be a whole number for a fixed length');
   const atLeast = (high, low) => { if (c[high] < c[low]) throw new RangeError(`${high} must be at least ${low}`); };
   if (c.lengthDistribution === 'lognormal') atLeast('plannedTurnsP95', 'plannedTurns');
@@ -94,6 +108,8 @@ export function ageLaw(median, p95, maxAge = DEFAULTS.maxTurns) {
   for (let a = 1; a <= maxAge; a++) F[a] = Math.max(F[a - 1], sigma > 0 ? normalCdf(Math.log((a + .5)/median)/sigma) : median < a + .5 ? 1 : 0);
   return Object.freeze({
     cdf: age => F[Math.max(0, Math.min(maxAge, Math.floor(age)))],
+    // The weight on exactly `age` turns back, before any thread length is taken into account.
+    weight: age => age >= 1 && age <= maxAge ? F[age] - F[age - 1] : 0,
     // Only `oldest` earlier turns exist. Among them, the share that lie exactly `age` back.
     // When the law puts no weight on any of them, the oldest one stands in.
     pmf: (age, oldest) => F[oldest] > 0 ? (F[age] - F[age - 1])/F[oldest] : age === oldest ? 1 : 0,
@@ -104,22 +120,52 @@ export function ageLaw(median, p95, maxAge = DEFAULTS.maxTurns) {
   });
 }
 const ageLaws = (c, maxAge) => Object.fromEntries(KINDS.map(kind => [kind, ageLaw(c[`${kind}DependencyTurnsBack`], c[`${kind}DependencyTurnsBackP95`], maxAge)]));
+// Whether any turn retrieves anything.
+const retrieves = c => c.tokenMedian !== 0 && c.retrievalShare !== 0;
+// Under the 'continuation' length law, the chance of another turn after turn `turn`, counted from 1.
+export function continueChance(turn, c) { return c.continueLong - (c.continueLong - c.continueFirst)*0.5**((turn - 1)/c.continueHalfTurn); }
+// How many times longer than in a long thread the usual return delay is after turn `turn`, counted from 1.
+function gapFactor(turn, c) { return c.gapFirstFactor**(0.5**((turn - 1)/c.gapHalfTurn)); }
+// Long breaks are lognormal around their median, with a 95th percentile four times that.
+const BREAK_SIGMA = Math.log(4)/z95;
+// Of the earlier turns that retrieved (`origins`, oldest first), the one a need of turn `i` points at for a uniform draw
+// `u`: each weighted by the age law. When the law puts no weight on any of them, the oldest stands in.
+function pickOrigin(law, origins, i, u) {
+  let total = 0; for (const origin of origins) total += law.weight(i - origin);
+  if (!(total > 0)) return origins[0];
+  let x = u*total;
+  for (let k = origins.length - 1; k > 0; k--) { x -= law.weight(i - origins[k]); if (x < 0) return origins[k]; }
+  return origins[0];
+}
 export function generateWorkload(config) {
   const c=configure(config), random=rng(c.seed), laws=ageLaws(c,c.maxTurns), threads=[], gaps=[], planned=[], realized=[];
+  const byChance=c.lengthDistribution==='continuation', answerMinutes=c.answerSeconds/60, retrieving=retrieves(c);
   for(let ti=0;ti<c.threads;ti++) {
-    let length=c.lengthDistribution==='fixed' ? c.plannedTurns : c.lengthDistribution==='geometric' ? Math.ceil(Math.log(Math.max(random(),1e-12))/Math.log(1-1/Math.max(1.00000001,c.plannedTurns))) : Math.round(lognormal(random,c.plannedTurns,c.plannedTurnsP95));
-    length=Math.max(1,Math.min(c.maxTurns,length)); planned.push(length);
-    const turns=[]; let time=0;
+    // By chance of another turn, a thread has no length in advance: it runs until a turn is the last, or to the cap.
+    let length=byChance ? c.maxTurns : c.lengthDistribution==='fixed' ? c.plannedTurns : c.lengthDistribution==='geometric' ? Math.ceil(Math.log(Math.max(random(),1e-12))/Math.log(1-1/Math.max(1.00000001,c.plannedTurns))) : Math.round(lognormal(random,c.plannedTurns,c.plannedTurnsP95));
+    length=Math.max(1,Math.min(c.maxTurns,length));
+    // The earlier turns that retrieved, oldest first.
+    const turns=[], retrieved=[]; let time=0;
     for(let i=0;i<length;i++) {
-      if(i>0) {if(random()>=c.continuationProbability) break; const g=lognormal(random,c.gapMedianMinutes,c.gapP95Minutes); gaps.push(g); time+=g;}
-      const retrieval=c.tokenMedian===0?0:Math.max(1,Math.min(1000000,Math.round(lognormal(random,c.tokenMedian,c.tokenP95)))), deps=[];
-      // Each kind independently: with its chance, this turn needs one earlier item of that kind, as far back as its law says.
-      if(i) for(const kind of KINDS) {
-        if(!(kind==='retrieval' && c.tokenMedian===0) && random()<c[`${kind}DependencyProbability`]) deps.push({kind,turn:i-laws[kind].sample(random(),i)});
+      if(i>0) {
+        if(random()>=(byChance?continueChance(i,c):c.continuationProbability)) break;
+        // A long break with its chance, otherwise the usual delay for this position. The question arrives once the answer is there and the user is back.
+        const g=c.breakShare>0 && random()<c.breakShare ? lognormal(random,c.breakMedianMinutes,4*c.breakMedianMinutes) : lognormal(random,c.gapMedianMinutes,c.gapP95Minutes)*gapFactor(i,c);
+        gaps.push(g); time+=answerMinutes+g;
       }
+      const found=retrieving && (c.retrievalShare>=1 || random()<c.retrievalShare);
+      const retrieval=found?Math.max(1,Math.min(1000000,Math.round(lognormal(random,c.tokenMedian,c.tokenP95)))):0, deps=[];
+      // Each kind independently: with its chance, this turn needs one earlier item of that kind, as far back as its law says.
+      // Retrieved text can only be needed from a turn that retrieved. With no such turn there is no need.
+      if(i) for(const kind of KINDS) {
+        if(kind==='retrieval') {
+          if(retrieved.length && random()<c.retrievalDependencyProbability) deps.push({kind,turn:retrieved.length===i?i-laws.retrieval.sample(random(),i):pickOrigin(laws.retrieval,retrieved,i,random())});
+        } else if(random()<c[`${kind}DependencyProbability`]) deps.push({kind,turn:i-laws[kind].sample(random(),i)});
+      }
+      if(found)retrieved.push(i);
       turns.push({index:i,time,inputTokens:c.inputTokens,retrievalTokens:retrieval,outputTokens:c.outputTokens,dependencies:deps});
     }
-    realized.push(turns.length); threads.push({id:`thread-${ti+1}`,plannedTurns:length,turns});
+    planned.push(byChance?turns.length:length); realized.push(turns.length); threads.push({id:`thread-${ti+1}`,plannedTurns:byChance?turns.length:length,turns});
   }
   const survival=Array.from({length:c.maxTurns},(_,i)=>({turn:i+1,planned:planned.filter(x=>x>i).length/c.threads,realized:realized.filter(x=>x>i).length/c.threads})).filter(x=>x.planned||x.realized);
   return {threads,plannedLengths:distribution(planned),realizedLengths:distribution(realized),gaps:distribution(gaps),survival,totalRuns:realized.reduce((a,b)=>a+b,0)};
@@ -143,7 +189,18 @@ export function priceCall(input,cached,output,model,{cacheable=true}={}) {
 }
 // Normal CDF approximation used only by the explicitly modeled planner.
 function normalCdf(x) {const sign=x<0?-1:1, t=1/(1+.3275911*Math.abs(x)/Math.SQRT2); const e=1-(((((1.061405429*t-1.453152027)*t+1.421413741)*t-.284496736)*t+.254829592)*t)*Math.exp(-x*x/2);return .5*(1+sign*e);}
-function gapCdf(t,c) {if(t<=0)return 0; const s=Math.log(c.gapP95Minutes/c.gapMedianMinutes)/z95; return s===0 ? (t>=c.gapMedianMinutes?1:0) : normalCdf(Math.log(t/c.gapMedianMinutes)/s);}
+// The chance that a returning user is back within `t` minutes of the answer to turn `turn`, counted from 1: the usual
+// delay at that position, mixed with long breaks.
+function gapCdf(t,c,turn=Infinity) {
+  if(t<=0)return 0;
+  const median=c.gapMedianMinutes*gapFactor(turn,c), s=Math.log(c.gapP95Minutes/c.gapMedianMinutes)/z95;
+  const usual=s===0 ? (t>=median?1:0) : normalCdf(Math.log(t/median)/s);
+  return c.breakShare>0 ? (1-c.breakShare)*usual+c.breakShare*normalCdf(Math.log(t/c.breakMedianMinutes)/BREAK_SIGMA) : usual;
+}
+// Retrieved text can be archived when that frees anything: a turn that retrieved nothing, or less than the notice
+// an archived source leaves behind, keeps its place.
+const archivable=(b,c)=>b.kind==='retrieval' && b.tokens>c.archivedTokens;
+const notice=(b,c)=>block(`archived-${b.id}`,c.archivedTokens,'archived',b.turn,'archived');
 // The request a cold return would carry once old retrieved text is archived down to the target. No future
 // question or dependency is known: only earlier retrieved text can go, and questions and answers keep their place.
 export function coldPreview(history, c) {
@@ -151,7 +208,10 @@ export function coldPreview(history, c) {
   let size=c.systemTokens+sum(history);
   if(size<=(c.target+.02)*c.model.context) return [system,...history];
   const lastTurn=history.reduce((n,b)=>Math.max(n,b.turn),-1), limit=c.target*c.model.context, view=[system];
-  for(const b of history) {if(size>limit && b.kind==='retrieval' && lastTurn+1-Number(b.source.slice(1))>c.retrievalRetentionRuns) size-=b.tokens; else view.push(b);}
+  for(const b of history) {
+    if(size>limit && archivable(b,c) && lastTurn+1-Number(b.source.slice(1))>c.retrievalRetentionRuns) {size-=b.tokens-c.archivedTokens; if(c.archivedTokens)view.push(notice(b,c));}
+    else view.push(b);
+  }
   return view;
 }
 // The size of that request, for a view that starts with its system block.
@@ -160,7 +220,7 @@ function coldSize(full, c) {
   for(let j=1;j<full.length;j++) {size+=full[j].tokens; if(full[j].turn>lastTurn)lastTurn=full[j].turn;}
   if(size<=(c.target+.02)*c.model.context) return size;
   const limit=c.target*c.model.context;
-  for(let j=1;j<full.length && size>limit;j++) {const b=full[j]; if(b.kind==='retrieval' && lastTurn+1-Number(b.source.slice(1))>c.retrievalRetentionRuns) size-=b.tokens;}
+  for(let j=1;j<full.length && size>limit;j++) {const b=full[j]; if(archivable(b,c) && lastTurn+1-Number(b.source.slice(1))>c.retrievalRetentionRuns) size-=b.tokens-c.archivedTokens;}
   return size;
 }
 // Planned length is rounded and capped in generateWorkload; return probability
@@ -168,55 +228,86 @@ function coldSize(full, c) {
 function plannedSurvival(turn,c) {
   if(turn<=1)return 1;
   if(turn>c.maxTurns)return 0;
+  if(c.lengthDistribution==='continuation'){let alive=1;for(let n=1;n<turn;n++)alive*=continueChance(n,c);return alive;}
   if(c.lengthDistribution==='fixed')return turn<=Math.min(c.plannedTurns,c.maxTurns)?1:0;
   if(c.lengthDistribution==='geometric')return (1-1/Math.max(1.00000001,c.plannedTurns))**(turn-1);
   const sigma=Math.log(c.plannedTurnsP95/c.plannedTurns)/z95;
   if(sigma===0)return turn<=Math.round(c.plannedTurns)?1:0;
   return 1-normalCdf(Math.log((turn-.5)/c.plannedTurns)/sigma);
 }
+// The chance that the user comes back after the turn with this index, given that the thread got that far.
+function returnChance(runIndex,c) {
+  if(runIndex+2>c.maxTurns)return 0;
+  if(c.lengthDistribution==='continuation')return continueChance(runIndex+1,c);
+  const currentSurvival=plannedSurvival(runIndex+1,c), nextSurvival=plannedSurvival(runIndex+2,c);
+  return currentSurvival>0?c.continuationProbability*nextSurvival/currentSurvival:0;
+}
 export function theoreticalSurvival(config={}) {
   const c=configure(config);
-  return Array.from({length:c.maxTurns},(_,i)=>({turn:i+1,planned:plannedSurvival(i+1,c),realized:plannedSurvival(i+1,c)*c.continuationProbability**i}));
+  // By chance of another turn there is no planned length apart from the realized one, and no flat chance on top of it.
+  const flat=c.lengthDistribution==='continuation'?1:c.continuationProbability;
+  return Array.from({length:c.maxTurns},(_,i)=>({turn:i+1,planned:plannedSurvival(i+1,c),realized:plannedSurvival(i+1,c)*flat**i}));
 }
-// CDF of return delay conditional on a continuation, not an unconditional return probability.
-export function returnCdf(minutes,config={}) {return gapCdf(minutes,configure(config));}
-// For n pings: the chance a returning user is back before the n-th goes out, and the chance the return falls in
-// the extra time those pings keep the cache alive. Both depend on the settings only.
-let pingCurveKey='', pingCurveRows=[];
-function pingCurve(c) {
-  const key=`${c.ttlMinutes}|${c.pingLeadMinutes}|${c.gapMedianMinutes}|${c.gapP95Minutes}|${c.maxPings}`;
-  if(key!==pingCurveKey) {
-    const interval=c.ttlMinutes-c.pingLeadMinutes, unaided=gapCdf(c.ttlMinutes,c);
-    pingCurveRows=Array.from({length:c.maxPings+1},(_,n)=>({back:gapCdf(n*interval,c),bridged:Math.max(0,gapCdf(n*interval+c.ttlMinutes,c)-unaided)}));
-    pingCurveKey=key;
+// CDF of the return delay after turn `turn` (counted from 1, a long thread when left out), conditional on a
+// continuation: not an unconditional return probability.
+export function returnCdf(minutes,config={},turn=Infinity) {return gapCdf(minutes,configure(config),turn);}
+// The share of returning users whose next question finds the cache alive without a ping: the answer time and
+// the delay together stay inside the cache lifetime, which runs from when the request was sent.
+export function warmReturnShare(config={},turn=Infinity) {const c=configure(config);return gapCdf(c.ttlMinutes-c.answerSeconds/60,c,turn);}
+// For n pings after a turn: the chance a returning user is back before the n-th goes out, and the chance the return
+// falls in the extra time those pings keep the cache alive. Pings are due every interval from when the request was
+// sent, and the delay starts when the answer is there. Both depend on the settings and the turn's position only.
+let pingCurveKey='', pingCurves=new Map();
+function pingCurve(c,turn) {
+  const key=`${c.ttlMinutes}|${c.pingLeadMinutes}|${c.gapMedianMinutes}|${c.gapP95Minutes}|${c.maxPings}|${c.gapFirstFactor}|${c.gapHalfTurn}|${c.breakShare}|${c.breakMedianMinutes}|${c.answerSeconds}`;
+  if(key!==pingCurveKey) {pingCurves=new Map();pingCurveKey=key;}
+  // Without an effect of position one curve serves every turn.
+  const position=c.gapFirstFactor===1?0:turn;
+  let rows=pingCurves.get(position);
+  if(!rows) {
+    const interval=c.ttlMinutes-c.pingLeadMinutes, answer=c.answerSeconds/60, unaided=gapCdf(c.ttlMinutes-answer,c,turn);
+    rows=Array.from({length:c.maxPings+1},(_,n)=>({back:gapCdf(n*interval-answer,c,turn),bridged:Math.max(0,gapCdf(n*interval+c.ttlMinutes-answer,c,turn)-unaided)}));
+    pingCurves.set(position,rows);
   }
-  return pingCurveRows;
+  return rows;
 }
+// The tokens of the system block that another conversation may have left in the cache: none when no conversation
+// shares it or it is too short to cache.
+function sharedSystem(c) {return c.sharedPrefixWarm>0 && c.systemTokens>=c.cacheMinTokens ? Math.floor(c.systemTokens/c.cacheBlockTokens)*c.cacheBlockTokens : 0;}
+// The tokens a call can expect to read from the cache. `own` is the live prefix of its own thread, read with chance
+// cacheHitShare. `shared` is the system block another conversation may hold, there with chance sharedPrefixWarm.
+// The call reads the longer of the two that it finds. Priced by expectation, so no outcome is drawn.
+function expectedRead(own,shared,c) {
+  const hit=c.cacheHitShare, there=shared?c.sharedPrefixWarm:0;
+  return hit===1 && shared<=own ? own : hit*there*Math.max(own,shared)+hit*(1-there)*own+(1-hit)*there*shared;
+}
+// The same for a call that starts with the thread's system block.
+const expectedCached=(own,c)=>expectedRead(own,sharedSystem(c),c);
 export function evaluatePingPlan(held, full, c, runIndex=0) {
   if(!Number.isInteger(runIndex)||runIndex<0)throw new RangeError('runIndex must be nonnegative');
   const interval=c.ttlMinutes-c.pingLeadMinutes, heldInput=sum(held), k=sum(full);
-  const currentSurvival=plannedSurvival(runIndex+1,c), nextSurvival=plannedSurvival(runIndex+2,c);
-  const returnProbability=currentSurvival>0?c.continuationProbability*nextSurvival/currentSurvival:0;
+  const returnProbability=returnChance(runIndex,c);
   const coldInput=coldSize(full,c);
   // Above this size the next warm turn would compact anyway, so the prefix is not worth keeping warm.
   const aboveCeiling=k>(c.warmTrigger-c.safetyReserve/c.model.context)*c.model.context;
-  let reason=!c.keepWarm?'disabled':!c.maxPings?'no pings allowed':interval<=0?'ping interval is not positive':heldInput<c.cacheMinTokens?'prefix is below cache minimum':aboveCeiling?'prefix exceeds keep-warm ceiling':returnProbability<=0?'no modeled future return':null;
+  // A ping is due one interval after the request was sent. An answer still running then leaves nothing to keep warm.
+  let reason=!c.keepWarm?'disabled':!c.maxPings?'no pings allowed':interval<=0?'ping interval is not positive':c.answerSeconds/60>=interval?'answer outlasts the ping interval':heldInput<c.cacheMinTokens?'prefix is below cache minimum':aboveCeiling?'prefix exceeds keep-warm ceiling':returnProbability<=0?'no modeled future return':null;
   const rows=[{pings:0,expectedGain:0,expectedCost:0,net:0}];
   if(reason)return {chosen:0,reason,coldTokens:coldInput,heldTokens:heldInput,interval,ttl:c.ttlMinutes,returnProbability,aboveCeiling,rows};
   const heldShared=sharedPrefix(held,full);
   const cachedHeld=heldShared>=c.cacheMinTokens ? Math.floor(heldShared/c.cacheBlockTokens)*c.cacheBlockTokens : 0;
   const fullCached=k>=c.cacheMinTokens ? Math.floor(k/c.cacheBlockTokens)*c.cacheBlockTokens : 0;
-  // Expired structural prefixes receive no cold cache credit. One later call
-  // approximates the cost of carrying a larger warm prefix.
-  const coldCost=priceCall(coldInput,0,0,c.model,{cacheable:coldInput>=c.cacheMinTokens}).cost;
-  const warmCost=priceCall(k,fullCached,0,c.model).cost;
-  const laterExtra=Math.max(0,warmCost-priceCall(coldInput,coldInput>=c.cacheMinTokens?Math.floor(coldInput/c.cacheBlockTokens)*c.cacheBlockTokens:0,0,c.model,{cacheable:coldInput>=c.cacheMinTokens}).cost);
+  // Expired structural prefixes receive no cold cache credit of their own: a cold return reads at most the system
+  // block another conversation cached. One later call approximates the cost of carrying a larger warm prefix.
+  const coldCost=priceCall(coldInput,expectedCached(0,c),0,c.model,{cacheable:coldInput>=c.cacheMinTokens}).cost;
+  const warmCost=priceCall(k,expectedCached(fullCached,c),0,c.model).cost;
+  const laterExtra=Math.max(0,warmCost-priceCall(coldInput,expectedCached(coldInput>=c.cacheMinTokens?Math.floor(coldInput/c.cacheBlockTokens)*c.cacheBlockTokens:0,c),0,c.model,{cacheable:coldInput>=c.cacheMinTokens}).cost);
   const saving=coldCost-warmCost-laterExtra;
   let best=0, value=0, cost=0;
-  const curve=pingCurve(c);
+  const curve=pingCurve(c,runIndex+1);
   for(let n=1;n<=c.maxPings;n++) {
     const sent=1-returnProbability*curve[n].back;
-    cost+=sent*priceCall(k,n===1?cachedHeld:fullCached,c.pingOutputTokens,c.model).cost;
+    cost+=sent*priceCall(k,expectedCached(n===1?cachedHeld:fullCached,c),c.pingOutputTokens,c.model).cost;
     const bridged=returnProbability*curve[n].bridged;
     const expectedGain=bridged*saving, net=expectedGain-cost;
     rows.push({pings:n,expectedGain,expectedCost:cost,net});
@@ -231,7 +322,7 @@ function admitted(input,output,c,arm,role){const reserve=arm==='compache'?c.safe
 export function runArm(workload, config, arm, {collectDecisions=true,collectLedger=true}={}) {
   const c=configure(config); if(!['compache','openclaw'].includes(arm)) throw new RangeError('invalid arm');
   const laws=ageLaws(c,Math.max(c.maxTurns,...workload.threads.map(t=>t.turns.length)));
-  const ledger=[], curves=[], decisions=[], roles={}, cacheBreakdown=collectLedger?{cached:0,newContext:0,firstRequest:0,expiredPrefix:0,changedPrefix:0}:null, total={inputTokens:0,cachedTokens:0,freshTokens:0,outputTokens:0,inputCost:0,cachedCost:0,outputCost:0,cost:0,calls:0};
+  const ledger=[], curves=[], decisions=[], roles={}, cacheBreakdown=collectLedger?{cached:0,newContext:0,firstRequest:0,expiredPrefix:0,changedPrefix:0,missed:0}:null, total={inputTokens:0,cachedTokens:0,freshTokens:0,outputTokens:0,inputCost:0,cachedCost:0,outputCost:0,cost:0,calls:0};
   let completedThreads=0,completedRuns=0,attemptedRuns=0,compactions=0,clearings=0,recalls=0,required=0,covered=0,failedCalls=0,pings=0,totalRemovedTokens=0,totalRecallTokens=0;
   // Whether the warm trigger ever decided anything: a warm request above it, or a prefix above the ceiling it puts on pings.
   // A run in which it never did is, call for call, the run of every higher warm trigger.
@@ -241,6 +332,8 @@ export function runArm(workload, config, arm, {collectDecisions=true,collectLedg
     let history=[],snapshots=[],expiredSnapshots=[],seenBlocks=new Set(),cleared=new Set(),callIndex=0,threadCost=0,summaryIndex=0,failed=false;
     // Compache side: the turns whose retrieved text is in the request.
     const inView=new Set();
+    // The earlier turns that retrieved anything, oldest first.
+    const retrievedBefore=[];
     const system=block('system',c.systemTokens,'system',-1);
     function expireSnapshots(time) {
       const stillLive=[]; for(const snapshot of snapshots) {if(time-snapshot.time<c.ttlMinutes)stillLive.push(snapshot);else if(collectLedger)expiredSnapshots.push(snapshot);}
@@ -252,29 +345,57 @@ export function runArm(workload, config, arm, {collectDecisions=true,collectLedg
       if(!admitted(input,output,c,arm,role)){failedCalls++;if(collectLedger)ledger.push({arm,thread:thread.id,turn,role,time,inputTokens:input,outputTokens:output,admitted:false});return null;}
       expireSnapshots(time);
       let prefix=0; for(const s of snapshots) prefix=Math.max(prefix,s.blocks===blocks?input:sharedPrefix(s.blocks,blocks));
-      const cached=prefix>=c.cacheMinTokens ? Math.floor(prefix/c.cacheBlockTokens)*c.cacheBlockTokens : 0;
+      const own=prefix>=c.cacheMinTokens ? Math.floor(prefix/c.cacheBlockTokens)*c.cacheBlockTokens : 0;
+      // The call reads its own thread's live prefix when it hits it, and otherwise the system block when another
+      // conversation has that cached. It is priced at the expected tokens read: the blend of those outcomes.
+      const shared=blocks[0]===system?sharedSystem(c):0, cached=expectedRead(own,shared,c);
       let attribution=null;
       if(collectLedger && role==='answer') {
-        attribution={cached,newContext:0,firstRequest:0,expiredPrefix:0,changedPrefix:0};
-        if(callIndex===0)attribution.firstRequest=input-cached;
-        else {
-          let best=prefix; for(const snapshot of expiredSnapshots) best=Math.max(best,sharedPrefix(snapshot.blocks,blocks));
-          const bestCached=best>=c.cacheMinTokens?Math.floor(best/c.cacheBlockTokens)*c.cacheBlockTokens:0;
-          attribution.expiredPrefix=Math.max(0,bestCached-cached);
+        let best=prefix; if(callIndex)for(const snapshot of expiredSnapshots) best=Math.max(best,sharedPrefix(snapshot.blocks,blocks));
+        const bestCached=best>=c.cacheMinTokens?Math.floor(best/c.cacheBlockTokens)*c.cacheBlockTokens:0;
+        // Why the tokens beyond the `read` ones were not read from the cache. `live` is how far a live entry reached.
+        const explain=(read,live)=>{
+          const parts={cached:read,newContext:0,firstRequest:0,expiredPrefix:0,changedPrefix:0,missed:live-read};
+          if(callIndex===0){parts.firstRequest=input-live;return parts;}
+          const from=Math.max(bestCached,live); parts.expiredPrefix=from-live;
           let offset=0; for(const b of blocks) {
-            const tail=Math.max(0,offset+b.tokens-Math.max(offset,bestCached));
-            if(tail){if(seenBlocks.has(`${b.id}:${b.tokens}`))attribution.changedPrefix+=tail;else attribution.newContext+=tail;}
+            const tail=Math.max(0,offset+b.tokens-Math.max(offset,from));
+            if(tail){if(seenBlocks.has(`${b.id}:${b.tokens}`))parts.changedPrefix+=tail;else parts.newContext+=tail;}
             offset+=b.tokens;
+          }
+          return parts;
+        };
+        if(cached===own)attribution=explain(own,own);
+        else {
+          // Each outcome with its chance: both entries found, only the thread's own, only the shared one, neither.
+          const hit=c.cacheHitShare, there=shared?c.sharedPrefixWarm:0, longer=Math.max(own,shared);
+          attribution={cached:0,newContext:0,firstRequest:0,expiredPrefix:0,changedPrefix:0,missed:0};
+          for(const [chance,read] of [[hit*there,longer],[hit*(1-there),own],[(1-hit)*there,shared],[(1-hit)*(1-there),0]]) {
+            if(!chance)continue;
+            const parts=explain(read,Math.max(read,own)); for(const key of Object.keys(attribution))attribution[key]+=chance*parts[key];
           }
         }
         for(const key of Object.keys(cacheBreakdown))cacheBreakdown[key]+=attribution[key];
       }
       const costs=priceCall(input,cached,output,c.model,{cacheable:input>=c.cacheMinTokens});
       const row=collectLedger?{arm,thread:thread.id,turn,role,time,admitted:true,...costs,...(attribution?{cacheBreakdown:attribution}:{})}:costs; if(collectLedger)ledger.push(row); callIndex++;
-      const roleTotal=roles[role] ||= {calls:0,inputTokens:0,cachedTokens:0,freshTokens:0,outputTokens:0,inputCost:0,cachedCost:0,outputCost:0,cost:0};
-      total.calls++; roleTotal.calls++; for(const k of COST_KEYS) {total[k]+=costs[k]; roleTotal[k]+=costs[k];}
-      threadCost+=costs.cost; if(collectLedger)for(const b of blocks)seenBlocks.add(`${b.id}:${b.tokens}`); if(input>=c.cacheMinTokens) snapshots.push({time,blocks});
+      tally(role,costs);
+      if(collectLedger)for(const b of blocks)seenBlocks.add(`${b.id}:${b.tokens}`); if(input>=c.cacheMinTokens) snapshots.push({time,blocks});
       return row;
+    }
+    function tally(role,costs,calls=1) {
+      const roleTotal=roles[role] ||= {calls:0,inputTokens:0,cachedTokens:0,freshTokens:0,outputTokens:0,inputCost:0,cachedCost:0,outputCost:0,cost:0};
+      total.calls+=calls; roleTotal.calls+=calls; for(const k of COST_KEYS) {total[k]+=costs[k]; roleTotal[k]+=costs[k];}
+      threadCost+=costs.cost;
+    }
+    // The further model calls of a turn. Each sends the answer's request again with no output: read from the cache
+    // where the request is long enough to cache, at the full input price otherwise. Priced together, as callsPerTurn - 1 calls.
+    function furtherCalls(blocks,time,turn) {
+      const count=c.callsPerTurn-1, input=sum(blocks), cacheable=input>=c.cacheMinTokens;
+      const one=priceCall(input,expectedRead(cacheable?Math.floor(input/c.cacheBlockTokens)*c.cacheBlockTokens:0,blocks[0]===system?sharedSystem(c):0,c),0,c.model,{cacheable});
+      const costs=Object.fromEntries(COST_KEYS.map(key=>[key,count*one[key]]));
+      if(collectLedger)ledger.push({arm,thread:thread.id,turn,role:'further',time,admitted:true,calls:count,...costs,long:one.long});
+      tally('further',costs,count);
     }
     for(let i=0;i<thread.turns.length;i++) {
       const turn=thread.turns[i], input=block(`i${i}`,turn.inputTokens,'input',i), retrieval=block(`r${i}`,turn.retrievalTokens,'retrieval',i), output=block(`o${i}`,turn.outputTokens,'output',i);
@@ -286,9 +407,16 @@ export function runArm(workload, config, arm, {collectDecisions=true,collectLedg
         // expectation integrates over the configured age law, not future labels.
         if(i) {
           for(const kind of KINDS) {
-            const p=kind==='retrieval' && c.tokenMedian===0?0:c[`${kind}DependencyProbability`];
+            // Retrieved text can only be needed from an earlier turn that retrieved.
+            const p=kind==='retrieval' && (!retrieves(c) || !retrievedBefore.length)?0:c[`${kind}DependencyProbability`];
             // Questions and answers are never archived. Retrieved text counts for the share of its age law that is still in the request.
-            let share=1; if(kind==='retrieval'){share=0;for(const origin of inView)share+=laws.retrieval.pmf(i-origin,i);}
+            let share=1;
+            if(kind==='retrieval' && retrievedBefore.length===i){share=0;for(const origin of inView)share+=laws.retrieval.pmf(i-origin,i);}
+            else if(kind==='retrieval' && p) {
+              // Some earlier turns retrieved nothing: the age law is renormalised over the ones that did.
+              let all=0, held=0; for(const origin of retrievedBefore){const w=laws.retrieval.weight(i-origin);all+=w;if(inView.has(origin))held+=w;}
+              share=all>0?held/all:inView.has(retrievedBefore[0])?1:0;
+            }
             pre[kind].expectedRequired+=p; pre[kind].expectedRetained+=p*share;
           }
         }
@@ -308,7 +436,10 @@ export function runArm(workload, config, arm, {collectDecisions=true,collectLedg
           // Oldest first, archive retrieved text that is past the kept turns and not needed now, until the request is down to the target.
           const limit=c.target*c.model.context, kept=[];
           for(const b of history) {
-            if(projectedSize>limit && b.kind==='retrieval' && i-Number(b.source.slice(1))>c.retrievalRetentionRuns && !protectedSources.has(b.source)){removed.push(b);projectedSize-=b.tokens;inView.delete(Number(b.source.slice(1)));} else kept.push(b);
+            if(projectedSize>limit && archivable(b,c) && i-Number(b.source.slice(1))>c.retrievalRetentionRuns && !protectedSources.has(b.source)) {
+              removed.push(b);projectedSize-=b.tokens-c.archivedTokens;inView.delete(Number(b.source.slice(1)));
+              if(c.archivedTokens)kept.push(notice(b,c));
+            } else kept.push(b);
           }
           if(removed.length){history=kept;compactions++;if(collectDecisions)view=[system,...history,input,retrieval,...added];}
         }
@@ -319,8 +450,9 @@ export function runArm(workload, config, arm, {collectDecisions=true,collectLedg
         if(c.toolClearing) {
           // Anthropic server-side clearing with OpenClaw's derived parameters. By default: above 30% of the
           // window, clear all but the three newest tool results (this turn's and two before it), if that frees at least 5%.
-          const results=history.filter(b=>b.kind==='retrieval'), old=results.slice(0,Math.max(0,results.length-(c.clearKeepResults-1)));
-          if(c.systemTokens+sum(history)+input.tokens+retrieval.tokens>=Math.max(c.clearTriggerFloor,Math.floor(c.model.context*c.clearTriggerShare)) && sum(old)-old.length*c.clearedTokens>=Math.max(c.clearMinFreedFloor,Math.floor(c.model.context*c.clearMinFreedShare))) {
+          // A turn that retrieved nothing has no tool result to keep or to clear.
+          const results=history.filter(b=>b.kind==='retrieval' && b.tokens>0), old=results.slice(0,Math.max(0,results.length-(c.clearKeepResults-(retrieval.tokens>0?1:0))));
+          if(old.length && c.systemTokens+sum(history)+input.tokens+retrieval.tokens>=Math.max(c.clearTriggerFloor,Math.floor(c.model.context*c.clearTriggerShare)) && sum(old)-old.length*c.clearedTokens>=Math.max(c.clearMinFreedFloor,Math.floor(c.model.context*c.clearMinFreedShare))) {
             const gone=new Set(old); for(const b of old)cleared.add(b.source);
             history=history.map(b=>gone.has(b)?block(`cleared-${b.id}`,c.clearedTokens,'cleared',b.turn,'cleared'):b); clearings++;
           }
@@ -361,10 +493,12 @@ export function runArm(workload, config, arm, {collectDecisions=true,collectLedg
       const view=[system,...history];
       required+=needs.length;
       for(const d of needs) if(view.some(b=>b.source===sourceOf(d))) covered++;
-      const row=request(view,'answer',turn.time,turn.outputTokens,i);
+      // Reasoning is billed as output with the answer and is not sent again.
+      const row=request(view,'answer',turn.time,turn.outputTokens+c.reasoningTokens,i);
       if(!row){if(decision){decision.admitted=false;if(collectLedger)Object.assign(ledger.at(-1),{beforeTokens:decision.beforeTokens,afterTokens:decision.afterTokens,cacheState:decision.cacheState,triggerTokens:decision.triggerTokens,targetTokens:decision.targetTokens,removedTokens:decision.removedTokens,recallTokens:decision.recallTokens});decisions.push(Object.freeze(decision));}failed=true;break;}
       if(decision)decision.admitted=true;
-      completedRuns++; history.push(output);
+      if(c.callsPerTurn>1)furtherCalls(view,turn.time,i);
+      completedRuns++; history.push(output); if(turn.retrievalTokens>0)retrievedBefore.push(i);
       if(collectLedger && thread===workload.threads[0]) curves.push({turn:i+1,inputTokens:row.inputTokens,cachedTokens:row.cachedTokens,cost:row.cost,cumulativeCost:threadCost});
       if(arm==='compache') {
         const full=[system,...history], plan=evaluatePingPlan(view,full,c,i), count=plan.chosen, next=thread.turns[i+1]?.time ?? Infinity, interval=c.ttlMinutes-c.pingLeadMinutes;
@@ -388,7 +522,7 @@ export function simulate(overrides={}) {
   // Latest turns whose retrieved text is never archived: none, or just enough to cover a given share of the
   // retrieved text later turns need. Without retrieval there is nothing to archive and one horizon suffices.
   const law=ageLaw(base.retrievalDependencyTurnsBack,base.retrievalDependencyTurnsBackP95,base.maxTurns);
-  const horizons=base.tokenMedian===0?[0]:[...new Set([0,...[.25,.5,.75,.9,.95,.99].map(q=>law.quantile(q))])];
+  const horizons=!retrieves(base)?[0]:[...new Set([0,...[.25,.5,.75,.9,.95,.99].map(q=>law.quantile(q))])];
   for(const target of TARGETS) for(const retrievalRetentionRuns of horizons) {
     let stands=null;
     for(const warmTrigger of WARM_TRIGGERS) {
@@ -416,6 +550,6 @@ export function simulate(overrides={}) {
   const compache=runArm(workload,config,'compache'), openclaw=runArm(workload,config,'openclaw');
   const optimization={feasible:feasible.length>0,retentionRequirement:base.retentionRequirement,retention:compache.retention.expected,fittedRetention:pick.retention??null,fittedThreads:fitted.threads.length,fittedRuns:fitted.totalRuns,candidateCount:candidates.length,selected:feasible.length?selected:null,diagnosticPolicy:feasible.length?null:selected,candidates};
   const savings=optimization.feasible&&compache.complete&&openclaw.complete ? {absolute:openclaw.totals.cost-compache.totals.cost,percent:openclaw.totals.cost?100*(openclaw.totals.cost-compache.totals.cost)/openclaw.totals.cost:null} : null;
-  const warnings=['A model of token counts and list prices: neither Compache, OpenClaw nor a provider is run, and answer quality is not measured.', 'The policy is the cheapest feasible candidate of a finite set on the fitting threads; among equally cheap ones, the one that removes least. Costs are reported on a second set of threads drawn with the next seed.', 'When a run needs a source that was archived or cleared, one extra call asks for it and the answer call carries it. Both arms pay this, and both are assumed to know what the run needs. A source that OpenClaw summarized is not fetched again.', 'The floor is on the expected share of needed sources left in the request before fetching back, averaged over the configured chances and how far back each kind of need lies. A zero denominator is reported as null and imposes no constraint.', 'Prices and token counts are assumptions. A cache entry is modeled as living exactly its documented default lifetime; providers may keep entries longer or evict them earlier.', 'OpenClaw starts from its documented defaults at the pinned revision, and each constant is a setting. Claude presets: server-side tool-result clearing above 30% of the window, keeping the newest three, with the client summary at 75% behind it. OpenAI presets: the client-side summary path; the default OpenAI compact endpoint, retries and summary quality are not modeled. No keep-warm requests.', 'Keep-warm planning uses the configured return distribution and an expected-value approximation, not the package\'s fitted policy. Call duration is zero and pings can be sent after a user has left for good.', 'An incomplete arm or no feasible policy suppresses the savings figure; partial costs are not comparable totals.'];
+  const warnings=['A model of token counts and list prices: neither Compache, OpenClaw nor a provider is run, and answer quality is not measured.', 'The policy is the cheapest feasible candidate of a finite set on the fitting threads; among equally cheap ones, the one that removes least. Costs are reported on a second set of threads drawn with the next seed.', 'When a run needs a source that was archived or cleared, one extra call asks for it and the answer call carries it. Both arms pay this, and both are assumed to know what the run needs. A source that OpenClaw summarized is not fetched again.', 'The floor is on the expected share of needed sources left in the request before fetching back, averaged over the configured chances and how far back each kind of need lies. A zero denominator is reported as null and imposes no constraint.', 'Prices and token counts are assumptions. A cache entry is modeled as living exactly its configured lifetime from when its request was sent. The share of a live entry that is read, and a system prompt that another conversation has cached, are priced by expectation with no outcome drawn.', 'Each further model call of a turn sends its request again with no output. Reasoning is billed as output with the answer and is not sent again.', 'OpenClaw starts from its documented defaults at the pinned revision, and each constant is a setting. Claude presets: server-side tool-result clearing above 30% of the window, keeping the newest three, with the client summary at 75% behind it. OpenAI presets: the client-side summary path; the default OpenAI compact endpoint, retries and summary quality are not modeled. No keep-warm requests.', 'Keep-warm planning uses the configured chance of another turn and return delay at each turn\'s position, and an expected-value approximation, not the package\'s fitted policy. Pings can be sent after a user has left for good.', 'An incomplete arm or no feasible policy suppresses the savings figure; partial costs are not comparable totals.'];
   return {config,workload,compache,openclaw,optimization,savings,curves:{compache:compache.curve,openclaw:openclaw.curve},warnings};
 }

@@ -68,6 +68,9 @@ h1 { font-size: 30px; font-weight: 650; line-height: 1.15; letter-spacing: -.8px
 .key.openclaw::before { background: var(--baseline); }
 .key.s2::before { background: var(--series-2); }
 .key.s3::before { background: var(--series-3); }
+.key.ink::before { background: var(--ink-2); }
+.key.dash::before { background: repeating-linear-gradient(to right, var(--ink-2) 0 2px, transparent 2px 6px); }
+.caption .keys { display: flex; flex-wrap: wrap; gap: 0 14px; }
 .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 14px 0 6px; }
 
 /* Headline tiles */
@@ -168,6 +171,7 @@ svg .halo { paint-order: stroke; stroke: var(--surface); stroke-width: 4px; stro
 .g-axis { stroke: var(--axis); stroke-width: 1; }
 .g-cross { stroke: var(--muted); stroke-width: 1; }
 .line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.line.dash { stroke-dasharray: 1 5; }
 .s-compache { stroke: var(--compache); } .s-baseline { stroke: var(--baseline); } .s-2 { stroke: var(--series-2); } .s-3 { stroke: var(--series-3); } .s-ink { stroke: var(--ink-2); }
 .f-compache { fill: var(--compache); } .f-compache-soft { fill: var(--compache-soft); } .f-baseline { fill: var(--baseline); } .f-2 { fill: var(--series-2); } .f-3 { fill: var(--series-3); }
 .f-neutral { fill: var(--neutral); } .f-neutral-strong { fill: var(--ink-2); }
