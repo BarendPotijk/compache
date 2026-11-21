@@ -1,14 +1,20 @@
 """Choose the cut and the ping count by replayed cost on the caller's own threads."""
 
 from compache.errors import ContractError
+from compache.labels import label_index
 
 from .contracts import digest, number, seconds
-from .distribution import fit_distribution, validate_calls_per_run
+from .distribution import fit_distribution, measure_cache_reads, validate_calls_per_run
+from .replay import _run_arm
 from .retention import evidence_windows, fit_recipes, recipe_grid, size_ladder
 from .session import WorkloadPolicy
-from .replay import _run_arm
 
 __all__ = ["solve_workload"]
+
+
+def _rank_coverage(row):
+    # An assessed, history-independent cut has no historical denominator.
+    return 1.0 if row["coverage"] is None else row["coverage"]
 
 
 def _frontier(rows, limit):
@@ -20,17 +26,17 @@ def _frontier(rows, limit):
             # Replayed cost decides whether a cut pays, so the token estimate of
             # its recovery does not rule one out here.
             if r["individual_eligible"]
-            and r["changed_historical_required"]
+            and (r["changed_historical_required"] or r["assessed_independent_cut"])
             and r["projected_tokens"] < r["canonical_tokens"]
         ),
-        key=lambda r: (r["projected_tokens"], -r["coverage"]),
+        key=lambda r: (r["projected_tokens"], -_rank_coverage(r)),
     )
     kept, best = [], None
     for row in usable:
         # A dearer cut earns a place only by keeping at least a point more.
-        if best is None or row["coverage"] >= best + 0.01:
+        if best is None or _rank_coverage(row) >= best + 0.01:
             kept.append(row)
-            best = row["coverage"]
+            best = _rank_coverage(row)
     if len(kept) > limit:
         # Keep both ends and spread the rest evenly between them.
         step = (len(kept) - 1) / (limit - 1)
@@ -48,7 +54,7 @@ def solve_workload(
     default_tools,
     retention_threads=None,
     retention_floor=0.95,
-    tradeoff_floor=0.8,
+    tradeoff_floor=None,
     unknowns="excluded",
     ping_counts=(0, 1, 3),
     folds=3,
@@ -61,6 +67,7 @@ def solve_workload(
     tokenize=None,
     count_tokens=None,
     calls_per_run=None,
+    next_endpoint_reuse_fraction=None,
     salt="compache-solve-v1",
     **planner_options,
 ):
@@ -164,6 +171,19 @@ def solve_workload(
     candidates = [(None, n) for n in ping_counts] + [
         (row, n) for row in cuts for n in ping_counts
     ]
+    demand = fit_distribution(
+        threads,
+        spec,
+        observation_end=observation_end,
+        horizon_seconds=horizon_seconds,
+        calls_per_run=counted(threads),
+        next_endpoint_reuse_fraction=next_endpoint_reuse_fraction,
+    )
+    overlap = next_endpoint_reuse_fraction or {}
+    full_cache_reads = measure_cache_reads(threads, spec, overlap)
+    indexed = label_index(threads, labels) if retention_threads is None else {}
+    recovery_totals = [0.0] * len(candidates)
+    labelled_counts = [0] * len(candidates)
     cost = [0.0] * len(candidates)
     complete = [True] * len(candidates)
     turns = 0
@@ -172,20 +192,28 @@ def solve_workload(
         outside = [t for t in threads if fold_of[t.thread_id] != fold]
         if not outside:
             raise ContractError("every fold needs threads outside it; use fewer folds")
-        demand = fit_distribution(
+        fold_demand = fit_distribution(
             outside,
             spec,
             observation_end=observation_end,
             horizon_seconds=horizon_seconds,
             calls_per_run=counted(outside),
+            next_endpoint_reuse_fraction={
+                r.run_id: overlap[r.run_id]
+                for t in outside
+                for r in t.runs[:-1]
+                if r.run_id in overlap
+            },
         )
         turns += sum(len(t.runs) for t in inside)
+        read_estimate = measure_cache_reads(outside, spec, overlap)
         for i, (row, pings) in enumerate(candidates):
             policy = WorkloadPolicy(
                 {
                     "schema_version": "compache-workload-planner-v1",
                     "model_spec": spec.to_dict(),
-                    "demand": demand,
+                    "demand": fold_demand,
+                    "cache_reads": read_estimate,
                     "recipes": [{"recipe": row["recipe"], "eligible": True}]
                     if row
                     else [],
@@ -197,21 +225,36 @@ def solve_workload(
                 **planner_options,
             )
             # With no cut and no ping the planner has nothing to decide.
-            arm = _run_arm(inside, {}, policy, candidate=bool(row or pings), **replay)
+            arm = _run_arm(
+                inside, indexed, policy, candidate=bool(row or pings), **replay
+            )
+            for entry in arm["ledger"]:
+                if entry["role"] == "answer" and entry["labeled"]:
+                    labelled_counts[i] += 1
+                    recovery_totals[i] += entry["projected_recovery_cost"]
             cost[i] += arm["totals"]["cost_input_equivalents"]
             complete[i] = complete[i] and arm["complete"]
 
+    keep_coverage = 1.0 if rows and rows[0]["historical_required"] else None
     report = []
     for i, (row, pings) in enumerate(candidates):
         recovery = 0.0
-        if row:
+        if labelled_counts[i]:
+            recovery = recovery_totals[i] * turns / labelled_counts[i]
+        elif row and retention_threads is not None:
+            # Separately graded questions may be absent from the replay trajectories.
             labeled = row["turns"] - row["unlabeled_runs"]
             lost = row["historical_required"] - row["historical_retained"]
+            share = full_cache_reads["share"]
+            share = 1.0 if share is None else share
+            view_rate = spec.read_multiplier * share + spec.write_multiplier * (
+                1 - share
+            )
             recovery = (
                 turns
                 / labeled
                 * (
-                    spec.read_multiplier * row["recovery_view_tokens"]
+                    view_rate * row["recovery_view_tokens"]
                     + spec.write_multiplier * row["recovery_restored_tokens"]
                     + spec.output_multiplier * spec.expansion_output_tokens * lost
                 )
@@ -220,8 +263,10 @@ def solve_workload(
             {
                 "recipe": row["recipe"] if row else None,
                 "max_pings": pings,
-                "coverage": row["coverage"] if row else 1.0,
-                "min_thread_coverage": row["min_thread_coverage"] if row else 1.0,
+                "coverage": row["coverage"] if row else keep_coverage,
+                "min_thread_coverage": row["min_thread_coverage"]
+                if row
+                else keep_coverage,
                 "replayed_cost": cost[i],
                 "recovery_cost": recovery,
                 "expected_cost": cost[i] + recovery,
@@ -234,7 +279,7 @@ def solve_workload(
             "no candidate policy fits the context window on these threads"
         )
     chosen = min(
-        usable, key=lambda r: (r["expected_cost"], -r["coverage"], r["max_pings"])
+        usable, key=lambda r: (r["expected_cost"], -_rank_coverage(r), r["max_pings"])
     )
     keep = report[ping_counts.index(0)] if 0 in ping_counts else None
     priced = {id(row) for row in cuts}
@@ -247,7 +292,10 @@ def solve_workload(
                 "not_cheapest_by_replayed_cost"
                 if id(row) in priced
                 else "off_the_retention_frontier"
-                if row["changed_historical_required"]
+                if (
+                    row["changed_historical_required"]
+                    or row["assessed_independent_cut"]
+                )
                 and row["projected_tokens"] < row["canonical_tokens"]
                 else row["admission"]
                 if row["admission"]
@@ -257,14 +305,9 @@ def solve_workload(
     return {
         "schema_version": "compache-workload-planner-v1",
         "header_traffic": None,
+        "cache_reads": full_cache_reads,
         "model_spec": spec.to_dict(),
-        "demand": fit_distribution(
-            threads,
-            spec,
-            observation_end=observation_end,
-            horizon_seconds=horizon_seconds,
-            calls_per_run=counted(threads),
-        ),
+        "demand": demand,
         "recipes": rows,
         "retention_floor": retention_floor,
         "recipe_selection": {

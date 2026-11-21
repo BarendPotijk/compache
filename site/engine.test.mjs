@@ -392,12 +392,12 @@ const held=[{id:'system',kind:'system',turn:-1,tokens:2048},{id:'i0',kind:'input
 const answersOf=r=>r.ledger.filter(x=>x.role==='answer');
 test('the published Sonnet result is pinned, and the settings that are off by default change nothing',()=>{
   const r=simulate(applyPreset({},'sonnet')), per1000=arm=>(1000*arm.totals.cost/r.workload.totalRuns).toFixed(4);
-  assert.equal(per1000(r.compache),'86.3986');assert.equal(per1000(r.openclaw),'207.7703');
+  assert.equal(DEFAULTS.retentionRequirement,.95);assert.equal(per1000(r.compache),'96.7726');assert.equal(per1000(r.openclaw),'207.7703');
   // The archive notice is the one setting that is on: without it Compache costs what it did before the notice was priced.
   const bare=simulate(applyPreset({archivedTokens:0},'sonnet'));
-  assert.equal((1000*bare.compache.totals.cost/bare.workload.totalRuns).toFixed(4),'86.2176');
-  assert.equal(r.workload.totalRuns,877);assert.equal(r.compache.pings,26);
-  assert.deepEqual(r.optimization.selected,{target:.01,warmTrigger:.05,retrievalRetentionRuns:0});
+  assert.equal((1000*bare.compache.totals.cost/bare.workload.totalRuns).toFixed(4),'96.6828');
+  assert.equal(r.workload.totalRuns,877);assert.equal(r.compache.pings,1363);
+  assert.deepEqual(r.optimization.selected,{target:.05,warmTrigger:.25,retrievalRetentionRuns:0});
   assert.equal(r.compache.byRole.further,undefined);assert.equal(r.compache.cacheBreakdown.missed,0);
   // A setting whose effect is switched off draws nothing: the threads are the same, number for number.
   const idle={continueFirst:.2,continueLong:.3,continueHalfTurn:9,gapHalfTurn:9,breakMedianMinutes:5000};

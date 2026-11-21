@@ -16,11 +16,12 @@ from pathlib import Path
 from statistics import NormalDist, fmean
 from urllib.parse import urlencode
 
+from .errors import ContractError
 from .labels import normalize_label
 from .models import model_spec, pricing
 from .optimizer.contracts import seconds
+from .optimizer.distribution import measure_cache_reads
 from .optimizer.parts import Source, placeholder
-from .errors import ContractError
 from .threads import load_threads, read_jsonl, recorded
 
 __all__ = ["CALCULATOR_URL", "history_resent", "profile"]
@@ -344,18 +345,19 @@ def _shared_prompt_share(threads, lifetime_seconds):
 
 def measure(threads, spec, labels=()) -> dict:
     """Sizes, lengths, return delays, calls and labelled dependencies of a set of threads."""
+    threads = list(threads)
     by_thread = {}
     for row in labels:
         by_thread.setdefault(row.get("thread_id"), []).append(row)
     tokens = {kind: [] for kind in _KINDS}
     lengths, delays, durations, calls, reasoning = [], [], [], [], []
-    pieces, reads = [], []
+    pieces = []
     retrieving = runs = 0
     lags = {kind: [] for kind in _KINDS}
     labelled = known = needing = 0
     for thread in threads:
         lengths.append(len(thread.runs))
-        previous = earlier = None
+        previous = None
         for run in thread.runs:
             runs += 1
             tokens["input"].append(spec.part_tokens(run.input.text))
@@ -376,16 +378,7 @@ def measure(threads, spec, labels=()) -> dict:
             durations.append(end - start)
             if previous is not None:
                 delays.append((run.run_index - 1, max(0.0, start - previous) / 60))
-                sent, before = earlier
-                # The last turn's request is still cached: how much of it was read?
-                if (
-                    usage
-                    and before
-                    and before["input"] >= spec.cache_min_tokens
-                    and start - sent < spec.cache_ttl_seconds
-                ):
-                    reads.append(min(1.0, usage["cache_read"] / before["input"]))
-            previous, earlier = end, (start, usage)
+            previous = end
         origin = thread.part_origin
         index = {run.run_id: run.run_index for run in thread.runs}
         for row in by_thread.get(thread.thread_id, ()):
@@ -426,12 +419,7 @@ def measure(threads, spec, labels=()) -> dict:
         "reasoning_tokens": _quantile(reasoning, 0.5) if reasoning else None,
         "calls_per_turn": fmean(calls) if calls else None,
         "answer_seconds": _quantile(durations, 0.5),
-        # Of a request still in the cache, the share the next turn read, where usage says.
-        # Only for an app that resends its history: otherwise the layout decides, not the cache.
-        # A record that never reports a cache read says nothing about it either.
-        "cache_read_when_live": fmean(reads)
-        if len(reads) >= 5 and any(reads) and (resent is None or resent >= _RESENT)
-        else None,
+        "cache_read_when_live": measure_cache_reads(threads, spec)["share"],
         "history_resent": resent,
         # What archiving one turn's retrieved text leaves behind: a notice per part.
         "archive_notice_tokens": round(_notice_tokens(spec) * fmean(pieces))
@@ -499,7 +487,7 @@ def profile(
         "plannedTurns": min(_MAX_TURNS, lengths["median"]),
         "plannedTurnsP95": min(_MAX_TURNS_P95, lengths["p95"]),
         "continuationProbability": 1,
-        "retentionRequirement": 0.8,
+        "retentionRequirement": 0.95,
         "pingOutputTokens": spec.ping_output_tokens,
         "recoveryOutputTokens": spec.expansion_output_tokens,
     }

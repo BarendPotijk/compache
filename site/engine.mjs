@@ -30,7 +30,7 @@ export const DEFAULTS = Object.freeze({
   // cached block, and the share of a live entry that the next request actually reads.
   ttlMinutes: 30, cacheMinTokens: 1024, cacheBlockTokens: 1, cacheHitShare: 1,
   // Compache: the floor, the fitted policy (chosen by simulate) and its fixed costs.
-  retentionRequirement: 0.8, target: 0.20, warmTrigger: 0.5, retrievalRetentionRuns: 0,
+  retentionRequirement: 0.95, target: 0.20, warmTrigger: 0.5, retrievalRetentionRuns: 0,
   keepWarm: true, maxPings: 12, pingLeadMinutes: 0.75, pingOutputTokens: 16, recoveryOutputTokens: 32, safetyReserve: 32000,
   // Tokens of the notice left in place of one turn's archived retrieved text: what the package leaves for one part.
   archivedTokens: 22,

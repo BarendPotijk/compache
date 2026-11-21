@@ -19,15 +19,16 @@ A cut is three windows: how many turns of questions, of answers and of retrieved
 
 - Windows follow 1, 2, 5, 10 and so on, plus the look-backs that cover 80% to 100% of the labelled needs of each kind.
 - Every cut is scored without a replay: an applied cut archives a part once it leaves its window, so how much of what turns needed is still in view follows from how far back that evidence lies.
-- The cuts worth pricing are those on the frontier: each keeps at least one point more in view than every smaller one, down to 80%. Up to six of them, plus keeping everything, are each paired with 0, 1 and 3 pings.
+- Fully labelled turns that explicitly need only current evidence can support a cut even when there are zero historical requirements. An unknown or missing label on a changed turn disqualifies this case.
+- The cuts worth pricing are those on the frontier: each keeps at least one point more in view than every smaller one, down to the requested retention floor (95% by default). Up to six of them, plus keeping everything, are each paired with 0, 1 and 3 pings.
 
 ## The price of a candidate
 
 Token counts cannot rank policies, because what a cut or a ping is worth depends on how often the cache is still warm when the user returns.
 
 - Each candidate runs through the runtime session against the provider's cache rules: lifetime, smallest cacheable prefix, write and read prices and any long-request surcharge. Requests and pings fall at the threads' own timestamps.
-- A thread is priced with a model of returns fitted on the other threads, in three folds.
-- A cut pays for what it loses. Every labelled need that is no longer in view costs one more request, which reads the cached view, writes the reopened parts and emits a tool call. That rate carries from the labelled turns to all turns.
+- Returns and cache-read realization are fitted on the other threads in each fold. For timed, metered returns inside the cache lifetime, divide cached tokens by the preceding cacheable prefix and average the shares, capped at one. Both requests must carry at least 80% of the estimated conversation. The optional `next_endpoint_reuse_fraction` sidecar excludes known prefix edits from this estimate and models their overlap separately. Explicit zero reads count. When no suitable pair exists, pricing assumes full prefix reuse. Both replay arms use the frozen estimate.
+- A cut pays for what it loses. Each labelled requirement missing from the sent view is priced as one projected recovery request, which reads the cached view, writes the reopened parts and emits a tool call. That rate carries from the labelled turns to all turns.
 - The cheapest candidate wins. Ties go to more in view, then to fewer pings.
 
 The winner is the cheapest policy the fit priced on your threads, and keeping everything with and without pings is always among those. `compache replay` prices it on threads it has not seen.

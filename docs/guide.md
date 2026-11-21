@@ -119,15 +119,17 @@ compache fit threads.jsonl --labels labels.jsonl --model claude-sonnet-5-5 -o po
 ```text
 Fitted on 4 threads, 71 turns (71 labelled) for claude-sonnet-5-5.
 
-Keep questions from the last 4 turns, answers from the last 9 turns and retrieved text from the last turn.
-Send up to 1 keep-warm ping while a user is away.
-82% of the labelled turns that need earlier context still have it in view. The rest fetch it back, and that call is in the cost.
-$16.08 per 1,000 turns against $50.25 keeping everything: 68% less.
+Keep all questions, all answers and retrieved text from the last 3 turns.
+Parts of at most 422 tokens always stay.
+Send up to 3 keep-warm pings while a user is away.
+95% of labelled historical requirements retain their evidence in view.
+$27.22 per 1,000 turns against $50.25 keeping everything: 46% less.
 ```
 
 | Option | Use |
 |---|---|
 | `--model` | A model with a built-in price sheet (`compache models` lists them), or a JSON file of model spec fields for any other. Fields left out take the defaults of `ModelSpec`. It can be left out when the threads record their model, as a file from `compache pull` does |
+| `--retention-floor` | Minimum share of assessed historical requirements whose evidence a candidate must retain on the fit sample. Defaults to 0.95 |
 | `--system-prompt`, `--tools` | The text and tool definitions sent on every request, when the threads do not carry them |
 | `--observed-until` | When the record was cut, if conversations were still going and the threads do not say. By default every thread is taken to be over |
 | `--json` | Print the summary as JSON |
@@ -140,7 +142,7 @@ In Python, `compache.fit` returns a `Policy`: `policy.describe()` is the text ab
 compache replay heldout.jsonl --labels heldout-labels.jsonl --policy policy.json
 ```
 
-It prices the policy and keeping everything on the same arrivals, including every ping. With labels it also reports how much of what those threads needed stays in view and adds the cost of fetching the rest back. A fit sits near its floor by construction, so this is the number to trust.
+It prices the policy and keeping everything on the same arrivals, including every ping. With labels it also reports how much of what those threads needed stays in view and adds the cost of fetching the rest back. The JSON report gives retention by thread and counts unknown requirements separately. Each cost per 1,000 turns uses that policy’s completed answers. If either policy exhausts its context window, the report gives savings only for the turns both policies completed.
 
 ## 5. Apply
 

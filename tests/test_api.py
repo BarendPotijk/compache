@@ -164,6 +164,89 @@ class FitTests(unittest.TestCase):
 
 
 class ReplayTests(unittest.TestCase):
+    def test_overflow_uses_each_arms_completed_turns_and_matched_costs(self):
+        sample = threads()
+        policy = compache.fit(
+            sample, [r for t in sample for r in labels_for(t)], model=SPEC
+        )
+        held = thread(tid="held", n=32, gap=3600, body_size=2500)
+        # Narrow the deployment window so the baseline fills it during the replay.
+        from dataclasses import replace
+
+        policy.artifact["model_spec"] = replace(SPEC, context_tokens=12_000).to_dict()
+        report = compache.replay(policy, [held], labels_for(held, need_old=True))
+        self.assertEqual(report["planned_turns"], 32)
+        self.assertEqual(report["turns"], report["policy_turns"])
+        self.assertEqual(report["policy_turns"], 32)
+        self.assertLess(report["baseline_turns"], 32)
+        self.assertIsNone(report["saving"])
+        self.assertAlmostEqual(
+            report["cost_per_1000_turns"]["policy"], report["policy_cost"] * 1000 / 32
+        )
+        matched = report["common_prefix"]
+        self.assertEqual(matched["turns"], report["baseline_turns"])
+        answers = [
+            r for r in report["detail"]["candidate"]["ledger"] if r["role"] == "answer"
+        ]
+        self.assertGreater(report["recovery_cost"], 0)
+        self.assertEqual(
+            report["recovery_cost"], sum(r["projected_recovery_cost"] for r in answers)
+        )
+        self.assertEqual(
+            report["coverage"], sum(r["historical_retained"] for r in answers) / 31
+        )
+        self.assertEqual(report["coverage_by_thread"]["held"]["required"], 31)
+        paired = [
+            r
+            for r in report["detail"]["candidate"]["ledger"]
+            if r["run_index"] <= matched["turns"]
+        ]
+        self.assertAlmostEqual(
+            matched["cost_per_1000_turns"]["policy"],
+            sum(
+                r["cost_input_equivalents"] + r.get("projected_recovery_cost", 0)
+                for r in paired
+            )
+            * 1000
+            / matched["turns"],
+        )
+        too_large = thread(tid="oversized", n=1, body_size=50000)
+        empty = compache.replay(policy, [too_large])
+        self.assertEqual(empty["common_prefix"]["turns"], 0)
+        self.assertIsNone(empty["cost_per_1000_turns"]["policy"])
+
+    def test_deferred_cuts_keep_sources_that_an_every_turn_cut_would_lose(self):
+        train = threads(gap=400)
+        policy = compache.fit(
+            train, [r for t in train for r in labels_for(t)], model=SPEC
+        )
+        self.assertEqual(policy.recipe.retrieval_runs, 0)
+        held = thread(tid="held", n=6, gap=40)
+        rows = labels_for(held)
+        for label, earlier in zip(rows[1:], held.runs):
+            source = earlier.retrievals[0]
+            req = label["task_requirements"][0]
+            req["historical_context_needed"] = "yes"
+            req["alternatives"] = [
+                {"sources": [{"part_id": source.part_id, "quote": source.text}]}
+            ]
+        report = compache.replay(policy, [held], rows)
+        answers = [
+            r for r in report["detail"]["candidate"]["ledger"] if r["role"] == "answer"
+        ]
+        self.assertGreater(report["coverage"], 0)
+        self.assertLess(report["coverage"], 1)
+        self.assertTrue(
+            all(
+                r["projected_recovery_cost"] == 0
+                for r in answers
+                if r["historical_retained"]
+            )
+        )
+        self.assertAlmostEqual(
+            report["recovery_cost"], sum(r["projected_recovery_cost"] for r in answers)
+        )
+
     def test_replay_prices_unseen_threads(self):
         policy = fitted()
         held = [Thread.from_dict(thread(tid="held", n=6, gap=400).to_dict())]
