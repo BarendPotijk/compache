@@ -61,6 +61,7 @@ _GENERATION_FIELDS = {
     "model",
     "usage",
     "request_part_ids",
+    "cache_read_reported",
 }
 _USAGE_FIELDS = {"input", "output", "cache_read", "cache_write"}
 _RETRIEVAL_FIELDS = {"document_id", "version", "chunk_id", "exposed_to_model"}
@@ -138,6 +139,7 @@ class Generation:
     ended_at: str
     usage: tuple[tuple[str, int], ...] | None
     request_part_ids: tuple[str, ...]
+    cache_read_reported: bool = True
 
 
 @dataclass(frozen=True)
@@ -200,6 +202,7 @@ class Thread:
                 g["ended_at"],
                 tuple(sorted(usage.items())) if usage is not None else None,
                 tuple(g["request_part_ids"]),
+                g.get("cache_read_reported", True),
             )
             runs.append(
                 Run(
@@ -289,6 +292,8 @@ class Thread:
             g = run.get("generation")
             if not isinstance(g, dict):
                 raise ContractError("exactly one generation object required")
+            if type(g.get("cache_read_reported", True)) is not bool:
+                raise ContractError("cache_read_reported must be boolean")
             if set(g) - _GENERATION_FIELDS:
                 raise ContractError("unknown generation fields")
             observation = _id(g.get("observation_id"), "observation_id")
@@ -353,6 +358,22 @@ def _iso(value: Any, name: str) -> str:
             )
         return value
     raise ContractError(f"{name}: expected an ISO timestamp or epoch seconds")
+
+
+def cache_read_reported(usage: Any) -> bool:
+    """Whether a receipt supplied a read meter, including an explicit zero."""
+    if not isinstance(usage, dict):
+        dump = getattr(usage, "model_dump", None)
+        usage = dump() if callable(dump) else None
+    if not isinstance(usage, dict):
+        return False
+    counts = [
+        v for k, v in usage.items() if "cache" in k and ("read" in k or "cached" in k)
+    ]
+    for key in ("input_tokens_details", "prompt_tokens_details"):
+        if isinstance(usage.get(key), dict):
+            counts.append(usage[key].get("cached_tokens"))
+    return any(type(n) is int and n >= 0 for n in counts)
 
 
 def canonical_usage(usage: Any) -> dict | None:
@@ -524,6 +545,11 @@ def _runs_from_messages(messages: Any) -> list[dict]:
                     # Every assistant message is one model call.
                     "calls": current["calls"],
                     **(
+                        {"generation": {"cache_read_reported": False}}
+                        if current["usages"] and not current["read_reported"]
+                        else {}
+                    ),
+                    **(
                         {"usage": _turn_usage(current["usages"])}
                         if current["usages"]
                         else {}
@@ -572,6 +598,10 @@ def _runs_from_messages(messages: Any) -> list[dict]:
                 current["answers"].append(text)
             if at is not None:
                 current["ended_at"] = at
+            if current["calls"] == 0:
+                current["read_reported"] = message.get(
+                    "cache_read_reported", cache_read_reported(message.get("usage"))
+                )
             current["calls"] += 1
             if message.get("usage") is not None:
                 current["usages"].append(message["usage"])
@@ -658,6 +688,8 @@ def normalize_thread(data: Any, *, model: str | None = None) -> dict:
         generation.setdefault("observation_id", f"{run_id}:generation")
         generation.setdefault("started_at", run["started_at"])
         generation.setdefault("ended_at", run["ended_at"])
+        if usage is not None and not cache_read_reported(usage):
+            generation.setdefault("cache_read_reported", False)
         generation.setdefault("usage", canonical_usage(usage))
         generation.setdefault("model", recorded or default_model or "unspecified")
         if model is not None:

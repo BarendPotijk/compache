@@ -1,21 +1,21 @@
 {
  "model": "Claude Sonnet 5.5",
- "requirement": 0.8,
+ "requirement": 0.95,
  "rows": [
   {
    "turns": 8,
    "openclaw": 207.7702927023945,
-   "compache": 86.39860809578101
+   "compache": 96.77262451539328
   },
   {
    "turns": 30,
    "openclaw": 259.5569516790387,
-   "compache": 100.45393534817974
+   "compache": 135.0804495227999
   },
   {
    "turns": 80,
    "openclaw": 278.0710735187433,
-   "compache": 111.11243767490089
+   "compache": 190.92032981516678
   }
  ]
 }

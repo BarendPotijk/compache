@@ -35,7 +35,7 @@ class QuickstartTests(unittest.TestCase):
             (summary["threads"], summary["turns"], summary["labelled_turns"]),
             (4, 71, 71),
         )
-        self.assertEqual(summary["keep"]["retrieved"], 1)
+        self.assertEqual(summary["keep"]["retrieved"], 3)
 
     def test_the_sample_is_a_chat_log_with_simple_labels(self):
         threads = compache.load_threads(SAMPLE / "threads.jsonl.gz")
@@ -57,7 +57,8 @@ class QuickstartTests(unittest.TestCase):
         rows = out.getvalue().splitlines()
         self.assertEqual(len(rows), 27)
         sent, full, archived = (int(x.replace(",", "")) for x in rows[-1].split()[1:4])
-        self.assertLess(sent, full / 3)
+        self.assertGreaterEqual(self.policy.summary["coverage"], 0.95)
+        self.assertLess(sent, full / 2)
         self.assertGreater(archived, 0)
 
 

@@ -378,6 +378,7 @@ _COUNTERS = (
     "turns",
     "historical_required",
     "historical_retained",
+    "changed_direct_required",
     "changed_historical_required",
     "changed_historical_retained",
     "direct_required",
@@ -648,6 +649,7 @@ def _measure_recipes(
                         for sources in alternatives
                     )
                     if not historical:
+                        report["changed_direct_required"] += changed
                         report["direct_required"] += 1
                         report["direct_retained"] += kept
                         continue
@@ -706,28 +708,35 @@ def _measure_recipes(
             if report["unknown_runs"]
             else 0.0
         )
+        independent = (
+            required == 0
+            and report["changed_direct_required"] > 0
+            and report["direct_retained"] == report["direct_required"]
+            and report["unknown_changed_runs"] == 0
+        )
         if all(
             v is None
             for v in (recipe.input_runs, recipe.output_runs, recipe.retrieval_runs)
         ):
             admission = "keeps_everything"
-        elif coverage is None:
+        elif coverage is None and not independent:
             admission = "no_assessed_requirements"
-        elif coverage < minimum:
+        elif coverage is not None and coverage < minimum:
             admission = "below_retention_floor"
-        elif measure < minimum:
+        elif measure is not None and measure < minimum:
             admission = "unknown_requirements_could_break_floor"
         elif (
             max_unknown_change_rate is not None
             and unknown_rate > max_unknown_change_rate
         ):
             admission = "above_unknown_change_cap"
-        elif measure < retention_floor:
+        elif measure is not None and measure < retention_floor:
             admission = "within_tradeoff"
         else:
             admission = "passes"
         labeled = report["turns"] - report["unlabeled_runs"]
         report.update(
+            assessed_independent_cut=independent,
             coverage=coverage,
             coverage_lower_bound=lower_bound,
             min_thread_coverage=worst,
@@ -749,6 +758,8 @@ def assess(label, full_ids):
     if label is None:
         return {
             "assessable": False,
+            "unknown_requirements": 0,
+            "assessed_requirements": 0,
             "missed_requirements": [],
             "restore_alternatives": [],
             "historical_requirements_assessed": 0,
@@ -760,9 +771,10 @@ def assess(label, full_ids):
     )
     missed = []
     alternatives = []
-    historical_total = historical_retained = 0
+    historical_total = historical_retained = unknown = 0
     for req in label["task_requirements"]:
         if req["historical_context_needed"] == "unknown" or not req["alternatives"]:
+            unknown += 1
             continue
         sets = [{s["part_id"] for s in a["sources"]} for a in req["alternatives"]]
         retained = any(s <= full_ids for s in sets)
@@ -774,6 +786,8 @@ def assess(label, full_ids):
             alternatives.append([s - full_ids for s in sets])
     return {
         "assessable": assessable,
+        "unknown_requirements": unknown,
+        "assessed_requirements": len(label["task_requirements"]) - unknown,
         "missed_requirements": missed,
         "restore_alternatives": alternatives,
         "historical_requirements_assessed": historical_total,
@@ -849,7 +863,10 @@ def fit_recipes(
         ]
 
         def shortfall(report):
-            if not report["changed_historical_required"]:
+            if not (
+                report["changed_historical_required"]
+                or report["assessed_independent_cut"]
+            ):
                 return "cut_met_no_assessed_requirement"
             if report[cost] >= report["canonical_tokens"]:
                 # A placeholder can outweigh the short message it replaces, and
