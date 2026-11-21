@@ -12,10 +12,13 @@ The command measures your threads and prints a link that opens the calculator wi
 
 | Measured from | Calculator input |
 |---|---|
-| Text of each turn | Question and answer tokens per turn, and retrieved tokens per turn with their 95th percentile |
-| Turns per thread | Thread length: median and 95th percentile |
-| Time between an answer and the next question | Return delay: median and 95th percentile |
-| System prompt and tools | Tokens sent on every request |
+| Text of each turn | Question and answer tokens per turn, the share of turns that retrieve anything, their retrieved tokens with the 95th percentile, and the notice that archiving a turn's retrieved parts leaves behind |
+| Turns per thread | Thread length: median and 95th percentile, or the chance of another turn after the first turn and in long threads and how fast it moves between them, whichever describes the threads better |
+| Time between an answer and the next question | Return delay: median and 95th percentile, how much longer the wait after the first turn is, and the share and length of long breaks |
+| Start and end of each turn | How long an answer takes. The cache lifetime runs from when the request was sent |
+| Assistant messages per turn | Model calls per turn |
+| Reported usage | Billed output that is not kept in the history, such as reasoning, and how much of a request still in the cache the next turn read |
+| System prompt and tools | Tokens sent on every request, and how often another thread had them cached at a cold start |
 | Labels | For questions, retrieved text and answers: the share of turns that need an earlier one, and how many turns back, median and 95th percentile |
 | `--model` | Prices and cache rules of a built-in model, or your own |
 
@@ -23,7 +26,7 @@ Without labels the calculator keeps its defaults for what later turns need, whic
 
 ## How close it is
 
-Opened on the three [DocChat](../benchmarks/docchat/README.md) profiles, the calculator puts the saving at 46%, 84% and 82% for users back after 30 seconds, 4 minutes and 30 minutes. The package's replay on DocChat's held-out threads gives 43%, 83% and 85%.
+Opened on the three [DocChat](../benchmarks/docchat/README.md) profiles, the calculator puts the saving at 45%, 83% and 81% for users back after 30 seconds, 4 minutes and 30 minutes. The package's replay on DocChat's held-out threads gives 43%, 83% and 85%.
 
 The calculator's compache side is a simplified policy, so treat its figure as an estimate and `compache fit` with `compache replay` as the number for your threads.
 

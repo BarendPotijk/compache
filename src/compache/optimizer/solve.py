@@ -60,6 +60,7 @@ def solve_workload(
     cache_key="",
     tokenize=None,
     count_tokens=None,
+    calls_per_run=None,
     salt="compache-solve-v1",
     **planner_options,
 ):
@@ -74,6 +75,10 @@ def solve_workload(
     without it. A cut also pays for what it loses: every lost requirement is
     one more request that reads the cached view, writes the reopened sources
     and emits a tool call, at the rate seen on labelled turns.
+
+    `calls_per_run` maps run IDs to the model calls that turn made. A call after
+    the first re-sends the turn's request and reads it from the cache, in the
+    fit of returns and in every candidate's replay alike.
 
     `threads` supply demand and cost. `retention_threads` supply the labelled
     runs when those differ, for example when graded questions are appended to a
@@ -136,10 +141,17 @@ def solve_workload(
         "provider": provider,
         "cache_key": cache_key,
         "calls_per_run": validate_calls_per_run(
-            None, {r.run_id for t in threads for r in t.runs}
+            calls_per_run, {r.run_id for t in threads for r in t.runs}
         ),
         "modeled_ping_output_tokens": spec.ping_output_tokens,
     }
+    counts = replay["calls_per_run"]
+
+    def counted(group):
+        """The call counts recorded for these threads' own runs."""
+        own = {r.run_id for t in group for r in t.runs}
+        return {run: n for run, n in counts.items() if run in own} or None
+
     fold_of = {
         t.thread_id: int(digest([salt, t.thread_id])[:8], 16) % folds for t in threads
     }
@@ -165,6 +177,7 @@ def solve_workload(
             spec,
             observation_end=observation_end,
             horizon_seconds=horizon_seconds,
+            calls_per_run=counted(outside),
         )
         turns += sum(len(t.runs) for t in inside)
         for i, (row, pings) in enumerate(candidates):
@@ -250,6 +263,7 @@ def solve_workload(
             spec,
             observation_end=observation_end,
             horizon_seconds=horizon_seconds,
+            calls_per_run=counted(threads),
         ),
         "recipes": rows,
         "retention_floor": retention_floor,

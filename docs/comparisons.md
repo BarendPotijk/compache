@@ -22,7 +22,7 @@ Defaults as documented at revision [`c49b553`](https://github.com/openclaw/openc
 
 | Models | 8-turn threads | 30-turn threads | 80-turn threads |
 |---|---|---|---|
-| Claude Fable 5.2, Opus 5.5, Sonnet 5.5 | 58% to 59% cheaper | 61% to 63% cheaper | 60% to 63% cheaper |
+| Claude Fable 5.2, Opus 5.5, Sonnet 5.5 | 58% cheaper | 61% to 63% cheaper | 60% to 63% cheaper |
 | Claude Haiku 5.5 | 90% cheaper | 91% cheaper | 88% cheaper |
 | GPT-6 Astra, GPT-5.6 Terra, GPT-6 Luna | 59% cheaper | 80% cheaper | 82% cheaper |
 

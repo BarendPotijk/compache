@@ -8,8 +8,9 @@ compache answers two questions from your recorded threads: what must stay in the
 
 | From | The fit learns |
 |---|---|
-| Timestamps | For each turn position: whether the user came back, after how long, and how long the answer took. A wait that the record cuts short is treated as unfinished, not as a user who left |
+| Timestamps | For each turn position: whether the user came back, after how long, and how long the answer took. A second turn and a twentieth are measured apart, so a thread that has come far can be more likely to go on, and sooner. A wait that the record cuts short is treated as unfinished, not as a user who left |
 | Text sizes | How much each turn adds: its question, its retrieved text, its answer |
+| Calls | How many model calls a turn made, when the record says. A call after the first reads the turn's request from the cache |
 | Labels | For each kind of part, how far back the evidence a turn needed lies |
 
 ## The candidates
@@ -44,7 +45,8 @@ A request that should have hit the cache and read nothing suspends pings for tha
 
 ## Assumptions
 
-- One answer call per user message, unless the engine is given call counts.
+- One model call per user message, unless the threads record more.
+- The cache lifetime counts from when a request is sent, so a long answer leaves less of it for the user's return.
 - A cache entry lives exactly the lifetime in the model spec.
 - Tokens are estimated at four bytes each unless the engine is given a tokenizer.
 - A need counts as in view only when a whole alternative is in the request before anything is fetched back.

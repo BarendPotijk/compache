@@ -30,9 +30,10 @@ node --test site/*.test.mjs</code></pre>
 <p>The package's <code>compache profile</code> command reads recorded threads and prints a link that opens this page with the workload filled in. It can write the same profile to a file for Import. The page then shows where the numbers came from.</p>
 <div class="table-scroll"><table>
 <tr><th>Filled in from traces</th><th>Settings</th></tr>
-<tr><td>Tokens per turn</td><td>Question, answer and retrieved tokens (median and 95th percentile), system prompt and tools</td></tr>
-<tr><td>Thread length</td><td>Median and 95th percentile of turns</td></tr>
-<tr><td>Return delay</td><td>Median and 95th percentile of the time between an answer and the next question</td></tr>
+<tr><td>Tokens per turn</td><td>Question, answer and retrieved tokens (median and 95th percentile), the share of turns that retrieve, reasoning tokens, system prompt and tools</td></tr>
+<tr><td>Thread length</td><td>Median and 95th percentile of turns, or the chance of another turn after the first turn and in long threads, whichever describes the threads better</td></tr>
+<tr><td>Return delay</td><td>Median and 95th percentile of the time between an answer and the next question, how much longer the first return takes, and the share and length of long breaks</td></tr>
+<tr><td>One turn</td><td>How long an answer takes, model calls per turn, and how often another thread had the system prompt cached</td></tr>
 <tr><td>What later turns need</td><td>Per kind of earlier text: the chance a turn needs it, and how many turns back it lies (median and 95th percentile)</td></tr>
 <tr><td>Model</td><td>A preset, or the model's own prices, context window and cache rules</td></tr>
 </table></div>
@@ -42,10 +43,15 @@ node --test site/*.test.mjs</code></pre>
 <ul>
 <li><strong>Two sets of threads.</strong> One seed draws the threads the policy is fitted on. The next seed draws the threads both sides are costed on. 100 threads each by default.</li>
 <li><strong>Thread length</strong> is lognormal (median and 95th percentile), fixed, or geometric (mean), capped at 160 turns. Before every further turn the thread continues with a set chance.</li>
-<li><strong>Each turn</strong> adds a question, retrieved text and an answer. Retrieved tokens are lognormal. Zero retrieved tokens means no retrieval at all. The system prompt and tools start every request.</li>
-<li><strong>Return delay</strong> is lognormal. A user who does not return is a thread that ended, not a long delay. A call takes no time.</li>
-<li><strong>What later turns need.</strong> For questions, retrieved text and answers separately, a turn needs one earlier item of that kind with a set chance. How far back it lies is lognormal with a median and a 95th percentile, rounded to a whole turn, at least one, and limited to the turns that exist. A 95th percentile equal to the median means exactly that many turns back.</li>
+<li><strong>By chance of another turn</strong> is a fourth way to set the length, for traffic with many one-turn threads and long threads that keep going. The chance moves from its value after the first turn to its value in long threads, and is halfway after a set number of turns.</li>
+<li><strong>Each turn</strong> adds a question, retrieved text and an answer. Retrieved tokens are lognormal. A set share of turns retrieves, and the others add a question and an answer only. Zero retrieved tokens means no retrieval at all. The system prompt and tools start every request.</li>
+<li><strong>Return delay</strong> is lognormal. Its median and 95th percentile describe long threads. After the first turn the delay is a set multiple of that, and it moves to the long-thread value as the thread goes on. A set share of returns are long breaks instead, whatever the turn: lognormal around their own median, with a 95th percentile four times that. A user who does not return is a thread that ended, not a long delay.</li>
+<li><strong>Answer time.</strong> The next question arrives one answer time plus the return delay after the request was sent.</li>
+<li><strong>What later turns need.</strong> For questions, retrieved text and answers separately, a turn needs one earlier item of that kind with a set chance. How far back it lies is lognormal with a median and a 95th percentile, rounded to a whole turn, at least one, and limited to the turns that exist. A 95th percentile equal to the median means exactly that many turns back. Retrieved text can only be needed from a turn that retrieved: the distances are weighted over those turns, and before any turn has retrieved there is no such need.</li>
 </ul>
+<p>After turn <em>n</em> of a thread, with <em>h</em> the turns to halfway of each effect:</p>
+<pre><code>chance of another turn = long - (long - first) × 0.5^((n - 1) / h)
+median return delay    = median × factor^(0.5^((n - 1) / h))</code></pre>
 <p>The defaults for what later turns need were measured on DocChat, where a model answered every turn again with parts of the history withheld:</p>
 <div class="table-scroll"><table>
 <tr><th>Earlier text</th><th class="num">Chance per turn</th><th class="num">Turns back, median</th><th class="num">95th percentile</th></tr>
@@ -62,7 +68,11 @@ cost  = fresh  × input_rate × cache_write × long_input  / 1,000,000
       + cached × cache_read_rate          × long_input  / 1,000,000
       + output × output_rate              × long_output / 1,000,000</code></pre>
 <ul>
-<li><strong>Cached</strong> is the longest start a request shares with an earlier request of the same thread that has not expired, in whole cache blocks and at least the model's minimum. An entry lives exactly the configured lifetime from the request that wrote or read it. Other threads share nothing.</li>
+<li><strong>Cached</strong> is the longest start a request shares with an earlier request of the same thread that has not expired, in whole cache blocks and at least the model's minimum. An entry lives exactly the configured lifetime from when the request that wrote or read it was sent.</li>
+<li><strong>A shared system prompt.</strong> A request that finds less of its own thread cached than the system block reads that block with a set chance: another conversation with the same prompt has cached it. The block must reach the cache minimum. The chance is 0 by default, and OpenClaw's flush and summary prompts are never shared.</li>
+<li><strong>A live entry</strong> is read for a set share, all of it by default. This and the shared prompt are priced at the expected tokens read. No outcome is drawn.</li>
+<li><strong>Further calls.</strong> A turn that makes more than one model call sends its request again for each further call, with no output: read from the cache where the request can be cached, at the plain input price otherwise. Both sides pay it.</li>
+<li><strong>Reasoning</strong> is billed as output with each answer and is not sent again.</li>
 <li>A request below the cache minimum pays the plain input price for its fresh tokens.</li>
 <li>The long-request rates apply to the whole request once its input exceeds the threshold. Zero turns them off.</li>
 <li>An answer enters the cache only when a later request carries it.</li>
@@ -81,7 +91,7 @@ cost  = fresh  × input_rate × cache_write × long_input  / 1,000,000
 <p>A cache write costs 1.25× the input price for every preset. Claude presets use a 1,000,000-token window. OpenAI presets use a 1,050,000-token window with at most 922,000 input tokens. Editing a price or a cache rule switches the model to custom prices. Prices exclude tax, regional premiums and batch discounts.</p>
 
 <h2>The Compache side</h2>
-<p>Questions and answers always stay in the request. Only old retrieved text is archived. A policy is three numbers:</p>
+<p>Questions and answers always stay in the request. Only old retrieved text is archived, and each turn's archived text leaves a notice in its place (22 tokens by default, what the package leaves for one part). A policy is three numbers:</p>
 <div class="table-scroll"><table>
 <tr><th>Number</th><th>Meaning</th><th>Candidates</th></tr>
 <tr><td>Compact to</td><td>At a cold return, a request more than two points above this share of the window is compacted down to it, oldest retrieved text first</td><td>1%, 3%, 5%, 10%, 20%, 45%</td></tr>
@@ -95,7 +105,10 @@ cost  = fresh  × input_rate × cache_write × long_input  / 1,000,000
 <li><strong>Fetching back.</strong> A turn that needs an archived source pays one extra call that reads the request and returns a short reply (32 tokens by default). The answer call then carries the source again.</li>
 <li><strong>Admission.</strong> A request must fit the model's input limit and leave the reserve free (32,000 tokens by default). A thread that does not fit is reported, and no saving is shown.</li>
 </ul>
-<p><strong>Keep-warm pings.</strong> After each answer the planner weighs, for one to twelve pings, the chance that the user returns in the extra time the pings buy times the cost a warm return avoids, against every ping sent while waiting. It uses the configured return delay and thread length, never the sampled future. Pings go out a set lead before the cache would expire and stop when the user returns. They are charged when the user never does. No ping is sent for a request that the next warm turn would compact anyway, nor for one too short to cache.</p>
+<p><strong>Keep-warm pings.</strong> After each answer the planner weighs, for one to twelve pings, the chance that the user returns in the extra time the pings buy times the cost a warm return avoids, against every ping sent while waiting. It uses the configured chance of another turn and return delay at that turn's position, never the sampled future. Pings go out a set lead before the cache would expire and stop when the user returns. They are charged when the user never does. No ping is sent for a request that the next warm turn would compact anyway, for one too short to cache, or when the answer is still running as the first ping falls due.</p>
+<p>With <em>F</em> the share of returning users back within a delay at that position, <em>d</em> the answer time and the interval one lifetime less the lead, both counted from when the request was sent:</p>
+<pre><code>back before ping n   = F(n × interval - d)
+bridged by n pings   = F(n × interval + lifetime - d) - F(lifetime - d)</code></pre>
 
 <h2>The OpenClaw baseline</h2>
 <p>The baseline follows OpenClaw's documented defaults at revision <a href="https://github.com/openclaw/openclaw/commit/c49b553b85b82bc700465d4607949574f892366c"><code>c49b553</code></a>, as far as token counts can price them. Every constant is a setting under <em>OpenClaw baseline</em>.</p>
@@ -113,21 +126,22 @@ cost  = fresh  × input_rate × cache_write × long_input  / 1,000,000
 
 <h2>Reading the page</h2>
 <ul>
-<li><strong>Cost per 1,000 turns</strong> is the cost of every answer, ping, fetch-back, summary and flush call on the costed threads, divided by their turns.</li>
+<li><strong>Cost per 1,000 turns</strong> is the cost of every answer, further call, ping, fetch-back, summary and flush call on the costed threads, divided by their turns.</li>
 <li><strong>Needed sources in view</strong> is, of everything turns needed, the share that was in the request before anything was fetched back.</li>
 <li><strong>Input read from cache</strong> counts the input tokens of answer calls only.</li>
 <li><strong>Tokens per turn</strong> averages the request size over the threads that reach each turn on both sides. The bars below it show how many that is.</li>
 <li><strong>Keep-warm pings</strong> shows the planner's amounts after one turn, per 1,000 waits. In the average view it averages the same plan over the threads that can be pinged at that turn.</li>
-<li><strong>Input tokens of answers</strong> splits answer input into what was read from the cache and why the rest was not: new this turn, the first turn of a thread, an expired entry, or a request that changed before that point.</li>
+<li><strong>Input tokens of answers</strong> splits answer input into what was read from the cache and why the rest was not: new this turn, the first turn of a thread, an expired entry, a request that changed before that point, or a live entry that was not read.</li>
 </ul>
 
 <h2>Limits</h2>
 <ul>
-<li>Token counts and list prices are assumptions. A cache entry is taken to live exactly its documented lifetime. Providers may keep it longer or evict it sooner.</li>
-<li>One answer call per turn, after retrieval. Tool loops and call duration are not modeled.</li>
+<li>Token counts and list prices are assumptions. A cache entry is taken to live exactly its configured lifetime. Providers may keep it longer or evict it sooner.</li>
+<li>A turn's further calls repeat its first request. Text that a tool loop adds between calls counts as arriving with the question. Answer time is one number for every turn.</li>
+<li>The chance of another turn and the return delay depend on a turn's position. What a turn retrieves and what it needs do not.</li>
 <li>Both sides know which earlier sources a turn needs. Real requests have to find that out.</li>
 <li>Needs are independent draws per kind. A real thread has structure this does not capture.</li>
-<li>The policy is the cheapest of a finite set of candidates, not the package's fitted policy. It removes whole retrieved blocks and does not price the placeholder left behind.</li>
+<li>The policy is the cheapest of a finite set of candidates, not the package's fitted policy. It removes whole retrieved blocks.</li>
 <li>Pings can raise the realized cost: the planner decides on expectations.</li>
 <li>OpenClaw's summary quality, retries, memory tools and its OpenAI compaction path are not modeled.</li>
 </ul>

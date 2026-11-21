@@ -15,10 +15,16 @@ export function contextSeries(result,threadId='average') {
 }
 
 export function survivalView(config) {
-  const c=configure(config),all=theoreticalSurvival(c);
+  const c=configure(config),all=theoreticalSurvival(c),oneTurn=1-(all[1]?.realized??0);
+  if(c.lengthDistribution==='continuation') {
+    // By chance of another turn, the median and the 95th percentile of the length are read off the curve.
+    const within=share=>{let turn=1;while(turn<c.maxTurns&&all[turn].realized>1-share)turn++;return turn;};
+    const max=Math.min(c.maxTurns,Math.max(3,Math.ceil(within(.95)*1.15)+1));
+    return {max,reference:within(.5),referenceLabel:'median',points:all.filter(p=>p.turn<=max),tail:all[max-1]?.realized??0,oneTurn};
+  }
   const length95=c.lengthDistribution==='fixed'?c.plannedTurns:c.lengthDistribution==='geometric'?(c.plannedTurns===1?1:Math.ceil(Math.log(.05)/Math.log(1-1/c.plannedTurns))):c.plannedTurnsP95;
   const max=Math.min(c.maxTurns,Math.max(3,Math.ceil(length95*1.15)+1));
-  return {max,reference:Math.min(c.maxTurns,c.plannedTurns),referenceLabel:c.lengthDistribution==='geometric'?'mean':c.lengthDistribution==='fixed'?'length':'median',points:all.filter(p=>p.turn<=max),tail:all[max-1]?.realized??0};
+  return {max,reference:Math.min(c.maxTurns,c.plannedTurns),referenceLabel:c.lengthDistribution==='geometric'?'mean':c.lengthDistribution==='fixed'?'length':'median',points:all.filter(p=>p.turn<=max),tail:all[max-1]?.realized??0,oneTurn};
 }
 
 // Averages of eligible per-prefix plans after the selected run, not a promise

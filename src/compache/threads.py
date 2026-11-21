@@ -9,6 +9,8 @@ and the answer. One JSON object per line, in any of three shapes:
 - the canonical form, in which every identity is spelled out.
 
 `normalize_thread` turns the first two into the third. `Thread` validates it.
+The first two may also say which `model` answered, which `tools` every request
+carried and until when the thread was observed. `recorded` reads those.
 """
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ from __future__ import annotations
 import copy
 import gzip
 import json
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import cached_property
@@ -31,6 +34,7 @@ __all__ = [
     "load_threads",
     "normalize_thread",
     "read_jsonl",
+    "recorded",
     "system_prompt_of",
     "write_threads",
 ]
@@ -48,6 +52,7 @@ _RUN_FIELDS = {
     "output",
     "retrievals",
     "generation",
+    "calls",
 }
 _GENERATION_FIELDS = {
     "observation_id",
@@ -146,6 +151,8 @@ class Run:
     output: Part
     retrievals: tuple[RetrievalPart, ...]
     generation: Generation
+    # Model calls the turn made, when the record says. None means not recorded.
+    calls: int | None = None
 
 
 def _typed_part(part: dict, retrieval: bool = False) -> Part:
@@ -205,6 +212,7 @@ class Thread:
                     _typed_part(r["output"]),
                     tuple(_typed_part(p, True) for p in r["retrievals"]),
                     generation,
+                    r.get("calls"),
                 )
             )
         self.runs = tuple(runs)
@@ -261,6 +269,9 @@ class Thread:
             last_end = end
             if run.get("history_policy") != "full_canonical":
                 raise ContractError("unsupported history_policy")
+            calls = run.get("calls")
+            if calls is not None and (type(calls) is not int or calls < 1):
+                raise ContractError("calls must be a positive integer")
             retrievals = run.get("retrievals")
             if not isinstance(retrievals, list):
                 raise ContractError("retrievals must be array")
@@ -420,6 +431,78 @@ def system_prompt_of(data: Any) -> str | None:
     return None
 
 
+def recorded(rows: Iterable[Any]) -> dict:
+    """What a set of thread rows says about itself, beyond the conversations.
+
+    The system prompt, the tool definitions and the model that most of them
+    carry, and the latest `observed_until`: when the record was read, for
+    threads that may still have been going. Each is None where no row says.
+    """
+    prompts, tools, models = Counter(), Counter(), Counter()
+    until = None
+    for row in rows:
+        if isinstance(row, Thread):
+            row = row.to_dict()
+        if not isinstance(row, dict):
+            continue
+        prompt = system_prompt_of(row)
+        if prompt:
+            prompts[prompt] += 1
+        if isinstance(row.get("tools"), list) and row["tools"]:
+            tools[json.dumps(row["tools"], ensure_ascii=False, sort_keys=True)] += 1
+        default = row.get("model")
+        for message in row.get("messages") or ():
+            if isinstance(message, dict) and message.get("role") == "assistant":
+                models[message.get("model") or default] += 1
+        for run in row.get("runs") or ():
+            if isinstance(run, dict):
+                generation = run.get("generation")
+                named = (
+                    generation.get("model") if isinstance(generation, dict) else None
+                )
+                models[run.get("model") or named or default] += 1
+        if row.get("observed_until"):
+            moment = _iso(row["observed_until"], "observed_until")
+            if until is None or _time(moment, "observed_until") > _time(
+                until, "observed_until"
+            ):
+                until = moment
+    models.pop(None, None)
+    models.pop("unspecified", None)
+
+    def most(counter):
+        return counter.most_common(1)[0][0] if counter else None
+
+    return {
+        "system_prompt": most(prompts),
+        "tools": json.loads(most(tools)) if tools else None,
+        "model": most(models),
+        "models": dict(models.most_common()),
+        "observed_until": until,
+    }
+
+
+def _turn_usage(usages: list) -> dict | None:
+    """One usage for a turn of several calls.
+
+    The input is the last call's, which holds the whole turn. The output is
+    all of it. The cache read is the first call's: what the turn found in the
+    cache when it arrived.
+    """
+    counted = [u for u in map(canonical_usage, usages) if u is not None]
+    if not counted:
+        return None
+    return {
+        "input": counted[-1]["input"],
+        "output": sum(u["output"] for u in counted),
+        "cache_read": counted[0]["cache_read"],
+        "cache_write": min(
+            counted[-1]["cache_write"],
+            counted[-1]["input"] - counted[0]["cache_read"],
+        ),
+    }
+
+
 def _runs_from_messages(messages: Any) -> list[dict]:
     """Group a chat log into runs: a user message, what was retrieved, the answer."""
     if not isinstance(messages, list):
@@ -438,7 +521,13 @@ def _runs_from_messages(messages: Any) -> list[dict]:
                     "input": "\n\n".join(current["questions"]),
                     "retrievals": current["retrievals"],
                     "output": "\n\n".join(current["answers"]),
-                    **({"usage": current["usage"]} if current["usage"] else {}),
+                    # Every assistant message is one model call.
+                    "calls": current["calls"],
+                    **(
+                        {"usage": _turn_usage(current["usages"])}
+                        if current["usages"]
+                        else {}
+                    ),
                     **({"model": current["model"]} if current["model"] else {}),
                 }
             )
@@ -472,7 +561,8 @@ def _runs_from_messages(messages: Any) -> list[dict]:
                     "questions": [],
                     "retrievals": waiting,
                     "answers": [],
-                    "usage": None,
+                    "usages": [],
+                    "calls": 0,
                     "model": None,
                 }
                 waiting = []
@@ -482,7 +572,9 @@ def _runs_from_messages(messages: Any) -> list[dict]:
                 current["answers"].append(text)
             if at is not None:
                 current["ended_at"] = at
-            current["usage"] = message.get("usage") or current["usage"]
+            current["calls"] += 1
+            if message.get("usage") is not None:
+                current["usages"].append(message["usage"])
             current["model"] = message.get("model") or current["model"]
         elif role not in ("user", "assistant") and role not in RETRIEVAL_ROLES:
             raise ContractError(f"message {number}: unknown role {role!r}")
@@ -529,6 +621,9 @@ def normalize_thread(data: Any, *, model: str | None = None) -> dict:
     data = dict(data)
     thread_id = _id(data.get("thread_id"), "thread_id")
     default_model = data.pop("model", None)
+    # What `recorded` reads: about the record, not part of the conversation.
+    data.pop("tools", None)
+    data.pop("observed_until", None)
     if "messages" in data:
         if "runs" in data:
             raise ContractError("a thread has either messages or runs")

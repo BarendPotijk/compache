@@ -1,4 +1,4 @@
-import {DEFAULTS, ageLaw, returnCdf} from './engine.mjs';
+import {DEFAULTS, ageLaw, returnCdf, warmReturnShare} from './engine.mjs';
 import {presets, applyPreset} from './models.mjs';
 import {contextSeries, survivalView, pingProfile} from './charts.mjs';
 import {EXPORT_SCHEMA, parseLink, parseFile, resolveScenario, shareHash} from './scenario.mjs';
@@ -7,7 +7,7 @@ const $ = id => document.getElementById(id), form = $('scenario'), tip = $('tip'
 const KINDS = [['input', 'Questions'], ['retrieval', 'Retrieved text'], ['output', 'Answers']];
 const PRICES_CHECKED = '2026-11-20', BASELINE_COMMIT = 'c49b553b85b82bc700465d4607949574f892366c';
 // Why the planner sends no ping after a turn, in the page's words.
-const WHY_NO_PING = {'disabled': 'keep-warm is off', 'no pings allowed': 'pings per wait is 0', 'ping interval is not positive': 'the ping lead is longer than the cache lifetime', 'prefix is below cache minimum': 'the request is too short to cache',
+const WHY_NO_PING = {'disabled': 'keep-warm is off', 'no pings allowed': 'pings per wait is 0', 'ping interval is not positive': 'the ping lead is longer than the cache lifetime', 'answer outlasts the ping interval': 'the answer is still running when the first ping is due', 'prefix is below cache minimum': 'the request is too short to cache',
   'prefix exceeds keep-warm ceiling': 'the next turn rewrites the request anyway', 'no modeled future return': 'no further turn is expected', 'no positive expected value': 'no ping pays for itself'};
 
 // Numbers as text.
@@ -60,10 +60,20 @@ function readForm() {
   return applyPreset(c, $('modelPreset').value);
 }
 function labels() {
-  const fields = form.elements, kind = fields.lengthDistribution.value, noRetrieval = Number(fields.tokenMedian.value) === 0;
+  const fields = form.elements, kind = fields.lengthDistribution.value, byChance = kind === 'continuation';
+  const noRetrieval = Number(fields.tokenMedian.value) === 0 || (fields.retrievalShare.value !== '' && Number(fields.retrievalShare.value) === 0);
+  // Thread length is set either by a law or by the chance of another turn. The inputs of the other are hidden and switched off.
+  $('lengthByLaw').hidden = byChance; $('lengthByChance').hidden = !byChance;
+  for (const name of ['plannedTurns', 'continuationProbability']) fields[name].disabled = byChance;
+  for (const name of ['continueFirst', 'continueLong', 'continueHalfTurn']) fields[name].disabled = !byChance;
   fields.plannedTurnsP95.disabled = kind !== 'lognormal';
   $('lengthLabel').firstChild.textContent = kind === 'geometric' ? 'Mean turns' : kind === 'fixed' ? 'Turns' : 'Median turns';
   for (const name of ['tokenP95', 'retrievalDependencyProbability', 'retrievalDependencyTurnsBack', 'retrievalDependencyTurnsBackP95']) fields[name].disabled = noRetrieval;
+  // An input that changes nothing until another is set is switched off: the share of turns that retrieve nothing,
+  // how fast the first return's delay fades when it is no different, and the length of breaks nobody takes.
+  fields.retrievalShare.disabled = Number(fields.tokenMedian.value) === 0;
+  fields.gapHalfTurn.disabled = Number(fields.gapFirstFactor.value) === 1;
+  fields.breakMedianMinutes.disabled = fields.breakShare.value !== '' && Number(fields.breakShare.value) === 0;
   $('retrievalCaption').hidden = !noRetrieval; $('retrievalCaption').textContent = noRetrieval ? 'No retrieved text, so no later turn can need any.' : '';
   syncSliders();
 }
@@ -124,23 +134,32 @@ function showTip(anchor, title, rows) {
 const hideTip = () => { tip.hidden = true; };
 
 // The small curves under the inputs: neutral ink, since they describe the workload and not either side.
-function miniLine(id, points, {label = '', xLabel = '', reference = null, referenceLabel = '', referenceLow = false} = {}) {
+function miniLine(id, points, {label = '', xLabel = '', reference = null, referenceLabel = '', referenceLow = false, second = null} = {}) {
   const W = 260, H = 70, L = 4, R = 4, T = 6, B = 16, xmax = Math.max(1e-9, ...points.map(p => p.x));
   const x = v => L + v / xmax * (W - L - R), y = v => H - B - v * (H - T - B);
-  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}"><line class="g-axis" x1="${L}" y1="${H - B}" x2="${W - R}" y2="${H - B}"/>`;
-  if (reference !== null && reference <= xmax) { const far = x(reference) > W * .6; svg += `<line class="g-axis" x1="${x(reference)}" y1="${T}" x2="${x(reference)}" y2="${H - B}"/><text x="${x(reference) + (far ? -4 : 4)}" y="${referenceLow ? H - B - 5 : T + 8}" text-anchor="${far ? 'end' : 'start'}">${esc(referenceLabel)}</text>`; }
-  svg += `<polyline class="line s-ink" points="${points.map(p => `${x(p.x).toFixed(1)},${y(p.y).toFixed(1)}`).join(' ')}"/><text x="${L}" y="${H - 3}">0</text><text x="${W - R}" y="${H - 3}" text-anchor="end">${esc(xLabel)}</text></svg>`;
+  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}"><line class="g-axis" x1="${L}" y1="${H - B}" x2="${W - R}" y2="${H - B}"/>`, mark = '';
+  // The reference is named where the curve is not: at the foot of its line when the curve is high there. It is drawn
+  // on top of the curves, with a rim that keeps it readable where one passes under it.
+  if (reference !== null && reference > 0 && reference <= xmax) {
+    const far = x(reference) > W * .6, low = referenceLow || points.reduce((near, p) => Math.abs(p.x - reference) < Math.abs(near.x - reference) ? p : near).y > .6;
+    svg += `<line class="g-axis" x1="${x(reference)}" y1="${T}" x2="${x(reference)}" y2="${H - B}"/>`;
+    mark = `<text class="halo" x="${x(reference) + (far ? -4 : 4)}" y="${low ? H - B - 5 : T + 8}" text-anchor="${far ? 'end' : 'start'}">${esc(referenceLabel)}</text>`;
+  }
+  const path = series => series.map(p => `${x(p.x).toFixed(1)},${y(p.y).toFixed(1)}`).join(' ');
+  // A second curve to compare with, dotted.
+  if (second) svg += `<polyline class="line s-ink dash" points="${path(second)}"/>`;
+  svg += `<polyline class="line s-ink" points="${path(points)}"/>${mark}<text x="${L}" y="${H - 3}">0</text><text x="${W - R}" y="${H - 3}" text-anchor="end">${esc(xLabel)}</text></svg>`;
   $(id).innerHTML = svg;
 }
 function renderMini(c) {
   // Request size over the first six turns if nothing were removed.
-  const W = 260, H = 70, step = c.tokenMedian + c.inputTokens + c.outputTokens, last = c.systemTokens + step * 6;
+  const W = 260, H = 70, step = c.tokenMedian * c.retrievalShare + c.inputTokens + c.outputTokens, last = c.systemTokens + step * 6;
   let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Request size over six turns with nothing removed, reaching ${compact(last)} tokens"><line class="g-axis" x1="4" y1="54" x2="256" y2="54"/>`;
   for (let i = 0; i < 6; i++) svg += `<path class="f-neutral" d="${bar(8 + i * 42, 24, 54, 54 - Math.max(2, (c.systemTokens + step * (i + 1)) / last * 46))}"/>`;
   $('growthMini').innerHTML = `${svg}<text x="4" y="67">turn 1</text><text x="256" y="67" text-anchor="end">turn 6 · ${compact(last)} tokens</text></svg>`;
 
   // Of everything later turns need, the share that lies within so many turns back.
-  const needs = KINDS.map(([kind]) => ({chance: kind === 'retrieval' && c.tokenMedian === 0 ? 0 : c[`${kind}DependencyProbability`], law: ageLaw(c[`${kind}DependencyTurnsBack`], c[`${kind}DependencyTurnsBackP95`], 1000), far: c[`${kind}DependencyTurnsBackP95`]})).filter(n => n.chance > 0);
+  const needs = KINDS.map(([kind]) => ({chance: kind === 'retrieval' && (c.tokenMedian === 0 || c.retrievalShare === 0) ? 0 : c[`${kind}DependencyProbability`], law: ageLaw(c[`${kind}DependencyTurnsBack`], c[`${kind}DependencyTurnsBackP95`], 1000), far: c[`${kind}DependencyTurnsBackP95`]})).filter(n => n.chance > 0);
   const weight = needs.reduce((sum, n) => sum + n.chance, 0), within = age => needs.reduce((sum, n) => sum + n.chance * n.law.cdf(age), 0) / weight;
   if (weight > 0) {
     const reach = Math.max(2, Math.ceil(Math.max(...needs.map(n => n.far)))); let half = 1; while (half < 1000 && within(half) < .5) half++;
@@ -148,13 +167,20 @@ function renderMini(c) {
     $('needsCaption').textContent = `${pct(1 - needs.reduce((none, n) => none * (1 - n.chance), 1))} of turns need something earlier · half of it within ${plural(half, 'turn')}`;
   } else { $('needsMini').innerHTML = ''; $('needsCaption').textContent = 'No turn needs anything earlier.'; }
 
+  // The median, mean or fixed length is marked, unless it lies at the left edge, where its name would sit on the curve.
   const v = survivalView(c);
-  miniLine('survivalMini', v.points.map(p => ({x: p.turn, y: p.realized})), {label: `Share of threads that reach each turn, through turn ${v.max}`, xLabel: `${v.max} turns`, reference: v.reference, referenceLabel: `${v.referenceLabel} ${num(v.reference)}`});
-  $('survivalCaption').textContent = `${pct(v.tail)} of threads reach turn ${v.max}`;
+  miniLine('survivalMini', v.points.map(p => ({x: p.turn, y: p.realized})), {label: `Share of threads that reach each turn, through turn ${v.max}`, xLabel: `${v.max} turns`, reference: v.reference >= 3 ? v.reference : null, referenceLabel: `${v.referenceLabel} ${num(v.reference)}`});
+  $('survivalCaption').textContent = c.lengthDistribution === 'continuation' ? `${pct(v.oneTurn)} of threads end after one turn · ${pct(v.tail)} reach turn ${v.max}` : `${pct(v.tail)} of threads reach turn ${v.max}`;
 
-  const reach = Math.max(30, c.ttlMinutes, c.gapP95Minutes);
-  miniLine('returnMini', Array.from({length: 101}, (_, i) => ({x: i * reach / 100, y: returnCdf(i * reach / 100, c)})), {label: 'Share of returning users back within so many minutes', xLabel: `${num(reach)} min`, reference: c.ttlMinutes, referenceLabel: 'cache expires', referenceLow: true});
-  $('returnCaption').textContent = `${pct(returnCdf(c.ttlMinutes, c))} back within the cache lifetime of ${num(c.ttlMinutes)} min`;
+  // The delay in a long thread, and beside it the delay after the first turn when that differs. The cache lifetime
+  // runs from when the request was sent, so the answer time comes off the wait it covers.
+  const reach = Math.max(30, c.ttlMinutes, c.gapP95Minutes), byPosition = c.gapFirstFactor !== 1;
+  const curve = turn => Array.from({length: 101}, (_, i) => ({x: i * reach / 100, y: returnCdf(i * reach / 100, c, turn)}));
+  miniLine('returnMini', curve(Infinity), {label: `Share of returning users back within so many minutes${byPosition ? ', in a long thread and after the first turn' : ''}`, xLabel: `${num(reach)} min`, reference: c.ttlMinutes - c.answerSeconds / 60, referenceLabel: 'cache expires', referenceLow: true, second: byPosition ? curve(1) : null});
+  const lifetime = `the cache lifetime of ${num(c.ttlMinutes)} min`, breaks = c.breakShare > 0 ? `${pct(c.breakShare)} after a long break` : '';
+  $('returnCaption').innerHTML = byPosition
+    ? `Back within ${lifetime}: <span class="keys"><span class="key line dash">${pct(warmReturnShare(c, 1))} after turn 1</span> <span class="key line ink">${pct(warmReturnShare(c))} in long threads</span>${breaks ? ` <span>${breaks}</span>` : ''}</span>`
+    : `${pct(warmReturnShare(c))} back within ${lifetime}${breaks ? ` · ${breaks}` : ''}`;
 }
 
 function contextChart() {
@@ -264,6 +290,7 @@ function renderPing() {
 function renderCache() {
   // Why answer input was, or was not, read from the cache. Each column sums to 100%.
   const rows = [['cached', 'Read from cache', 'Input that matched a live cache entry.'], ['newContext', 'New this turn', 'Text no request of the thread had carried before: the new question and what was retrieved for it.'], ['firstRequest', 'First turn of a thread', 'Nothing of the thread is cached yet.'], ['expiredPrefix', 'Cache expired', 'It would have matched, but the entry had expired when the user returned.'], ['changedPrefix', 'Request changed', 'Sent before, but no longer at the same place in the request: a rewrite moved or removed what came before it.']];
+  if (current.config.cacheHitShare < 1) rows.push(['missed', 'Live entry not read', 'A live entry matched, but the request did not read it.']);
   const share = (arm, key) => { const mix = arm.cacheBreakdown || {}, total = Object.values(mix).reduce((n, v) => n + v, 0); return total ? (mix[key] || 0) / total : null; };
   const cell = (cls, value) => `<td>${pct(value)}<i class="${cls}" style="--share:${(100 * (value || 0)).toFixed(2)}%"></i></td>`;
   $('cacheRows').innerHTML = rows.map(([key, label, title]) => `<tr><th title="${esc(title)}">${label}</th>${cell('compache', share(current.compache, key))}${cell('openclaw', share(current.openclaw, key))}</tr>`).join('');
@@ -293,12 +320,14 @@ function render(r) {
 
   const cells = (format, x, y) => `<td>${full ? format(x) : '—'}</td><td>${full ? format(y) : '—'}</td>`, group = title => `<tr class="group"><th colspan="3">${title}</th></tr>`;
   const line = (label, format, x, y, cls = '') => `<tr class="${cls}"><th>${label}</th>${cells(format, x, y)}</tr>`, millions = x => num(x / 1e6);
+  // A turn's model calls after its first, shown only when a turn makes more than one.
+  const further = (label, format, field) => c.callsPerTurn > 1 ? [line(label, format, per1000(role(a, 'further', field)), per1000(role(b, 'further', field)))] : [];
   $('ledgerRows').innerHTML = [group('Cost'),
-    line('Answers', dollars, per1000(role(a, 'answer')), per1000(role(b, 'answer'))), line('Keep-warm pings', dollars, per1000(role(a, 'ping')), per1000(role(b, 'ping'))),
+    line('Answers', dollars, per1000(role(a, 'answer')), per1000(role(b, 'answer'))), ...further('Further calls of a turn', dollars, 'cost'), line('Keep-warm pings', dollars, per1000(role(a, 'ping')), per1000(role(b, 'ping'))),
     line('Fetching sources back', dollars, per1000(role(a, 'recovery')), per1000(role(b, 'recovery'))), line('Summaries and flushes', dollars, per1000(role(a, 'summary') + role(a, 'flush')), per1000(role(b, 'summary') + role(b, 'flush'))),
     line('Total', dollars, per1000(a.totals.cost), per1000(b.totals.cost), 'total'),
     group('Calls'),
-    line('Answers', num, per1000(role(a, 'answer', 'calls')), per1000(role(b, 'answer', 'calls'))), line('Keep-warm pings', num, per1000(a.pings), per1000(b.pings)),
+    line('Answers', num, per1000(role(a, 'answer', 'calls')), per1000(role(b, 'answer', 'calls'))), ...further('Further calls of a turn', num, 'calls'), line('Keep-warm pings', num, per1000(a.pings), per1000(b.pings)),
     line('Fetch-backs', num, per1000(role(a, 'recovery', 'calls')), per1000(role(b, 'recovery', 'calls'))), line('Context rewrites', num, per1000(a.compactions), per1000(b.compactions + b.clearings)),
     group('Tokens'),
     line('Input, millions', millions, per1000(a.totals.inputTokens), per1000(b.totals.inputTokens)), line('read from cache, millions', millions, per1000(a.totals.cachedTokens), per1000(b.totals.cachedTokens)),

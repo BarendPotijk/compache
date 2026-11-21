@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import time
-from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -19,7 +18,7 @@ from .optimizer.replay import replay_workload
 from .optimizer.retention import RetentionRecipe, fit_recipes
 from .optimizer.session import WorkloadPolicy, WorkloadSession
 from .optimizer.solve import solve_workload
-from .threads import canonical_usage, load_threads, read_jsonl, system_prompt_of
+from .threads import canonical_usage, load_threads, read_jsonl, recorded
 
 __all__ = ["Policy", "Session", "Turn", "fit", "replay"]
 
@@ -34,13 +33,27 @@ def _rows(source) -> list:
     return list(source)
 
 
-def _threads(source, model_id):
-    """Threads priced as `model_id`, and the system prompt most of them start with."""
+def _threads(source, model=None):
+    """Threads priced as one model, its spec, and what the rows record about themselves.
+
+    Without `model` the threads are priced as the model most of them record.
+    """
     rows = _rows(source)
-    prompts = Counter(p for p in map(system_prompt_of, rows) if p)
-    return load_threads(rows, model=model_id), (
-        prompts.most_common(1)[0][0] if prompts else None
-    )
+    found = recorded(rows)
+    if model is None:
+        model = found["model"]
+        if model is None:
+            raise ContractError(
+                "the threads do not record which model answered: name it with --model or model="
+            )
+    spec = model_spec(model)
+    return load_threads(rows, model=spec.model_id), spec, found, model
+
+
+def _calls(threads):
+    """Model calls per turn where the record has them and any turn made more than one."""
+    counts = {run.run_id: run.calls for t in threads for run in t.runs if run.calls}
+    return counts if any(n > 1 for n in counts.values()) else None
 
 
 def _observed_until(threads, given):
@@ -75,17 +88,20 @@ def fit(
     threads,
     labels=None,
     *,
-    model,
+    model=None,
     system_prompt=None,
-    tools=(),
+    tools=None,
     observed_until=None,
     **options,
 ) -> Policy:
     """Fit what to keep in view and how many keep-warm pings to send.
 
     `threads` and `labels` are paths to JSONL files (or folders of them), or
-    lists of dicts. `model` names a known model or gives a model spec. Without
-    labels only the pings are fitted and the whole history stays in view.
+    lists of dicts. `model` names a known model or gives a model spec. Left
+    out, it is the model the threads record, as are the system prompt, the
+    tools and when the record was read. Without labels only the pings are
+    fitted and the whole history stays in view. Where the threads record
+    several model calls in a turn, those are priced.
 
     Every candidate is replayed against the provider's cache rules at the
     threads' own timestamps, each thread priced by a model of returns fitted on
@@ -93,19 +109,20 @@ def fit(
     `observed_until` is when the record was cut, for a record that ends while
     conversations were still going. `options` go to the solver.
     """
-    spec = model_spec(model)
-    threads, found = _threads(threads, spec.model_id)
+    threads, spec, found, model = _threads(threads, model)
     if system_prompt is None:
-        system_prompt = found or ""
-    tools = list(tools)
+        system_prompt = found["system_prompt"] or ""
+    tools = list(found["tools"] or ()) if tools is None else list(tools)
     artifact = solve_workload(
         threads,
         _rows(labels),
         spec,
-        observation_end=_observed_until(threads, observed_until),
+        observation_end=_observed_until(
+            threads, observed_until or found["observed_until"]
+        ),
         system_prompt=system_prompt,
         default_tools=tools,
-        **options,
+        **{"calls_per_run": _calls(threads), **options},
     )
     scored = artifact["recipes"]
     artifact["fitted"] = {
@@ -135,17 +152,19 @@ def replay(policy, threads, labels=None, *, observed_until=None, **options) -> d
     """
     if not isinstance(policy, Policy):
         policy = Policy(policy)
-    spec = policy.spec
-    threads, _ = _threads(threads, spec.model_id)
+    threads, spec, found, _ = _threads(threads, policy.spec)
     labels = _rows(labels)
     header = policy.artifact.get("header") or {}
     # Threads share a cached system prompt in the replay if they did in the fit.
     options.setdefault("share_headers", header.get("share_headers", True))
+    options.setdefault("calls_per_run", _calls(threads))
     detail = replay_workload(
         threads,
         labels,
         policy.artifact,
-        observation_end=_observed_until(threads, observed_until),
+        observation_end=_observed_until(
+            threads, observed_until or found["observed_until"]
+        ),
         system_prompt=header.get("system_prompt", ""),
         default_tools=header.get("default_tools", []),
         **options,

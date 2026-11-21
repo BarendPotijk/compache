@@ -69,6 +69,30 @@ test('a profile made from traces fills in the workload and keeps the preset pric
   const custom = resolveScenario(parseFile({...profile, calculator: {model: 'custom', scenario: own}}));
   assert.equal(custom.preset, 'custom'); assert.deepEqual(custom.config.model, own.model); assert.equal(custom.config.ttlMinutes, 60); assert.equal(custom.config.cacheBlockTokens, 64);
 });
+test('a profile carries what depends on the position in a thread, and a link without it behaves as before', () => {
+  // What `compache profile` writes when the threads show these effects.
+  const measured = {lengthDistribution: 'continuation', continueFirst: 0.42, continueLong: 0.96, continueHalfTurn: 5, plannedTurns: 2, plannedTurnsP95: 31, continuationProbability: 1,
+    retrievalShare: 0.83, reasoningTokens: 310, callsPerTurn: 2.4, answerSeconds: 11.5, gapMedianMinutes: 3.2, gapP95Minutes: 41, gapFirstFactor: 2.6, gapHalfTurn: 3,
+    breakShare: 0.07, breakMedianMinutes: 960.5, sharedPrefixWarm: 0.25};
+  const {config, legacy} = resolveScenario(parseLink(link(6, 'claude-sonnet-5-5', measured, '212 threads, 1,904 turns')));
+  assert.equal(legacy, false);
+  for (const [key, value] of Object.entries(measured)) assert.equal(config[key], value, key);
+  // It runs, and the share link gives the same scenario back.
+  const r = simulate({...config, threads: 8});
+  assert.ok(r.compache.complete && r.openclaw.complete && r.optimization.feasible);
+  assert.ok(r.compache.byRole.further.calls > 0 && r.openclaw.byRole.further.calls > 0);
+  assert.deepEqual(resolveScenario(parseLink(`#${shareHash(config, 'sonnet')}`)).config, config);
+  // The same through a profile file.
+  assert.deepEqual(resolveScenario(parseFile({schema_version: 'compache-profile-v1', calculator: {v: 6, model: 'sonnet', scenario: measured}})).config, config);
+  // A link made before these settings existed takes their defaults, which change nothing.
+  const before = resolveScenario(parseLink(link(6, 'sonnet', {tokenMedian: 3615, tokenP95: 4207}))).config;
+  for (const key of ['continueFirst', 'continueLong', 'continueHalfTurn', 'gapFirstFactor', 'gapHalfTurn', 'breakShare', 'breakMedianMinutes', 'answerSeconds', 'callsPerTurn', 'sharedPrefixWarm', 'retrievalShare', 'reasoningTokens', 'cacheHitShare', 'archivedTokens'])
+    assert.equal(before[key], DEFAULTS[key], key);
+  assert.equal(before.lengthDistribution, 'lognormal');
+  // A value out of range is refused by name.
+  assert.throws(() => resolveScenario({version: 6, model: 'sonnet', scenario: {callsPerTurn: 0}}), /callsPerTurn must be between 1 and 100/);
+  assert.throws(() => resolveScenario({version: 6, model: 'sonnet', scenario: {lengthDistribution: 'chance'}}), /lengthDistribution must be/);
+});
 test('an export of this page loads again, and an older export is migrated', () => {
   const config = configure(applyPreset({seed: 9}, 'opus'));
   const now = resolveScenario(parseFile({schemaVersion: EXPORT_SCHEMA, modelPreset: 'opus', source: 'my traces', config, workload: {}, compache: {}}));
