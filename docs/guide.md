@@ -1,0 +1,161 @@
+# Guide
+
+Record threads, fit a policy, apply it. Python 3.11 or later, no dependencies.
+
+```sh
+pip install git+https://github.com/BarendPotijk/compache
+```
+
+| Step | Command | Python |
+|---|---|---|
+| Check the data | `compache check threads.jsonl --labels labels.jsonl` | `compache.load_threads(path)` |
+| Fit | `compache fit threads.jsonl --labels labels.jsonl --model claude-sonnet-5-5` | `compache.fit(threads, labels, model=...)` |
+| Price on unseen threads | `compache replay heldout.jsonl --policy policy.json` | `compache.replay(policy, threads, labels)` |
+| Apply | | `policy.session(thread_id)` |
+| Open the calculator on your workload | `compache profile threads.jsonl --model claude-sonnet-5-5` | `compache.profile(threads, labels, model=...)` |
+
+## 1. Threads
+
+One JSON object per line, one conversation each. A file, a gzipped file or a folder of either. The simplest shape is the chat log you already store:
+
+```json
+{"thread_id": "t-17", "messages": [
+  {"role": "system", "content": "Answer from the handbook."},
+  {"role": "user", "content": "How many leave days do I get?", "at": "2026-11-02T09:14:03Z"},
+  {"role": "retrieval", "content": "Full-time staff accrue 25 days a year.", "id": "handbook#leave-3"},
+  {"role": "assistant", "content": "25 days a year.", "at": "2026-11-02T09:14:09Z"}
+]}
+```
+
+| Field | What it is for |
+|---|---|
+| `role` | `user`, `assistant` or `system`. Retrieved or tool text is `retrieval`, `tool`, `context`, `document` or `function`. A `tool_result` block inside a user message also counts as retrieved text |
+| `content` | Text, or a list of text blocks. Sizes are estimated from it at four bytes a token |
+| `at` | When the message was sent: ISO time or seconds since the epoch. Needed on every user message, used on assistant messages when present. `created_at`, `timestamp` and `time` are read too. A time without a zone is taken as UTC |
+| `id` | Optional name of a retrieved document |
+| `usage` | Optional, on an assistant message: the provider's usage as returned. Its output count replaces the estimate |
+
+A user message opens a turn. Everything retrieved and everything the assistant says before the next user message belongs to it. User messages sent before any answer merge into one question, and a last message that was never answered is dropped. The first system message becomes the system prompt of the fit.
+
+If you keep turns instead of messages, write them directly:
+
+```json
+{"thread_id": "t-17", "runs": [
+  {"started_at": "2026-11-02T09:14:03Z", "ended_at": "2026-11-02T09:14:09Z",
+   "input": "How many leave days do I get?",
+   "retrievals": [{"text": "Full-time staff accrue 25 days a year.", "id": "handbook#leave-3"}],
+   "output": "25 days a year."}
+]}
+```
+
+Parts are numbered `<thread>:<turn>:input`, `<thread>:<turn>:retrieval:<k>` and `<thread>:<turn>:output`. Labels refer to these IDs. A thread that spells out every identity itself, as the benchmark builders write them, is taken as is.
+
+## 2. Labels
+
+Without labels the fit tunes the keep-warm pings and keeps the whole history. Labels say what later turns needed from earlier ones, which is what lets it drop the rest. A sample is enough: an unlabelled turn counts as not sampled.
+
+```json
+{"thread_id": "t-17", "run": 7, "needs": [["t-17:3:output"], ["t-17:2:retrieval:1"]]}
+{"thread_id": "t-17", "run": 8, "needs": []}
+{"thread_id": "t-17", "run": 9, "needs": null}
+```
+
+| `needs` | Meaning |
+|---|---|
+| A list of alternatives | Any one alternative, with all of its parts in view, is enough to answer the turn |
+| `[]` | The turn needs nothing from earlier turns |
+| `null` | Nobody could tell |
+
+A part is its ID, or `{"part_id": ..., "quote": ...}`. A quote is checked to appear verbatim in that part, which keeps a model that writes labels honest.
+
+To have a coding agent write them:
+
+```sh
+compache packets threads.jsonl --sample 200 -o packets.jsonl   # what a labeller may see, one run per line
+# the agent labels each packet with the skill in skills/compache-label-dependencies
+compache check threads.jsonl --labels labels.jsonl             # validates and summarizes
+```
+
+## 3. Fit
+
+```sh
+compache fit threads.jsonl --labels labels.jsonl --model claude-sonnet-5-5 -o policy.json
+```
+
+```text
+Fitted on 4 threads, 71 turns (71 labelled) for claude-sonnet-5-5.
+
+Keep questions from the last 4 turns, answers from the last 9 turns and retrieved text from the last turn.
+Send up to 1 keep-warm ping while a user is away.
+82% of the labelled turns that need earlier context still have it in view. The rest fetch it back, and that call is in the cost.
+$16.08 per 1,000 turns against $50.25 keeping everything: 68% less.
+```
+
+| Option | Use |
+|---|---|
+| `--model` | A model with a built-in price sheet (`compache models` lists them), or a JSON file of model spec fields for any other. Fields left out take the defaults of `ModelSpec` |
+| `--system-prompt`, `--tools` | The text and tool definitions sent on every request, when the threads do not carry them |
+| `--observed-until` | When the record was cut, if conversations were still going. By default every thread is taken to be over |
+| `--json` | Print the summary as JSON |
+
+In Python, `compache.fit` returns a `Policy`: `policy.describe()` is the text above, `policy.summary` the numbers, `policy.save(path)` the file. The file holds the decision, the fitted model of returns, the priced candidates and the system prompt it was fitted with.
+
+## 4. Replay on unseen threads
+
+```sh
+compache replay heldout.jsonl --labels heldout-labels.jsonl --policy policy.json
+```
+
+It prices the policy and keeping everything on the same arrivals, including every ping. With labels it also reports how much of what those threads needed stays in view and adds the cost of fetching the rest back. A fit sits near its floor by construction, so this is the number to trust.
+
+## 5. Apply
+
+```python
+import compache
+
+policy = compache.Policy.load("policy.json")
+session = policy.session("thread-17")          # one per conversation, kept while it is active
+
+turn = session.prepare(question, retrieved)     # retrieved: the texts fetched for this question
+response = client.messages.create(model=MODEL, system=SYSTEM, messages=turn.messages, ...)
+session.complete(turn, answer_text, usage=response.usage)
+
+if session.next_ping_at:                         # epoch seconds, or None
+    schedule(session.next_ping_at)
+```
+
+| Call | What it does |
+|---|---|
+| `session.prepare(question, retrieved)` | Returns the request for this turn. `turn.parts` are its parts in order, `turn.messages` the same as chat messages, `turn.archived_ids` the parts replaced by a short notice |
+| `session.complete(turn, answer, usage=...)` | Records the answer and returns when a ping is due. `usage` is the provider's usage object or dict. With it the session tracks real sizes and stops pinging a cache that no longer hits |
+| `session.ping()` | When the timer fires: the request to send with the smallest output the provider allows, or `None` if the ping is no longer worth sending |
+| `session.ping_sent(at=..., usage=...)` | Records the ping. More pings follow only when its usage shows the cache was read |
+| `session.reopen(reference)` | Answers the model's `reopen` tool call with the archived text |
+
+- **Archived parts.** A cut replaces a part with a notice that carries a handle. Give the model `compache.REOPEN_TOOL` and `compache.REOPEN_INSTRUCTIONS`, and pass its tool calls to `session.reopen`.
+- **Placement.** `turn.messages` puts answers under `assistant` and everything else under `user`. If your application sends retrieved text another way, build the request from `turn.parts` and keep that mapping fixed.
+- **Tool loops.** Call `prepare` once per user message and append the calls of that turn yourself.
+- **Determinism.** No model is called. The same history, times and usage give the same request, so a session can be rebuilt after a restart by feeding the stored turns through `prepare` and `complete` again.
+- **Time.** Both calls take `at=` in epoch seconds and default to now.
+
+## 6. The calculator on your workload
+
+```sh
+compache profile threads.jsonl --labels labels.jsonl --model claude-sonnet-5-5
+```
+
+It measures tokens per turn, thread length, time away and what later turns needed, and prints a link that opens the [cost calculator](https://barendpotijk.github.io/compache/) with those numbers filled in. `-o profile.json` writes the same as a file for the calculator's Import button. Details in [calculator.md](calculator.md).
+
+## Beyond the top-level API
+
+`compache.optimizer` holds the engine: `solve_workload`, `replay_workload`, `WorkloadPolicy` and `WorkloadSession`. Use it for a tokenizer callback instead of the byte estimate, a cache-break checker stored in SQLite, shared system prompts across threads, several model calls per turn, or a comparison against your host's own call ledger. Each is a keyword argument documented on the function.
+
+| Model spec field | Meaning |
+|---|---|
+| `model_id` | Name written on the policy |
+| `context_tokens` | Largest input the model accepts |
+| `cache_ttl_seconds`, `cache_min_tokens`, `cache_block_tokens` | The provider's cache lifetime, smallest cacheable prefix and block size |
+| `read_multiplier`, `write_multiplier`, `output_multiplier` | Price of a cached, a newly cached and an output token, relative to an input token |
+| `long_input_threshold`, `long_input_factor`, `long_output_factor` | Surcharge above a request size, with `"schema_version": "compache-model-spec-v2"` |
+| `ping_output_tokens`, `expansion_output_tokens` | Output a ping and a fetch-back request are expected to produce |
+| `bytes_per_token`, `part_overhead_tokens`, `byte_limit` | The size estimate and the request size limit |
