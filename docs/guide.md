@@ -8,6 +8,7 @@ pip install git+https://github.com/BarendPotijk/compache
 
 | Step | Command | Python |
 |---|---|---|
+| Read traces from Langfuse | `compache pull langfuse -o threads.jsonl.gz` | `compache.langfuse.pull()` |
 | Check the data | `compache check threads.jsonl --labels labels.jsonl` | `compache.load_threads(path)` |
 | Fit | `compache fit threads.jsonl --labels labels.jsonl --model claude-sonnet-5-5` | `compache.fit(threads, labels, model=...)` |
 | Price on unseen threads | `compache replay heldout.jsonl --policy policy.json` | `compache.replay(policy, threads, labels)` |
@@ -29,11 +30,12 @@ One JSON object per line, one conversation each. A file, a gzipped file or a fol
 
 | Field | What it is for |
 |---|---|
-| `role` | `user`, `assistant` or `system`. Retrieved or tool text is `retrieval`, `tool`, `context`, `document` or `function`. A `tool_result` block inside a user message also counts as retrieved text |
+| `role` | `user`, `assistant` or `system`. Retrieved or tool text is `retrieval`, `tool`, `context`, `document` or `function`. A `tool_result` block inside a user message also counts as retrieved text. Every assistant message counts as one model call of its turn |
 | `content` | Text, or a list of text blocks. Sizes are estimated from it at four bytes a token |
 | `at` | When the message was sent: ISO time or seconds since the epoch. Needed on every user message, used on assistant messages when present. `created_at`, `timestamp` and `time` are read too. A time without a zone is taken as UTC |
 | `id` | Optional name of a retrieved document |
-| `usage` | Optional, on an assistant message: the provider's usage as returned. Its output count replaces the estimate |
+| `usage` | Optional, on an assistant message: the provider's usage as returned. Its output count replaces the estimate, and its cache read says how much of the last request the turn found cached |
+| `model` | Optional, on an assistant message or on the thread: the model that answered. `fit` prices the threads as the model most of them record |
 
 A user message opens a turn. Everything retrieved and everything the assistant says before the next user message belongs to it. User messages sent before any answer merge into one question, and a last message that was never answered is dropped. The first system message becomes the system prompt of the fit.
 
@@ -48,7 +50,39 @@ If you keep turns instead of messages, write them directly:
 ]}
 ```
 
-Parts are numbered `<thread>:<turn>:input`, `<thread>:<turn>:retrieval:<k>` and `<thread>:<turn>:output`. Labels refer to these IDs. A thread that spells out every identity itself, as the benchmark builders write them, is taken as is.
+A turn that made several model calls can say so with `"calls": 3`. Parts are numbered `<thread>:<turn>:input`, `<thread>:<turn>:retrieval:<k>` and `<thread>:<turn>:output`. Labels refer to these IDs. A thread that spells out every identity itself, as the benchmark builders write them, is taken as is.
+
+A thread in either shape may also carry `"tools"`, the tool definitions sent on every request, and `"observed_until"`, when the record was read.
+
+### From Langfuse
+
+```sh
+export LANGFUSE_PUBLIC_KEY=pk-lf-... LANGFUSE_SECRET_KEY=sk-lf-...
+compache pull langfuse -o threads.jsonl.gz --days 30 --environment production
+```
+
+```text
+Read 1,542 observations: 514 model calls in 80 sessions.
+Wrote 80 threads, 257 turns to threads.jsonl.gz.
+514 model calls were recorded twice and are counted once.
+Answered by claude-opus-5-5 (514 calls).
+```
+
+A session becomes a thread. The file carries the model, the system prompt, the tools and the time of the read, so `compache fit threads.jsonl.gz` needs nothing else.
+
+| In the traces | How it is read |
+|---|---|
+| One trace per turn, or one per model call | Turns follow the user's messages, rebuilt from what each model call was sent |
+| A tool loop | Every call of the turn is counted. Tool results are retrieved text |
+| Retrieved text pasted into the prompt | Taken out of the prompt where a retriever or tool observation of the trace returned it |
+| A model call recorded by two instrumentations | Counted once |
+| Helper calls, such as a query rewriter | Left out |
+| Calls that do not carry the conversation | The thread is read trace by trace: each root's input and output is a turn |
+
+- **It needs** a session ID on the traces, with prompts and answers recorded. Sessions that began before the first row read are left out, and the summary counts everything it leaves out.
+- **Choose one app** in a project with `--environment`, `--tag` or `--filter`, which takes Langfuse's own filter JSON. `--rows export.json` reads exported observations instead of the API.
+- **Host.** Langfuse Cloud by default, `LANGFUSE_BASE_URL` for another region or your own Langfuse 4.
+- **Checked** on Langfuse Cloud with the OpenAI drop-in, the Anthropic SDK's own spans, the OpenTelemetry Anthropic instrumentation and `@observe` functions.
 
 ## 2. Labels
 
@@ -93,9 +127,9 @@ $16.08 per 1,000 turns against $50.25 keeping everything: 68% less.
 
 | Option | Use |
 |---|---|
-| `--model` | A model with a built-in price sheet (`compache models` lists them), or a JSON file of model spec fields for any other. Fields left out take the defaults of `ModelSpec` |
+| `--model` | A model with a built-in price sheet (`compache models` lists them), or a JSON file of model spec fields for any other. Fields left out take the defaults of `ModelSpec`. It can be left out when the threads record their model, as a file from `compache pull` does |
 | `--system-prompt`, `--tools` | The text and tool definitions sent on every request, when the threads do not carry them |
-| `--observed-until` | When the record was cut, if conversations were still going. By default every thread is taken to be over |
+| `--observed-until` | When the record was cut, if conversations were still going and the threads do not say. By default every thread is taken to be over |
 | `--json` | Print the summary as JSON |
 
 In Python, `compache.fit` returns a `Policy`: `policy.describe()` is the text above, `policy.summary` the numbers, `policy.save(path)` the file. The file holds the decision, the fitted model of returns, the priced candidates and the system prompt it was fitted with.
@@ -144,7 +178,7 @@ if session.next_ping_at:                         # epoch seconds, or None
 compache profile threads.jsonl --labels labels.jsonl --model claude-sonnet-5-5
 ```
 
-It measures tokens per turn, thread length, time away and what later turns needed, and prints a link that opens the [cost calculator](https://barendpotijk.github.io/compache/) with those numbers filled in. `-o profile.json` writes the same as a file for the calculator's Import button. Details in [calculator.md](calculator.md).
+It measures tokens per turn, thread length and time away by how far a thread has come, calls and answer time per turn, what the cache returned and what later turns needed, and prints a link that opens the [cost calculator](https://barendpotijk.github.io/compache/) with those numbers filled in. `-o profile.json` writes the same as a file for the calculator's Import button. Details in [calculator.md](calculator.md).
 
 ## Beyond the top-level API
 

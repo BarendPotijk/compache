@@ -60,7 +60,7 @@ Applying a policy calls no model. The same history always gives the same request
 | Your chat log: each message with its role, text and time | When a keep-warm ping pays |
 | Plus labels for a sample of turns: which earlier parts the turn needed | What stays in view, separately for questions, answers and retrieved text |
 
-No thresholds to tune and no model to call. The log goes in as you store it, a [coding-agent skill](skills/compache-label-dependencies/SKILL.md) writes the labels, and prices for current Claude and GPT models are built in. [Guide](docs/guide.md)
+No thresholds to tune and no model to call. The log goes in as you store it, or straight from Langfuse with `compache pull langfuse`. A [coding-agent skill](skills/compache-label-dependencies/SKILL.md) writes the labels, and prices for current Claude and GPT models are built in. [Guide](docs/guide.md)
 
 ![Record threads, fit a policy, apply it on every request](docs/assets/workflow.svg)
 

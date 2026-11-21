@@ -13,6 +13,7 @@ from compache.threads import (
     canonical_usage,
     load_threads,
     normalize_thread,
+    recorded,
     system_prompt_of,
     write_threads,
 )
@@ -234,6 +235,99 @@ class SimpleShapeTests(unittest.TestCase):
         self.assertEqual(
             dict(run.generation.usage),
             {"input": 25, "output": 3, "cache_read": 20, "cache_write": 0},
+        )
+
+    def test_model_calls_per_turn_are_recorded(self):
+        usage = {
+            "input_tokens": 5,
+            "output_tokens": 3,
+            "cache_read_input_tokens": 20,
+            "cache_creation_input_tokens": 0,
+        }
+        chat = {
+            "thread_id": "loop",
+            "messages": [
+                {"role": "user", "content": "Find it.", "at": 1767603600},
+                {
+                    "role": "assistant",
+                    "content": [{"type": "tool_use", "name": "search", "input": {}}],
+                    "usage": usage,
+                },
+                {"role": "tool", "content": "Found."},
+                {
+                    "role": "assistant",
+                    "content": "Here.",
+                    "at": 1767603610,
+                    "usage": {
+                        **usage,
+                        "output_tokens": 7,
+                        "cache_read_input_tokens": 120,
+                    },
+                },
+                {"role": "user", "content": "Thanks.", "at": 1767603700},
+                {"role": "assistant", "content": "Welcome.", "at": 1767603702},
+            ],
+        }
+        first, second = Thread(normalize_thread(chat)).runs
+        # Every assistant message is one call. The turn's usage is the last call's input, all
+        # the output, and the cache read of the first call: what the turn found on arrival.
+        self.assertEqual((first.calls, second.calls), (2, 1))
+        self.assertEqual(
+            dict(first.generation.usage),
+            {"input": 125, "output": 10, "cache_read": 20, "cache_write": 0},
+        )
+        explicit = {
+            "thread_id": "e",
+            "runs": [
+                {"started_at": 1767603600, "input": "q", "output": "a", "calls": 3}
+            ],
+        }
+        self.assertEqual(Thread(normalize_thread(explicit)).runs[0].calls, 3)
+        self.assertIsNone(Thread(sample()).runs[0].calls)
+        for bad in (0, "2", 1.5, True):
+            explicit["runs"][0]["calls"] = bad
+            with (
+                self.subTest(calls=bad),
+                self.assertRaisesRegex(ContractError, "calls"),
+            ):
+                Thread(normalize_thread(explicit))
+
+    def test_a_record_says_which_model_prompt_and_tools_it_was_made_with(self):
+        chat = {
+            "thread_id": "c",
+            "tools": [{"name": "search"}],
+            "observed_until": "2026-01-05T10:00:00Z",
+            "messages": [
+                {"role": "system", "content": "Be brief."},
+                {"role": "user", "content": "Hi", "at": "2026-01-05T09:00:00Z"},
+                {"role": "assistant", "content": "Hello.", "model": "model-a"},
+            ],
+        }
+        runs = {
+            "thread_id": "r",
+            "model": "model-b",
+            "observed_until": "2026-01-05T11:00:00+00:00",
+            "runs": [
+                {"started_at": 1767603600, "input": "q", "output": "a"},
+                {"started_at": 1767603700, "input": "q", "output": "a"},
+            ],
+        }
+        found = recorded([chat, runs, Thread(sample())])
+        self.assertEqual(found["system_prompt"], "Be brief.")
+        self.assertEqual(found["tools"], [{"name": "search"}])
+        self.assertEqual((found["model"], found["models"]["model-a"]), ("model-b", 1))
+        self.assertEqual(found["observed_until"], "2026-01-05T11:00:00+00:00")
+        # What the record says about itself is not part of the conversation.
+        self.assertNotIn("tools", normalize_thread(chat))
+        self.assertEqual(
+            recorded([{"thread_id": "x", "runs": []}]),
+            {
+                "system_prompt": None,
+                "tools": None,
+                "model": None,
+                "models": {},
+                "observed_until": None,
+            },
         )
 
     def test_explicit_runs_with_plain_text(self):

@@ -6,8 +6,9 @@ turn = session.prepare(question, retrieved)   # send turn.messages
 session.complete(turn, answer)
 """
 
-__version__ = "0.10.0"
+__version__ = "0.11.0"
 
+from . import langfuse
 from .api import Policy, Session, Turn, fit, replay
 from .errors import ContractError
 from .models import known_models, model_spec
@@ -27,6 +28,7 @@ __all__ = [
     "Turn",
     "fit",
     "known_models",
+    "langfuse",
     "load_threads",
     "model_spec",
     "profile",

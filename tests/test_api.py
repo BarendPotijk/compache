@@ -130,6 +130,32 @@ class FitTests(unittest.TestCase):
         self.assertEqual(policy.summary["coverage"], 1.0)
         self.assertEqual(policy.recipe.output_runs, 0)
 
+    def test_several_model_calls_in_a_turn_are_priced(self):
+        once = threads()
+        looped = []
+        for thread_ in once:
+            data = thread_.to_dict()
+            for run in data["runs"]:
+                run["calls"] = 4
+            looped.append(data)
+        plain = compache.fit(once, model=SPEC, folds=2, share_headers=False)
+        loops = compache.fit(looped, model=SPEC, folds=2, share_headers=False)
+        cost = lambda policy: policy.artifact["solve"]["keep_everything_cost"]  # noqa: E731
+        # Three further calls a turn each read the turn's request from the cache.
+        self.assertGreater(cost(loops), cost(plain))
+        self.assertEqual(
+            loops.artifact["demand"]["by_position"]["1"]["calls_per_run"], [4] * 4
+        )
+        self.assertEqual(
+            plain.artifact["demand"]["by_position"]["1"]["calls_per_run"], [None] * 4
+        )
+        held = thread(tid="held", n=6, gap=400).to_dict()
+        for run in held["runs"]:
+            run["calls"] = 4
+        report = compache.replay(loops, [held])
+        self.assertEqual(report["detail"]["baseline"]["foreground_calls"], 24)
+        self.assertGreater(report["detail"]["baseline"]["repeat_input_tokens"], 0)
+
     def test_too_little_data_is_refused(self):
         with self.assertRaises(compache.ContractError):
             compache.fit(threads(count=1), model=SPEC)
@@ -302,7 +328,10 @@ class ProfileTests(unittest.TestCase):
         )
         measured, scenario = result["measured"], result["calculator"]["scenario"]
         self.assertEqual((measured["threads"], measured["turns"]), (4, 24))
-        self.assertEqual(measured["turns_per_thread"], {"median": 6, "p95": 6})
+        lengths = measured["turns_per_thread"]
+        self.assertEqual(
+            (lengths["median"], lengths["p95"], lengths["law"]), (6, 6, "lognormal")
+        )
         self.assertEqual(
             (
                 measured["labelled_turns"],

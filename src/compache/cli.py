@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
 import json
 import sys
@@ -14,7 +15,7 @@ from .errors import ContractError
 from .labels import build_packet, label_index
 from .models import _sheet, known_models
 from .optimizer.contracts import ModelSpec
-from .profile import measure, profile
+from .profile import history_resent, measure, profile
 from .threads import load_threads, read_jsonl
 
 
@@ -37,8 +38,8 @@ def _parser() -> argparse.ArgumentParser:
         if model:
             sub.add_argument(
                 "--model",
-                required=True,
-                help=f"A known model ({', '.join(known_models())}) or a JSON file of model spec fields",
+                help=f"A known model ({', '.join(known_models())}) or a JSON file of model spec fields. "
+                "Left out, the model the threads record",
             )
             sub.add_argument(
                 "--system-prompt", type=Path, help="Text file with the system prompt"
@@ -89,6 +90,28 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_argument("--sample", type=int, default=200, help="How many runs to label")
     sub.add_argument("--seed", default="0")
 
+    text = "Read the conversations of a Langfuse project into a threads file"
+    sub = commands.add_parser("pull", help=text, description=text)
+    sub.add_argument("source", choices=["langfuse"])
+    sub.add_argument("-o", "--output", type=Path, default=Path("threads.jsonl.gz"))
+    sub.add_argument("--days", type=float, default=30, help="How far back to read")
+    sub.add_argument("--since", help="Read from this time instead")
+    sub.add_argument("--until", help="Read up to this time")
+    sub.add_argument("--environment", help="Only this Langfuse environment")
+    sub.add_argument(
+        "--tag",
+        action="append",
+        default=[],
+        help="Only traces with this tag. Repeat for any of several",
+    )
+    sub.add_argument("--filter", help="More conditions, as a Langfuse filter in JSON")
+    sub.add_argument(
+        "--rows",
+        type=Path,
+        help="Observations already exported, as JSON or JSONL, instead of the API",
+    )
+    sub.add_argument("--json", action="store_true", help="Print JSON")
+
     listing = commands.add_parser(
         "models", help="List the models with a built-in price sheet"
     )
@@ -133,9 +156,17 @@ def _fit(args):
         if summary["labelled_turns"]
         else ""
     )
-    text = (
-        f"Fitted on {summary['threads']:,} threads, {summary['turns']:,} turns{labelled} "
-        f"for {summary['model']}.\n\n{policy.describe()}\n\nWrote {args.output}"
+    resent = history_resent(load_threads(args.threads), policy.spec)
+    text = "\n".join(
+        [
+            f"Fitted on {summary['threads']:,} threads, {summary['turns']:,} turns{labelled} "
+            f"for {summary['model']}.",
+            "",
+            policy.describe(),
+            *_trimmed(resent),
+            "",
+            f"Wrote {args.output}",
+        ]
     )
     return {"output": str(args.output), **summary}, text
 
@@ -170,6 +201,16 @@ def _replay(args):
     return report, "\n".join(lines)
 
 
+def _trimmed(resent) -> list[str]:
+    """A warning for an app that already leaves earlier text out of its requests."""
+    if resent is None or resent >= 0.8:
+        return []
+    return [
+        f"Its requests carried {resent:.0%} of the conversation so far: the app already leaves "
+        "earlier text out, so keeping everything costs more than it pays today."
+    ]
+
+
 def _describe(measured) -> list[str]:
     tokens, lengths = measured["tokens_per_turn"], measured["turns_per_thread"]
     lines = [
@@ -186,11 +227,54 @@ def _describe(measured) -> list[str]:
         + ".",
         f"Turns per thread: {lengths['median']} ({lengths['p95']}).",
     ]
+    if 0 < measured["turns_that_retrieve"] < 1:
+        lines.append(
+            f"Turns that retrieve anything: {measured['turns_that_retrieve']:.0%}."
+        )
+    if lengths["law"] == "continuation":
+        another = lengths["another_turn"]
+        lines.append(
+            f"Chance of another turn: {another['after_first']:.0%} after turn 1, "
+            f"{another['in_long_threads']:.0%} in long threads, halfway by turn {1 + another['half_turn']:g}. "
+            f"{lengths['one_turn_share']:.0%} of threads are one turn."
+        )
     if measured["idle_minutes"]:
         idle = measured["idle_minutes"]
+        where = " in long threads" if idle["half_turn"] else ""
         lines.append(
-            f"Minutes away between turns: {idle['median']:.1f} ({idle['p95']:.1f})."
+            f"Minutes away between turns{where}: {idle['median']:.1f} ({idle['p95']:.1f})."
         )
+        if idle["half_turn"]:
+            lines.append(
+                f"  after turn 1 the wait is {idle['first_factor']:.1f} times that, "
+                f"halfway by turn {1 + idle['half_turn']:g}."
+            )
+        if idle["break_share"]:
+            lines.append(
+                f"  {idle['break_share']:.0%} of returns follow a long break, "
+                f"median {idle['break_median'] / 60:.1f} hours."
+            )
+    extras = []
+    if measured["answer_seconds"]:
+        extras.append(f"an answer takes {measured['answer_seconds']:.0f} s")
+    if measured["calls_per_turn"] and measured["calls_per_turn"] > 1:
+        extras.append(f"{measured['calls_per_turn']:.1f} model calls a turn")
+    if measured["reasoning_tokens"]:
+        extras.append(
+            f"{measured['reasoning_tokens']:,} output tokens an answer are billed beyond its text"
+        )
+    if measured["cache_read_when_live"] is not None:
+        extras.append(
+            f"a request still in the cache was read to {measured['cache_read_when_live']:.0%} by the next turn"
+        )
+    if measured["prompt_warmed_by_others"]:
+        extras.append(
+            f"another thread was active within the cache lifetime at "
+            f"{measured['prompt_warmed_by_others']:.0%} of cold starts"
+        )
+    if extras:
+        lines.append("Also: " + ", ".join(extras) + ".")
+    lines += _trimmed(measured["history_resent"])
     if measured["needs"]:
         share = measured["turns_needing_history"] / measured["assessed_turns"]
         lines.append(
@@ -262,6 +346,108 @@ def _packets(args):
     return result, f"Wrote {len(chosen):,} of {len(candidates):,} runs to {args.output}"
 
 
+def _exported(path: Path) -> list:
+    """Observation rows from an export: a JSON list, an API response, or JSONL."""
+    opener = gzip.open if path.name.endswith(".gz") else open
+    with opener(path, "rt", encoding="utf-8") as stream:
+        text = stream.read()
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return [json.loads(line) for line in text.splitlines() if line.strip()]
+    return data.get("data") or [] if isinstance(data, dict) else data
+
+
+_LEFT_OUT = (
+    (
+        "calls_recorded_twice",
+        "{:,} model calls were recorded twice and are counted once.",
+    ),
+    (
+        "helper_calls",
+        "{:,} model calls outside the conversation, such as a query rewriter, are left out.",
+    ),
+    (
+        "turns_with_pasted_retrieval",
+        "In {:,} turns the retrieved text was pasted into the prompt. It is read as retrieved text.",
+    ),
+    (
+        "threads_read_trace_by_trace",
+        "{:,} threads were read trace by trace, as their model calls do not carry the conversation.",
+    ),
+    (
+        "threads_with_trimmed_history",
+        "In {:,} threads the app did not resend the whole history, so keeping everything is not what it does today.",
+    ),
+    (
+        "overlapping_turns",
+        "{:,} turns began before the answer to the one before. They are read one after the other.",
+    ),
+    (
+        "sessions_begun_earlier",
+        "{:,} sessions began before the first row read. Read further back to include them.",
+    ),
+    (
+        "sessions_without_text",
+        "{:,} sessions have model calls without their text. Record prompts and answers to use them.",
+    ),
+    ("sessions_unreadable", "{:,} sessions could not be rebuilt into turns."),
+    (
+        "traces_without_session",
+        "{:,} traces have no session ID, and a thread needs one.",
+    ),
+)
+
+
+def _pull(args):
+    from .langfuse import pull
+
+    options = {}
+    if args.rows:
+        options["rows"] = _exported(args.rows)
+    else:
+        conditions = json.loads(args.filter) if args.filter else []
+        options.update(
+            environment=args.environment,
+            tags=args.tag,
+            filters=conditions if isinstance(conditions, list) else [conditions],
+        )
+    threads, report = pull(
+        since=args.since, until=args.until, days=args.days, **options
+    )
+    lines = [
+        f"Read {report.get('observations', 0):,} observations: {report.get('model_calls', 0):,} "
+        f"model calls in {report.get('sessions', 0):,} sessions."
+    ]
+    notes = [text.format(report[key]) for key, text in _LEFT_OUT if report.get(key)]
+    if not threads:
+        raise ContractError(" ".join(lines + notes + ["No thread could be read."]))
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    opener = gzip.open if args.output.name.endswith(".gz") else open
+    with opener(args.output, "wt", encoding="utf-8") as stream:
+        for thread in threads:
+            stream.write(json.dumps(thread, ensure_ascii=False) + "\n")
+    lines.append(
+        f"Wrote {report['threads']:,} threads, {report['turns']:,} turns to {args.output}."
+    )
+    lines += notes
+    if report["models"]:
+        lines.append(
+            "Answered by "
+            + ", ".join(
+                f"{name} ({count:,} calls)" for name, count in report["models"].items()
+            )
+            + "."
+        )
+    if len(report["models"]) > 1:
+        lines.append(
+            "A fit prices every thread as one model: the most common, unless --model names another. "
+            "To fit one app of several, narrow the read with --tag or --environment."
+        )
+    lines += ["", f"Next: compache fit {args.output}"]
+    return {"output": str(args.output), **report}, "\n".join(lines)
+
+
 def _models(args):
     models = _sheet()["models"]
     lines = [f"Prices per million tokens, checked {_sheet()['checked']}."]
@@ -279,6 +465,7 @@ _COMMANDS = {
     "profile": _profile,
     "check": _check,
     "packets": _packets,
+    "pull": _pull,
     "models": _models,
 }
 
