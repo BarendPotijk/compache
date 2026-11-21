@@ -1,97 +1,145 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Model specification · Compache</title><link rel="stylesheet" href="./style.css"><style>.document{max-width:1050px;padding-top:30px;padding-bottom:50px}.document h1{margin-top:28px}.document h2{margin-top:30px;font-size:22px}.document p{line-height:1.7;color:#4e5a68}.document pre{white-space:pre-wrap;background:white;border:1px solid #d7dde5;padding:15px;font-size:12px}.document td{white-space:normal;text-align:left;padding:8px}.document tr:first-child{font-weight:bold}.document .table-scroll{overflow:auto}.document code{font-size:12px}.document .bullet{padding-left:16px}</style></head><body><main class="document"><a href="./">← Calculator</a><h1>Interactive cost explorer</h1>
-<p>The README links to a browser-local simulator because GitHub sanitizes executable JavaScript from rendered Markdown. Source lives in <code>site/</code>, with no dependencies, keys, telemetry, provider requests or build step. This is an aggregate deterministic scenario model, <strong>not a JavaScript port or execution of Compache</strong>, and not an OpenClaw runtime benchmark. The existing subscription experiments compare OpenCode; this new explorer explicitly models a separate OpenClaw client-summary configuration.</p>
-<h2>Run and reproduce</h2>
-<pre><code>
-python3 -m http.server 8765 --bind 127.0.0.1 --directory site
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="description" content="How the Compache cost calculator prices a workload: the workload model, prices and cache rules, the fitted policy and the OpenClaw baseline.">
+<title>Methodology · Compache</title>
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<main class="document">
+<header class="top"><a class="brand" href="./"><i></i>compache</a><a href="./">Calculator</a></header>
 
-# Open http://127.0.0.1:8765/
+<h1>How the calculator works</h1>
+<p>The calculator prices one chat workload twice from token counts and list prices: once with a Compache policy fitted to that workload, and once with OpenClaw's documented defaults. It runs in the browser from <code>site/</code>, with no dependencies, keys, telemetry or provider requests.</p>
+<p>It is a model. No model is called, neither product is executed and answer quality is not measured. The Compache side is a simplified projection of the package's policy. The <a href="https://github.com/BarendPotijk/compache/tree/main/benchmarks/docchat">DocChat benchmark</a> runs the package itself.</p>
 
-node --test site/*.test.mjs
+<h2>Run it</h2>
+<pre><code>python3 -m http.server 8765 --bind 127.0.0.1 --directory site   # then open http://127.0.0.1:8765/
+node --test site/*.test.mjs</code></pre>
+<ul>
+<li><strong>Share</strong> copies a link that carries every setting. Links made by earlier versions still open, with a note that their numbers were computed differently.</li>
+<li><strong>Export</strong> downloads the settings, the sampled threads, every priced call, every candidate policy and the limits below.</li>
+<li><strong>Import</strong> reads a profile made from your traces or a file exported here. You can also drop the file on the page.</li>
+<li>A setting that is unknown or out of range is reported on the page. Nothing falls back to a default unnoticed.</li>
+</ul>
 
-</code></pre>
-<p>Use the scenario link to preserve inputs in the URL fragment, or export the JSON ledger to inspect every request. The export includes configuration, seed, generated workload, model-default cache settings, per-call ledgers, per-role totals, every searched candidate, selected policy, expected/observed retention, decision diagnostics and limitations. Decision previews keep the latest 16 blocks and report omitted counts/tokens; totals by kind cover the entire view. No content is sent to a service. Serve over HTTP; opening <code>index.html</code> directly as a file cannot load its module worker reliably. GitHub Pages serves the calculator at https://barendpotijk.github.io/compache/. The Pages workflow tests the calculator and publishes only its nine website files when site files or the workflow change on main. The former ChatGPT Site remains an earlier published copy.</p>
-<h2>Workload assumptions</h2>
-<p class="bullet">• One seed creates the threads the policy is fitted on, and the next seed creates the threads both arms are costed on. Policy, TTL and pricing changes leave both sets unchanged. Workload inputs such as dependency intensity can change random draws; this is not a common-random-number causal experiment between different workloads.</p>
-<p class="bullet">• The calculator models one company with one parameter set: <code>companies=1</code> and <code>companyVariation=0</code>. It samples 100 threads by default; sample count and seed are advanced settings. No company profile or real customer data is used.</p>
-<p class="bullet">• Retrieved tokens per run follow a lognormal distribution specified by median (0–500,000) and p95 (up to 1,000,000), with no company-specific multiplier. A zero median is a dedicated no-retrieval mode: every retrieval is zero tokens and retrieval dependency edges/requirements are absent. The p95 and retrieval dependency controls are disabled in that mode; a zero-median lognormal is not evaluated. User input is configurable (default 200 tokens), system context 2,048 tokens and output length is the configured billable total, including reasoning. Retrieval tokens are bounded at one million in the generator. One answer request per run is modeled, after retrieval. Actual multi-call tools and generation duration are not modeled.</p>
-<p class="bullet">• Planned length is fixed, geometric (parameter is its mean), or lognormal (median/p95). It is capped at 160. Before each subsequent turn, a continuation Bernoulli can end the thread. Planned length and abandonment are distinct causes of thread termination. The survival chart shows theoretical survival after both length limits and abandonment; the p95 length control only affects the lognormal distribution.</p>
-<p class="bullet">• Conditional return gaps are lognormal, specified by median/p95 in minutes. Never-return mass comes from termination, not an arbitrary long gap. Request duration is zero. TTL is measured from request start; a snapshot expires exactly at its TTL.</p>
-<p class="bullet">• Input, retrieval and output dependencies are sampled independently from their own per-run probabilities. Each source type has a separate lookback in runs; if selected, one earlier source is chosen uniformly within that lookback (or all available prior runs when the thread is younger). A retrieval block represents a whole bundle. This simple graph is not a benchmark-derived distribution, calibrated company behavior, or a semantic AND/OR proof.</p>
-<p>The headline cost is the total cost of all answer, fetch-back, ping, summary and flush calls on the costed threads, divided by their number of turns and shown per 1,000 turns. It is unavailable when either arm is incomplete or no candidate policy meets the floor. "Needed sources still in view" is, over every earlier item a turn needs, the share still present verbatim in that arm's request before anything is fetched back. The token-mix bars show the share of answer-input tokens read from the cache; ping and other maintenance calls are excluded from them. Context defaults to the mean input at each run across threads admitted by both arms at that run. Ended or failed threads are not padded with zero; a dedicated thread-count subchart with an aligned run axis and point tooltips shows the surviving cohort. The subchart shows counts and shares of the initial workload, with the selected run highlighted; it is hidden for individual-thread views. Select a thread and a run to inspect its context curve and ping plan. The redundant expandable run-context panel is removed. The Assumptions disclosure contains only fixed modeling assumptions; pricing sources remain with model settings and full sources are in the methodology. Incomplete comparisons retain diagnostic charts but suppress comparable cost metrics. The default planned median is 8 runs and p95 is 20, editable assumptions rather than measured chatbot norms. The survival chart follows the configured length distribution through approximately 1.15 times its p95 (capped at 160), with a median/mean/fixed-length marker. Changing a median scales its p95 proportionally; p95 remains independently editable.</p>
-<h2>Token and cost accounting</h2>
-<p>Ordered blocks have immutable identities and token counts. Cache hits use the longest common prefix with any unexpired earlier request of the same thread, at an exact eligible block boundary, with the selected model&#x27;s minimum (1,024 visible tokens for the OpenAI presets; 512 for the current Claude presets). Generated outputs do not enter the cache until included in a later request. Summaries and flushes use separate system identities. Each request refreshes its own prefix; compacting the middle invalidates the subsequent prefix. Cross-thread reuse is excluded. The calculator assumes caching is enabled through the final eligible input block, a matching breakpoint remains discoverable, and entries persist until a hard cutoff at the documented default lifetime. Routing, hidden provider tokens, explicit breakpoint placement and provider lookup limits are not simulated. Providers may retain entries longer; an unexpired prefix is not a guarantee of a real hit. Below the minimum cacheable request size, fresh tokens pay base input rather than the cache-write rate.</p>
-<p>For each successful request, with rates per million tokens:</p>
-<pre><code>
-fresh = input - cached
-
-cost = fresh × input_rate × write_multiplier × input_tier / 1,000,000
-
-     + cached × cached_rate × input_tier / 1,000,000
-
-     + output × output_rate × output_tier / 1,000,000
-
-</code></pre>
-<p>The long tier is selected from total input, not fresh input, and applies to the whole request. Zero disables the threshold. Maintenance requests are priced independently. Negative savings remain negative. Zero-cost denominators are unavailable, not an infinite saving. Any admission failure suppresses the full-workload savings percentage; displayed partial totals must not be compared as completed costs.</p>
-<p>Presets were checked on <strong>2026-11-20</strong> against official pricing, model and caching documentation. Rates are Standard API USD per million tokens; writes replace the base input charge, rather than adding to it.</p>
+<h2>From your traces</h2>
+<p>The package's <code>compache profile</code> command reads recorded threads and prints a link that opens this page with the workload filled in. It can write the same profile to a file for Import. The page then shows where the numbers came from.</p>
 <div class="table-scroll"><table>
-<tr><td>Preset</td><td>Input / cached / output</td><td>Cache write</td><td>Default cache</td><td>Long request tier</td></tr>
-<tr><td><a href="https://developers.openai.com/api/docs/models/gpt-6-luna">GPT-6 Luna</a></td><td>0.10 / 0.01 / 0.50</td><td>0.125</td><td>30 min</td><td>Above 272k: 2× input/cache/write, 1.5× output</td></tr>
-<tr><td><a href="https://developers.openai.com/api/docs/models/gpt-6-astra">GPT-6 Astra</a></td><td>10 / 1 / 50</td><td>12.50</td><td>30 min</td><td>Above 272k: 2× input/cache/write, 1.5× output</td></tr>
-<tr><td><a href="https://developers.openai.com/api/docs/models/gpt-5.6-terra">GPT-5.6 Terra</a></td><td>2 / 0.20 / 12</td><td>2.50</td><td>30 min</td><td>Above 272k: 2× input/cache/write, 1.5× output</td></tr>
-<tr><td>Claude Opus 5.5</td><td>4 / 0.20 / 20</td><td>5</td><td>5 min</td><td>No long-context premium</td></tr>
-<tr><td>Claude Sonnet 5.5</td><td>2 / 0.10 / 10</td><td>2.50</td><td>5 min</td><td>No long-context premium</td></tr>
-<tr><td>Claude Haiku 5.5</td><td>0.10 / 0.01 / 0.50</td><td>0.125</td><td>5 min</td><td>Above 100k: 5× all token rates</td></tr>
-<tr><td>Claude Fable 5.2</td><td>8 / 0.20 / 40</td><td>10</td><td>5 min</td><td>No long-context premium</td></tr>
+<tr><th>Filled in from traces</th><th>Settings</th></tr>
+<tr><td>Tokens per turn</td><td>Question, answer and retrieved tokens (median and 95th percentile), system prompt and tools</td></tr>
+<tr><td>Thread length</td><td>Median and 95th percentile of turns</td></tr>
+<tr><td>Return delay</td><td>Median and 95th percentile of the time between an answer and the next question</td></tr>
+<tr><td>What later turns need</td><td>Per kind of earlier text: the chance a turn needs it, and how many turns back it lies (median and 95th percentile)</td></tr>
+<tr><td>Model</td><td>A preset, or the model's own prices, context window and cache rules</td></tr>
 </table></div>
-<p>Claude prices come from <a href="https://platform.claude.com/docs/en/about-claude/pricing">Anthropic&#x27;s developer pricing page</a>, with <a href="https://platform.claude.com/docs/en/models/overview">model context limits</a> and <a href="https://platform.claude.com/docs/en/build-with-claude/prompt-caching">caching defaults/minimums</a>. The Claude presets use 1,000,000 context/input limit with the engine&#x27;s output/reserve admission check. OpenAI presets use 1,050,000 context and 922,000 maximum input. <a href="https://developers.openai.com/api/docs/guides/prompt-caching">OpenAI caching documentation</a> specifies the 30-minute default and exact eligible-boundary accounting for GPT-5.6 and later. GPT-4.1 is removed.</p>
-<p>Selecting a model sets pricing, context, cache minimum and lifetime together. There is no cache-window selector or 5/30-minute comparison table. Editing an advanced model price switches to custom pricing and retains the last preset&#x27;s cache policy. Prices exclude tax, regional premiums, batch/flex discounts and infrastructure. No model is called; these are neither subscription credits nor invoice measurements. Rates may change after the source date.</p>
-<h2>Retention-constrained policy search</h2>
-<p>A retention slider runs from <strong>75% to 100%</strong>, in one-percentage-point steps, defaulting to <strong>80%</strong>. This is the least share of what later turns need that Compache must leave in the request before anything is fetched back. It is not a share of all input tokens and not a measure of answer quality. What falls outside it is not lost: a turn that needs an archived source fetches it back, and that call is charged.</p>
-<p>For each reached run and source type, expected required dependencies equal that type&#x27;s configured probability. Expected retained dependencies equal this probability multiplied by the fraction of possible source turns still present within its uniform lookback. Sum retained and required across runs and types, then divide. Thus a type with no reuse probability contributes no weight. Report both the expected score used for optimization and availability for the independently sampled dependency edges. A zero denominator is unavailable and imposes no constraint. Earlier inputs and outputs remain verbatim in this projection; retrieval is the compactable source type. The per-type table makes this weighting visible.</p>
-<p>The deterministic search evaluates targets <strong>10/15/20/25/35/45%</strong>, warm triggers <strong>50/55/60%</strong>, and protected retrieval horizons of <strong>0/75/90/95/100%</strong> of the retrieval lookback, rounded up to whole runs and deduplicated. The horizon is a minimum set of recent retrieval sources to retain, so actual context can remain above the target. The default 24-run lookback yields 90 candidates. No target or warm-trigger input is shown to the user.</p>
-<p>Candidates must complete every turn and meet the expected floor on the <strong>fitting threads</strong>. Among those, the one with the smallest total cost of answers, fetch-back calls, pings and fetched tokens is selected. Ties are stable by target, trigger and horizon. Tightening the floor filters the same candidate set. If none qualifies, a diagnostic candidate can still be inspected, but it is not a recommendation and savings are suppressed.</p>
-<p>The policy is the cheapest point of a finite grid, not a continuous optimum or the package's fitted policy. It is <strong>chosen on one seeded set of threads and costed on a second set</strong> drawn with the next seed from the same settings. Both arms are reported on that second set, so the choice has not seen the threads it is judged on. Executing the policy uses only current and past context and the configured return distribution. On Claude presets both arms fetch back any removed or cleared source a turn needs, so both end with every needed source in the request. Text that OpenClaw summarized is not fetched again, and whether its summary still carries the fact is not evaluated.</p>
-<h2>Compache projection</h2>
-<p>The current user input, retrieval and previously generated answer blocks enter the sequence. Prior inputs and outputs remain verbatim. At a cold return, a view above target + two percentage points triggers retrieval compaction; a warm return waits for the selected 50%, 55% or 60% trigger. Oldest eligible retrieval blocks are removed toward the target. The selected recent retrieval horizon and current-query dependencies are protected; missing retrieval dependencies are appended as recalled source blocks, preserving the earlier prefix. Their input cost is charged, and so is <strong>one extra call</strong> per turn that needs any: it carries the request without the missing sources and returns a short reply (32 tokens by default) asking for them. The answer call that follows reads that request from the cache and adds the sources.</p>
-<p>This assumes perfect current-dependency identification, excludes lexical ambiguity and unknown dependencies, and uses the finite-grid selected target, trigger and horizon. It does not run the package&#x27;s Python training/held-out optimizer or establish semantic retention. Budget pressure can leave the view above target. Unlike the Python gate, this simplified projection removes blocks without pricing handle-placeholder text or applying the exact warm rollback, token calibration and serialized tool-pairing rules. It is useful for sensitivity, not a package-equivalence claim.</p>
-<p>Keep-warm planning compares configured return probabilities and delay CDF against cold-compacted versus retained context, with priced ping requests, output and one subsequent carrying-cost allowance. It never reads the realized next gap, planned thread end or future dependency graph. It assumes no future query in its cold preview. Pings stop on actual arrival; all planned pings are charged after abandonment. The planner is an expected-value approximation, not the package&#x27;s fitted survival estimator. Consequently pings can increase realized cost. Turning them off isolates passive cache reuse and compaction. The age-specific return probability is the continuation probability multiplied by <code>P(planned length &gt;= next run) / P(planned length &gt;= current run)</code>. It uses the configured distribution, never the realized future thread length. The displayed survival curve is this theoretical survival; the sampled workload may differ.</p>
-<p>Admission uses the model&#x27;s max input and <code>input + max(output, 32,000 reserve) &lt;= context</code> for Compache. The optional custom context can make admission fail; failures are reported rather than dropping expensive turns from a savings denominator.</p>
-<h2>Ping payoff and cache diagnostics</h2>
-<p>The ping graph replaces the four-step decision walkthrough. After a selected run it plots <strong>expected avoided cost</strong> and <strong>expected ping cost</strong> as lines, with <strong>net saving</strong> as bars. Zero pings is an explicit option. The planner now evaluates up to 12 pings by default; the advanced cap can be lowered. The winning positive value is highlighted, together with the ping interval and actual planned/sent counts. Sending stops when a user returns; waiting costs include abandonment. The lifetime is still bound to the chosen model.</p>
-<p>In the average context view, the graph averages the same N-ping alternatives across eligible thread prefixes at that run. It shows eligible and total counts; gated prefixes are excluded, and the result is labeled “best average plan.” It is not the average of individual optimal values and does not replace each thread&#x27;s own selected plan. Individual thread selection shows that thread&#x27;s actual planner rows. If all prefixes are gated, no positive ping curve is invented. The average planned/sent numbers include all admitted run ends at the chosen position.</p>
-<p>The token-mix bars reconcile exactly to answer-input tokens, with mutually exclusive categories:</p>
-<p class="bullet">• <strong>Cached:</strong> actual cache credit in the simulator.</p>
-<p class="bullet">• <strong>First request:</strong> all fresh input in the first successful request of a thread.</p>
-<p class="bullet">• <strong>Expired prefix:</strong> an exact cache-aligned match available in the last 16 expired snapshots, beyond the live match.</p>
-<p class="bullet">• <strong>New context:</strong> fresh tail blocks whose identity and length have never appeared in a previous successful request.</p>
-<p class="bullet">• <strong>Unmatched history:</strong> previously seen fresh tail blocks outside those matching prefixes, including rewrites and lookup/alignment limits.</p>
-<p>Snapshots and seen-block identities include successful maintenance calls; aggregate percentages include answer calls only. Diagnostic expiry history is bounded and does not change actual cache credits or prices. Unmatched history is <strong>not</strong> a proven compaction effect, and these are modeled accounting categories, not provider counters. A large retrieval payload or a first request can keep the token hit rate low even if every reusable prefix is warm. A ping cannot cache future new content. Long gaps beyond the selected ping horizon can still expire.</p>
-<p>The layout and payoff/cost chart use the supplied reference as design guidance only. Its private production figures and fitted return curves are not included.</p>
-<h2>OpenClaw baseline scope and source pin</h2>
-<p>Pinned revision: <a href="https://github.com/openclaw/openclaw/commit/c49b553b85b82bc700465d4607949574f892366c"><code>c49b553b85b82bc700465d4607949574f892366c</code></a>, checked 2026-11-17 and re-read on 2026-11-20. The baseline follows OpenClaw's documented defaults as far as they can be priced from token counts. For <strong>Claude presets</strong> it applies the server-side tool-result clearing that OpenClaw's Anthropic plugin turns on for API-key requests, with the client-side summary at 75% of the window behind it. OpenClaw also asks Anthropic to compact on the server at 70% of the window. That is not modeled separately: with clearing on, neither threshold is normally reached. For <strong>OpenAI presets</strong> it models the client-side summary path. OpenClaw's own default there calls OpenAI's compact endpoint at the same 75% threshold, and what that endpoint keeps and costs is not published in a form this page can price. OpenClaw's defaults send no request to keep a five-minute or thirty-minute cache warm. Generated text and token counts are assumptions.</p>
+<p>Everything else keeps its default and can be edited under <em>Prices and settings</em>.</p>
+
+<h2>Workload</h2>
+<ul>
+<li><strong>Two sets of threads.</strong> One seed draws the threads the policy is fitted on. The next seed draws the threads both sides are costed on. 100 threads each by default.</li>
+<li><strong>Thread length</strong> is lognormal (median and 95th percentile), fixed, or geometric (mean), capped at 160 turns. Before every further turn the thread continues with a set chance.</li>
+<li><strong>Each turn</strong> adds a question, retrieved text and an answer. Retrieved tokens are lognormal. Zero retrieved tokens means no retrieval at all. The system prompt and tools start every request.</li>
+<li><strong>Return delay</strong> is lognormal. A user who does not return is a thread that ended, not a long delay. A call takes no time.</li>
+<li><strong>What later turns need.</strong> For questions, retrieved text and answers separately, a turn needs one earlier item of that kind with a set chance. How far back it lies is lognormal with a median and a 95th percentile, rounded to a whole turn, at least one, and limited to the turns that exist. A 95th percentile equal to the median means exactly that many turns back.</li>
+</ul>
+<p>The defaults for what later turns need were measured on DocChat, where a model answered every turn again with parts of the history withheld:</p>
 <div class="table-scroll"><table>
-<tr><td>Behavior</td><td>Explorer representation</td></tr>
-<tr><td>Client maintenance threshold</td><td><code>min(75% × context, context - min(20k, 25% × context))</code> before the next answer</td></tr>
-<tr><td>Recent tail</td><td>Keep complete newest synthetic turns until the 20k token target is reached; actual OpenClaw cuts at valid messages/tool pairs and can split turns</td></tr>
-<tr><td>Summary input</td><td>Older head only; retrieval blocks projected to at most 500 tokens; capped at 40k conversation tokens plus 2,048 system tokens</td></tr>
-<tr><td>Summary output</td><td>Configurable, default 4,000 tokens; proxy for a 16,000-character ceiling, not observed output</td></tr>
-<tr><td>Deterministic record</td><td>1,500 tokens appended after summary; no generation cost, subsequent input cost charged</td></tr>
-<tr><td>Memory flush</td><td>One full-view call per compaction, default 256 output tokens, separate cache identity; prompt and exact flush timing are simplified</td></tr>
-<tr><td>Tool-result clearing</td><td>Claude presets: on, as OpenClaw's Anthropic plugin sets it for API-key requests. Once a request reaches <code>max(50,000, 30% × context)</code> input tokens, every tool result but the newest three is cleared, if that frees at least <code>max(12,500, 5% × context)</code>. A cleared result is a 12-token placeholder, and the cache is invalid from the first cleared result. OpenAI presets: off, as in OpenClaw</td></tr>
-<tr><td>Fetching back</td><td>A cleared tool result that a turn needs is fetched again, with the same extra call as for Compache. A summarized source is not fetched again. No summary-quality retries or failure calls</td></tr>
-<tr><td>Answer admission</td><td>Input cap plus output/reserve; reserve is <code>min(20k, 25% × context)</code></td></tr>
+<tr><th>Earlier text</th><th class="num">Chance per turn</th><th class="num">Turns back, median</th><th class="num">95th percentile</th></tr>
+<tr><td>Questions</td><td class="num">15%</td><td class="num">1</td><td class="num">20</td></tr>
+<tr><td>Retrieved text</td><td class="num">15%</td><td class="num">3</td><td class="num">30</td></tr>
+<tr><td>Answers</td><td class="num">20%</td><td class="num">1</td><td class="num">35</td></tr>
 </table></div>
-<p>The actual summarizer bounds conversation input to 160,000 characters, trims long tool results and samples over-budget histories. The explorer approximates that with token counts and an oldest-first cap. It does not reproduce sampling content, CJK density, recent-turn excerpts, split-turn summary calls, semantic audits, compressed reasoning, response latency or memory-tool I/O. Actual memory flushes also have a 2 MB transcript trigger and may be skipped by runtime conditions; only the per-compaction cost is represented here. Native Responses checkpoint compaction, after-delivery maintenance and tool-round pressure scheduling require separate future adapters. This should not be described as an exact simulation of all OpenClaw defaults.</p>
-<p>Primary sources:</p>
-<p class="bullet">• <a href="https://github.com/openclaw/openclaw/blob/c49b553b85b82bc700465d4607949574f892366c/docs/reference/session-management-compaction/compaction.md">Compaction behavior, thresholds and reserves</a></p>
-<p class="bullet">• <a href="https://github.com/openclaw/openclaw/blob/c49b553b85b82bc700465d4607949574f892366c/docs/concepts/compaction.md">Bounded summarizer input, safeguard mode and summary record</a></p>
-<p class="bullet">• <a href="https://github.com/openclaw/openclaw/blob/c49b553b85b82bc700465d4607949574f892366c/packages/agent-core/src/harness/compaction/compaction-cut-point.ts">Recent-tail cut point</a></p>
-<p class="bullet">• <a href="https://github.com/openclaw/openclaw/blob/c49b553b85b82bc700465d4607949574f892366c/src/auto-reply/reply/memory-flush-plan.ts">Memory-flush plan</a></p>
-<p class="bullet">• <a href="https://github.com/openclaw/openclaw/blob/c49b553b85b82bc700465d4607949574f892366c/docs/concepts/session-pruning.md">Session pruning and the server-side clearing parameters</a></p>
-<p class="bullet">• <a href="https://github.com/openclaw/openclaw/blob/c49b553b85b82bc700465d4607949574f892366c/docs/providers/anthropic.md">Anthropic provider defaults, including server-side compaction</a></p>
-<p class="bullet">• <a href="https://github.com/openclaw/openclaw/blob/c49b553b85b82bc700465d4607949574f892366c/docs/reference/prompt-caching.md">Cache retention defaults and scheduled cache reuse</a></p>
-<p class="bullet">• <a href="https://github.com/github/markup#github-markup">GitHub Markdown sanitization</a></p>
-<p>Whether a source is in the request is deliberately separate from answer accuracy. A block that OpenClaw summarized may still have its useful facts in the summary. The explorer does not generate that summary, so it cannot score what survives and makes no quality claim. This matters only for the OpenAI presets: on Claude presets nothing is summarized in ordinary workloads, and both arms fetch back what they removed.</p>
-<h2>Validation and next step</h2>
-<p>Engine tests cover deterministic causal graphs, company heterogeneity, shared-prefix/TTL accounting, generated-output cache timing, long-tier rates, protected dependencies and recall, summary/flush costs and bounds, deterministic-record replay cost, abandonment pings, negative savings, invalid configuration, admission and zero denominators. Tests also cover pre-recovery retention, per-type dependencies, constrained minimum cost, causal execution, model-bound cache defaults and Haiku whole-request pricing tiers. Tests cover matched-cohort averages, adaptive survival axes, zero retrieval, cache-mix reconciliation and ping aggregation. Browser checks cover slider boundaries, model changes, zero/large retrieval, short-thread scaling, average and individual views, reset, validation and responsive layout.</p>
-<p>The next evidence step is an adapter using actual documents and generated answers, compared against the real package under the same settings. See <a href="benchmarks.html">the benchmark source plan</a>. No benchmark dataset is used in these calculator results.</p></main></body></html>
+<p>The other workload defaults (25,000 retrieved tokens per turn, 8-turn threads, a four-minute return) are assumptions, not measurements.</p>
+
+<h2>Prices and cache</h2>
+<p>Every request is a sequence of blocks with fixed identities and sizes. For each call, with rates per million tokens:</p>
+<pre><code>fresh = input - cached
+cost  = fresh  × input_rate × cache_write × long_input  / 1,000,000
+      + cached × cache_read_rate          × long_input  / 1,000,000
+      + output × output_rate              × long_output / 1,000,000</code></pre>
+<ul>
+<li><strong>Cached</strong> is the longest start a request shares with an earlier request of the same thread that has not expired, in whole cache blocks and at least the model's minimum. An entry lives exactly the configured lifetime from the request that wrote or read it. Other threads share nothing.</li>
+<li>A request below the cache minimum pays the plain input price for its fresh tokens.</li>
+<li>The long-request rates apply to the whole request once its input exceeds the threshold. Zero turns them off.</li>
+<li>An answer enters the cache only when a later request carries it.</li>
+</ul>
+<p>Presets hold list prices in US dollars per million tokens, checked against the provider pages on <strong>20 November 2026</strong>. The package's price sheet carries the same numbers, and a test fails when the two differ.</p>
+<div class="table-scroll"><table>
+<tr><th>Preset</th><th class="num">Input</th><th class="num">Cache read</th><th class="num">Output</th><th>Cache</th><th>Long requests</th></tr>
+<tr><td><a href="https://platform.claude.com/docs/en/about-claude/pricing">Claude Fable 5.2</a></td><td class="num">8</td><td class="num">0.20</td><td class="num">40</td><td>5 min, from 512 tokens</td><td>None</td></tr>
+<tr><td>Claude Opus 5.5</td><td class="num">4</td><td class="num">0.20</td><td class="num">20</td><td>5 min, from 512 tokens</td><td>None</td></tr>
+<tr><td>Claude Sonnet 5.5</td><td class="num">2</td><td class="num">0.10</td><td class="num">10</td><td>5 min, from 512 tokens</td><td>None</td></tr>
+<tr><td>Claude Haiku 5.5</td><td class="num">0.10</td><td class="num">0.01</td><td class="num">0.50</td><td>5 min, from 512 tokens</td><td>Above 100k: 5× every rate</td></tr>
+<tr><td><a href="https://developers.openai.com/api/docs/models/gpt-6-astra">GPT-6 Astra</a></td><td class="num">10</td><td class="num">1</td><td class="num">50</td><td>30 min, from 1,024 tokens</td><td>Above 272k: 2× input and cache, 1.5× output</td></tr>
+<tr><td><a href="https://developers.openai.com/api/docs/models/gpt-5.6-terra">GPT-5.6 Terra</a></td><td class="num">2</td><td class="num">0.20</td><td class="num">12</td><td>30 min, from 1,024 tokens</td><td>Above 272k: 2× input and cache, 1.5× output</td></tr>
+<tr><td><a href="https://developers.openai.com/api/docs/models/gpt-6-luna">GPT-6 Luna</a></td><td class="num">0.10</td><td class="num">0.01</td><td class="num">0.50</td><td>30 min, from 1,024 tokens</td><td>Above 272k: 2× input and cache, 1.5× output</td></tr>
+</table></div>
+<p>A cache write costs 1.25× the input price for every preset. Claude presets use a 1,000,000-token window. OpenAI presets use a 1,050,000-token window with at most 922,000 input tokens. Editing a price or a cache rule switches the model to custom prices. Prices exclude tax, regional premiums and batch discounts.</p>
+
+<h2>The Compache side</h2>
+<p>Questions and answers always stay in the request. Only old retrieved text is archived. A policy is three numbers:</p>
+<div class="table-scroll"><table>
+<tr><th>Number</th><th>Meaning</th><th>Candidates</th></tr>
+<tr><td>Compact to</td><td>At a cold return, a request more than two points above this share of the window is compacted down to it, oldest retrieved text first</td><td>1%, 3%, 5%, 10%, 20%, 45%</td></tr>
+<tr><td>Warm at</td><td>While the cache is warm, compaction waits until the request reaches this share of the window</td><td>5%, 10%, 25%, 50%, 60%</td></tr>
+<tr><td>Keep turns</td><td>Retrieved text from the latest turns is never archived</td><td>None, or enough turns to cover 25%, 50%, 75%, 90%, 95% or 99% of the retrieved text later turns need</td></tr>
+</table></div>
+<ul>
+<li>With the default workload that is 147 candidates: 21 pairs of the first two numbers, each with seven horizons. A run in which the warm trigger never decided anything is shared by every higher trigger, which changes no result.</li>
+<li><strong>The floor.</strong> A candidate must finish every turn and leave at least the chosen share of what later turns need in the request, before anything is fetched back. That share is an expectation over the configured chances and distances, taken on the fitted threads. With no needs at all there is no constraint.</li>
+<li><strong>The choice.</strong> The cheapest candidate on the fitted threads wins. Among equally cheap ones, the one that removes least. Both sides are then costed on the second set of threads.</li>
+<li><strong>Fetching back.</strong> A turn that needs an archived source pays one extra call that reads the request and returns a short reply (32 tokens by default). The answer call then carries the source again.</li>
+<li><strong>Admission.</strong> A request must fit the model's input limit and leave the reserve free (32,000 tokens by default). A thread that does not fit is reported, and no saving is shown.</li>
+</ul>
+<p><strong>Keep-warm pings.</strong> After each answer the planner weighs, for one to twelve pings, the chance that the user returns in the extra time the pings buy times the cost a warm return avoids, against every ping sent while waiting. It uses the configured return delay and thread length, never the sampled future. Pings go out a set lead before the cache would expire and stop when the user returns. They are charged when the user never does. No ping is sent for a request that the next warm turn would compact anyway, nor for one too short to cache.</p>
+
+<h2>The OpenClaw baseline</h2>
+<p>The baseline follows OpenClaw's documented defaults at revision <a href="https://github.com/openclaw/openclaw/commit/c49b553b85b82bc700465d4607949574f892366c"><code>c49b553</code></a>, as far as token counts can price them. Every constant is a setting under <em>OpenClaw baseline</em>.</p>
+<div class="table-scroll"><table>
+<tr><th>Behaviour</th><th>In the calculator</th><th>Default</th></tr>
+<tr><td>Clearing old tool results</td><td>On for Claude presets, as OpenClaw's Anthropic provider sets it. Off for OpenAI presets</td><td>Starts at <code>max(50,000, 30% of the window)</code>. Keeps the newest three results. Clears only if that frees <code>max(12,500, 5% of the window)</code>. A cleared result becomes a 12-token placeholder</td></tr>
+<tr><td>Summary</td><td>Older turns are summarized before the next answer</td><td>At <code>min(75% of the window, window − reserve)</code>. The newest 20,000 tokens of turns stay verbatim</td></tr>
+<tr><td>Summary call</td><td>Reads the older turns, with each tool result cut short</td><td>At most 40,000 tokens, 500 per tool result, 2,048 system tokens. Returns 4,000 tokens</td></tr>
+<tr><td>Record and flush</td><td>A fixed record follows each summary. A memory flush precedes it</td><td>1,500 tokens. 256 output tokens</td></tr>
+<tr><td>Reserve</td><td>Context an answer must leave free</td><td><code>min(20,000, 25% of the window)</code></td></tr>
+<tr><td>Fetching back</td><td>A cleared result that a turn needs is fetched again, with the same extra call as on the Compache side. A summarized source is not</td><td></td></tr>
+<tr><td>Keep-warm</td><td>None. OpenClaw's defaults send no request to keep a cache entry alive</td><td></td></tr>
+</table></div>
+<p>For OpenAI models OpenClaw's own default calls OpenAI's compaction endpoint at the same 75% mark. What that keeps and costs is not published in a form this page can price, so the client-side summary stands in for it. Whether a summary still carries a fact is not evaluated: a summarized source counts as no longer in view.</p>
+
+<h2>Reading the page</h2>
+<ul>
+<li><strong>Cost per 1,000 turns</strong> is the cost of every answer, ping, fetch-back, summary and flush call on the costed threads, divided by their turns.</li>
+<li><strong>Needed sources in view</strong> is, of everything turns needed, the share that was in the request before anything was fetched back.</li>
+<li><strong>Input read from cache</strong> counts the input tokens of answer calls only.</li>
+<li><strong>Tokens per turn</strong> averages the request size over the threads that reach each turn on both sides. The bars below it show how many that is.</li>
+<li><strong>Keep-warm pings</strong> shows the planner's amounts after one turn, per 1,000 waits. In the average view it averages the same plan over the threads that can be pinged at that turn.</li>
+<li><strong>Input tokens of answers</strong> splits answer input into what was read from the cache and why the rest was not: new this turn, the first turn of a thread, an expired entry, or a request that changed before that point.</li>
+</ul>
+
+<h2>Limits</h2>
+<ul>
+<li>Token counts and list prices are assumptions. A cache entry is taken to live exactly its documented lifetime. Providers may keep it longer or evict it sooner.</li>
+<li>One answer call per turn, after retrieval. Tool loops and call duration are not modeled.</li>
+<li>Both sides know which earlier sources a turn needs. Real requests have to find that out.</li>
+<li>Needs are independent draws per kind. A real thread has structure this does not capture.</li>
+<li>The policy is the cheapest of a finite set of candidates, not the package's fitted policy. It removes whole retrieved blocks and does not price the placeholder left behind.</li>
+<li>Pings can raise the realized cost: the planner decides on expectations.</li>
+<li>OpenClaw's summary quality, retries, memory tools and its OpenAI compaction path are not modeled.</li>
+</ul>
+
+<h2>Sources</h2>
+<ul>
+<li><a href="https://platform.claude.com/docs/en/about-claude/pricing">Anthropic pricing</a>, <a href="https://platform.claude.com/docs/en/models/overview">model limits</a> and <a href="https://platform.claude.com/docs/en/build-with-claude/prompt-caching">prompt caching</a></li>
+<li><a href="https://developers.openai.com/api/docs/guides/prompt-caching">OpenAI prompt caching</a> and the model pages linked in the table</li>
+<li>OpenClaw at the pinned revision: <a href="https://github.com/openclaw/openclaw/blob/c49b553b85b82bc700465d4607949574f892366c/docs/reference/session-management-compaction/compaction.md">compaction thresholds and reserves</a>, <a href="https://github.com/openclaw/openclaw/blob/c49b553b85b82bc700465d4607949574f892366c/docs/concepts/compaction.md">summarizer input and record</a>, <a href="https://github.com/openclaw/openclaw/blob/c49b553b85b82bc700465d4607949574f892366c/packages/agent-core/src/harness/compaction/compaction-cut-point.ts">recent-tail cut point</a>, <a href="https://github.com/openclaw/openclaw/blob/c49b553b85b82bc700465d4607949574f892366c/src/auto-reply/reply/memory-flush-plan.ts">memory flush</a>, <a href="https://github.com/openclaw/openclaw/blob/c49b553b85b82bc700465d4607949574f892366c/docs/concepts/session-pruning.md">tool-result clearing</a>, <a href="https://github.com/openclaw/openclaw/blob/c49b553b85b82bc700465d4607949574f892366c/docs/providers/anthropic.md">Anthropic provider defaults</a> and <a href="https://github.com/openclaw/openclaw/blob/c49b553b85b82bc700465d4607949574f892366c/docs/reference/prompt-caching.md">cache retention</a></li>
+</ul>
+
+<footer><span>Compache · methodology</span><span><a href="./">Calculator</a> · <a href="https://github.com/BarendPotijk/compache/tree/main/site">Source</a></span></footer>
+</main>
+</body>
+</html>

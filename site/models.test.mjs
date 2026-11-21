@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {presets,applyPreset} from './models.mjs';
+import {readFileSync} from 'node:fs';
+import {presets,applyPreset,presetKey} from './models.mjs';
 import {configure,priceCall,runArm} from './engine.mjs';
 test('provider presets bind cache defaults and remove legacy model',()=>{
  assert.equal(presets.gpt41,undefined);
@@ -19,4 +20,21 @@ test('identical six-minute gap is warm for Luna and cold for Claude',()=>{
  const workload={totalRuns:2,threads:[{id:'x',turns:[0,1].map(i=>({index:i,time:i*6,inputTokens:100,retrievalTokens:2000,outputTokens:100,dependencies:[]}))}]};
  const a=runArm(workload,applyPreset({keepWarm:false},'luna'),'compache'),b=runArm(workload,applyPreset({keepWarm:false},'opus'),'compache');
  assert.ok(a.ledger[1].cachedTokens>0);assert.equal(b.ledger[1].cachedTokens,0);
+});
+test('the calculator presets and the package price sheet agree on every number',()=>{
+ const sheet=JSON.parse(readFileSync(new URL('../src/compache/models.json',import.meta.url),'utf8')), seen=new Set();
+ assert.equal(sheet.checked,'2026-11-20');
+ for(const [id,m] of Object.entries(sheet.models)) {
+  const p=presets[m.preset];assert.ok(p,`${id} names the preset ${m.preset}, which the calculator does not have`);
+  assert.ok(!seen.has(m.preset),`two models name the preset ${m.preset}`);seen.add(m.preset);
+  assert.equal(p.id,id);assert.equal(presetKey(id),m.preset);assert.equal(presetKey(m.preset),m.preset);
+  assert.deepEqual({name:p.name,url:p.url,input:p.model.inputRate,cacheRead:p.model.cachedRate,output:p.model.outputRate,write:p.model.writeMultiplier,context:p.model.context,maxInput:p.model.maxInput,
+    ttlSeconds:p.ttlMinutes*60,cacheMin:p.cacheMinTokens,cacheBlock:p.cacheBlockTokens,longThreshold:p.model.longThreshold,longInput:p.model.longInputMultiplier,longOutput:p.model.longOutputMultiplier},
+   {name:m.name,url:m.source,input:m.input_price,cacheRead:m.cache_read_price,output:m.output_price,write:m.cache_write_multiplier,context:m.context_tokens,maxInput:m.max_input_tokens,
+    ttlSeconds:m.cache_ttl_seconds,cacheMin:m.cache_min_tokens,cacheBlock:m.cache_block_tokens,longThreshold:m.long_input_threshold??0,longInput:m.long_input_factor,longOutput:m.long_output_factor},id);
+  // OpenClaw clears old tool results for its Anthropic provider only.
+  assert.equal(p.toolClearing,m.provider==='anthropic',id);
+ }
+ assert.deepEqual([...seen].sort(),Object.keys(presets).sort());
+ assert.equal(presetKey('custom'),undefined);assert.equal(presetKey('claude-sonnet'),undefined);
 });
