@@ -20,7 +20,7 @@ from random import Random
 from statistics import NormalDist, fmean, pstdev
 from types import MappingProxyType
 
-from compache.traces import ContractError
+from compache.errors import ContractError
 
 from .contracts import ModelSpec, number, seconds
 

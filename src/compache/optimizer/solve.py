@@ -1,12 +1,12 @@
 """Choose the cut and the ping count by replayed cost on the caller's own threads."""
 
-from compache.traces import ContractError
+from compache.errors import ContractError
 
 from .contracts import digest, number, seconds
 from .distribution import fit_distribution, validate_calls_per_run
 from .retention import evidence_windows, fit_recipes, recipe_grid, size_ladder
-from .workload import WorkloadPolicy
-from .workload_replay import _run_arm
+from .session import WorkloadPolicy
+from .replay import _run_arm
 
 __all__ = ["solve_workload"]
 
@@ -143,6 +143,12 @@ def solve_workload(
     fold_of = {
         t.thread_id: int(digest([salt, t.thread_id])[:8], 16) % folds for t in threads
     }
+    if len(set(fold_of.values())) == 1:
+        # A handful of threads can hash into one fold. Deal them out instead.
+        ranked = sorted(threads, key=lambda t: digest([salt, t.thread_id]))
+        fold_of = {
+            t.thread_id: i % min(folds, len(threads)) for i, t in enumerate(ranked)
+        }
     candidates = [(None, n) for n in ping_counts] + [
         (row, n) for row in cuts for n in ping_counts
     ]

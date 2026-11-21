@@ -8,7 +8,7 @@ from compache.optimizer.header_traffic import (
     fit_shared_header_traffic,
     header_traffic_signature,
 )
-from compache.traces import ContractError, Thread
+from compache.threads import ContractError, Thread
 from helpers import thread
 
 

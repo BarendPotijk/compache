@@ -8,7 +8,7 @@ import tempfile
 import unittest
 
 from compache.optimizer.cache_breaks import CacheBreakChecker, CacheScope
-from compache.traces import ContractError
+from compache.errors import ContractError
 
 
 class CacheBreaks(unittest.TestCase):

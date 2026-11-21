@@ -1,4 +1,4 @@
 interface:
   display_name: "Compache Dependency Labeler"
-  short_description: "Map RAG thread dependencies with source evidence"
-  default_prompt: "Use $compache-label-dependencies to label input, retrieval, and output dependencies in these RAG threads."
+  short_description: "Label what each turn needed from earlier turns"
+  default_prompt: "Use $compache-label-dependencies to label which earlier parts each turn in these threads needed."

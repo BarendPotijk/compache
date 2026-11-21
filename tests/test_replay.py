@@ -5,9 +5,9 @@ from helpers import END, labels_for, thread
 
 from compache.optimizer.contracts import ModelSpec
 from compache.optimizer.retention import RetentionRecipe
-from compache.optimizer.workload import fit_workload
-from compache.optimizer.workload_replay import replay_workload
-from compache.traces import ContractError, Thread
+from compache.optimizer.session import fit_workload
+from compache.optimizer.replay import replay_workload
+from compache.threads import ContractError, Thread
 
 
 def shifted(t, seconds):
@@ -227,7 +227,7 @@ class WorkloadReplayTests(unittest.TestCase):
         )
         return replay_workload(
             threads,
-            [l for t in threads for l in labels_for(t)],
+            [row for t in threads for row in labels_for(t)],
             artifact,
             observation_end=cutoff,
             system_prompt="s" * 512,

@@ -3,7 +3,7 @@
 from copy import deepcopy
 from dataclasses import dataclass, replace
 
-from compache.traces import ContractError
+from compache.errors import ContractError
 
 from .cache_breaks import CacheBreakChecker, CacheScope
 from .contracts import ModelSpec, digest, number

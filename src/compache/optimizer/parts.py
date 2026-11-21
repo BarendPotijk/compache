@@ -6,9 +6,10 @@ import re
 from dataclasses import dataclass
 from functools import cached_property, lru_cache
 
-from compache.traces import ContractError, Thread
+from compache.threads import ContractError, Thread
 
 from .contracts import canonical, digest, number
+
 
 @dataclass(frozen=True)
 class Source:
@@ -262,14 +263,16 @@ def protected_sources(request: Request):
         previous_end = 0
         for group in groups:
             citation = group.group(1)
-            claim = text[previous_end:group.start()]
+            claim = text[previous_end : group.start()]
             previous_end = group.end()
             # Bare bracket entries may identify a part or chunk without a
             # document. Match whole entries only: prose is not a citation.
             if groups and group.group(0).startswith("["):
                 claim_ids = _identifiers(claim)
                 claim_relevant = not (
-                    qids and claim_ids and not qids & claim_ids
+                    qids
+                    and claim_ids
+                    and not qids & claim_ids
                     and a.run_index not in turns
                 )
                 if claim_relevant:
@@ -277,16 +280,24 @@ def protected_sources(request: Request):
                         key = entry.strip()
                         visible = [p for p in old if p.run_index <= a.run_index]
                         parts = [p for p in visible if p.part_id.lower() == key.lower()]
-                        chunks = [p for p in visible if p.chunk_id and p.chunk_id.lower() == key.lower()]
+                        chunks = [
+                            p
+                            for p in visible
+                            if p.chunk_id and p.chunk_id.lower() == key.lower()
+                        ]
                         # A chunk name shared by documents cannot identify which
                         # document was cited. Repetitions within one document
                         # remain possible occurrences and are all protected.
                         if not parts and len({p.document_id for p in chunks}) == 1:
                             parts = chunks
                         for p in parts:
-                            if (qids and len(claim_ids) > 1 and a.run_index not in turns
+                            if (
+                                qids
+                                and len(claim_ids) > 1
+                                and a.run_index not in turns
                                 and _identifiers(p.text or "")
-                                and not qids & _identifiers(p.text or "")):
+                                and not qids & _identifiers(p.text or "")
+                            ):
                                 continue
                             select(p)
             mentions = sorted(
@@ -294,18 +305,34 @@ def protected_sources(request: Request):
                 for doc in documents
                 for m in re.finditer(
                     r"(?<![\w-])" + re.escape(doc) + r"(?![\w-])",
-                    citation, re.I,
+                    citation,
+                    re.I,
                 )
             )
             for i, (start, end, doc) in enumerate(mentions):
-                scope = citation[start:mentions[i + 1][0] if i + 1 < len(mentions) else len(citation)]
+                scope = citation[
+                    start : mentions[i + 1][0]
+                    if i + 1 < len(mentions)
+                    else len(citation)
+                ]
                 candidates = [
-                    p for p in old
+                    p
+                    for p in old
                     if p.document_id == doc and p.run_index <= a.run_index
                 ]
-                cited_versions = {p.version for p in candidates if p.version and _contains(scope, p.version)}
-                cited_chunks = {p.chunk_id for p in candidates if p.chunk_id and _contains(scope, p.chunk_id)}
-                cited_parts = {p.part_id for p in candidates if _contains(scope, p.part_id)}
+                cited_versions = {
+                    p.version
+                    for p in candidates
+                    if p.version and _contains(scope, p.version)
+                }
+                cited_chunks = {
+                    p.chunk_id
+                    for p in candidates
+                    if p.chunk_id and _contains(scope, p.chunk_id)
+                }
+                cited_parts = {
+                    p.part_id for p in candidates if _contains(scope, p.part_id)
+                }
                 if cited_versions:
                     candidates = [p for p in candidates if p.version in cited_versions]
                 if cited_chunks:
@@ -315,7 +342,12 @@ def protected_sources(request: Request):
                 if not candidates:
                     continue
                 claim_ids = _identifiers(claim)
-                if qids and claim_ids and not qids & claim_ids and a.run_index not in turns:
+                if (
+                    qids
+                    and claim_ids
+                    and not qids & claim_ids
+                    and a.run_index not in turns
+                ):
                     continue
                 # A chunk or occurrence citation is an explicit reference. Keep
                 # every matching occurrence because provenance remains ambiguous.
@@ -325,7 +357,9 @@ def protected_sources(request: Request):
                     continue
                 matches = [p for p in candidates if qids & _identifiers(p.text or "")]
                 if not qids:
-                    matches = [p for p in candidates if len(rare & terms(p.text or "")) >= 2]
+                    matches = [
+                        p for p in candidates if len(rare & terms(p.text or "")) >= 2
+                    ]
                 if matches:
                     for p in matches:
                         select(p)
@@ -348,11 +382,7 @@ def expand(request: Request, source_handle: str, offset=0, limit=48_000) -> dict
     number(offset, "offset", integer=True)
     number(limit, "limit", 1, 48_000, integer=True)
     source = next(
-        (
-            p
-            for p in request.parts
-            if handle(request.thread_id, p) == source_handle
-        ),
+        (p for p in request.parts if handle(request.thread_id, p) == source_handle),
         None,
     )
     if source is None or source.text is None:

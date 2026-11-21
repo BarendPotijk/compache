@@ -17,7 +17,7 @@ import logging
 import sqlite3
 from threading import RLock
 
-from compache.traces import ContractError
+from compache.errors import ContractError
 from .contracts import digest, number
 
 

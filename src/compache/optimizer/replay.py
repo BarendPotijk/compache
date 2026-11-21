@@ -5,18 +5,18 @@ from dataclasses import dataclass
 from heapq import heappop, heappush
 from itertools import count
 
-from compache.traces import ContractError
+from compache.errors import ContractError
 
 from .cache_breaks import CacheBreakChecker, CacheScope
 from .contracts import digest, number, seconds
 from .distribution import repeat_input_usage, validate_calls_per_run
-from compache.dependencies import label_index
+from compache.labels import label_index
 
 from .parts import Request, Source
 from .host_ledger import compare_host_ledger, host_contract
 from .retention import RetentionRecipe, assess, matched_prefix_tokens, render_recipe
 from .shared_prefix import SharedPrefixCatalog
-from .workload import WorkloadPolicy, WorkloadSession
+from .session import WorkloadPolicy, WorkloadSession
 
 __all__ = ["compare_host_ledger", "replay_workload"]
 

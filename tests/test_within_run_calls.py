@@ -10,8 +10,8 @@ from compache.optimizer.distribution import (
     repeat_input_usage,
     validate_calls_per_run,
 )
-from compache.optimizer.workload import fit_workload
-from compache.traces import ContractError
+from compache.optimizer.session import fit_workload
+from compache.errors import ContractError
 from test_distribution_planner import SPEC, cohort, view
 from helpers import END, labels_for, thread
 

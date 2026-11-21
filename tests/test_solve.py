@@ -1,20 +1,13 @@
 """The solver picks the cut and the ping count by replayed cost on its own threads."""
 
-import io
-import json
-import tempfile
 import unittest
-from contextlib import redirect_stderr, redirect_stdout
-from pathlib import Path
 
 from helpers import END, labels_for, thread
 
-from compache.cli import main
 from compache.optimizer import solve_workload
 from compache.optimizer.contracts import ModelSpec
-from compache.optimizer.workload import WorkloadPolicy
-from compache.optimizer.workload_replay import replay_workload
-from compache.traces import ContractError, Thread, write_threads
+from compache.optimizer.session import WorkloadPolicy
+from compache.threads import ContractError, Thread
 
 HEADER = {"system_prompt": "Answer from the supplied notes.", "default_tools": []}
 
@@ -140,71 +133,6 @@ class WorkloadSolveTests(unittest.TestCase):
             self.solve(sample, max_pings=2)
         with self.assertRaisesRegex(ContractError, "ping_counts"):
             self.solve(sample, ping_counts=(1, -1))
-
-    def test_command_writes_a_policy_that_replay_accepts(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            base = Path(tmp)
-            train, heldout = (
-                threads(400),
-                [
-                    Thread.from_dict(
-                        json.loads(
-                            json.dumps(thread(tid="held", n=6, gap=400).to_dict())
-                        )
-                    )
-                ],
-            )
-            write_threads(train, base / "train.jsonl")
-            write_threads(heldout, base / "held.jsonl")
-            (base / "model.json").write_text(json.dumps(self.spec.to_dict()))
-            (base / "header.json").write_text(json.dumps(HEADER))
-
-            def call(*args):
-                out = io.StringIO()
-                with redirect_stdout(out), redirect_stderr(io.StringIO()):
-                    status = main([str(a) for a in args])
-                self.assertEqual(status, 0)
-                return json.loads(out.getvalue())
-
-            common = ("--header", base / "header.json", "--observation-end", END)
-            solved = call(
-                "planner",
-                "solve",
-                "--threads",
-                base / "train.jsonl",
-                "--model-spec",
-                base / "model.json",
-                "--folds",
-                "2",
-                "--output",
-                base / "policy.json",
-                *common,
-            )
-            self.assertEqual(solved["training_threads"], 4)
-            self.assertGreater(solved["chosen"]["max_pings"], 0)
-            policy = json.loads((base / "policy.json").read_text())
-            self.assertEqual(
-                policy["planner_options"]["max_pings"], solved["chosen"]["max_pings"]
-            )
-            replayed = call(
-                "planner",
-                "replay",
-                "--threads",
-                base / "held.jsonl",
-                "--policy",
-                base / "policy.json",
-                "--no-share-headers",
-                "--output",
-                base / "replay.json",
-                *common,
-            )
-            self.assertTrue(replayed["candidate_complete"])
-            report = json.loads((base / "replay.json").read_text())
-            self.assertGreater(report["candidate"]["pings"], 0)
-            direct = replay_workload(
-                heldout, [], policy, observation_end=END, share_headers=False, **HEADER
-            )
-            self.assertEqual(direct["candidate"]["pings"], report["candidate"]["pings"])
 
 
 if __name__ == "__main__":

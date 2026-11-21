@@ -15,7 +15,7 @@ from compache.optimizer.retention import (
     matched_prefix_tokens,
     render_recipe,
 )
-from compache.traces import ContractError
+from compache.errors import ContractError
 
 
 class EditAccountingTests(unittest.TestCase):

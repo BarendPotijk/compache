@@ -13,7 +13,7 @@ from compache.optimizer import (
     WorkloadSession,
     fit_workload,
 )
-from compache.traces import ContractError
+from compache.errors import ContractError
 from helpers import END, labels_for, thread
 
 

@@ -2,8 +2,8 @@
 
 from datetime import datetime, timedelta, timezone
 
-from compache.dependencies import build_packet
-from compache.traces import Thread
+from compache.labels import build_packet
+from compache.threads import Thread
 
 
 def thread(tid="t", company="a", n=3, gap=600, body_size=1000):

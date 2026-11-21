@@ -5,7 +5,7 @@ from hashlib import sha256
 from heapq import heappop, heappush
 from itertools import groupby
 
-from compache.traces import ContractError
+from compache.errors import ContractError
 
 from .cache_breaks import CacheScope
 from .contracts import digest, seconds

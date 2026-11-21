@@ -6,7 +6,7 @@ from dataclasses import replace
 from test_distribution_planner import SPEC, cohort, view
 
 from compache.optimizer.distribution import plan_distribution_idle, repeat_ping_charge
-from compache.traces import ContractError
+from compache.errors import ContractError
 
 
 def receipt(
