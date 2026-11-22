@@ -19,6 +19,7 @@ from threading import RLock
 
 from compache.errors import ContractError
 from .contracts import digest, number
+from .distribution import modeled_read_tokens
 
 
 logger = logging.getLogger(__name__)
@@ -518,6 +519,7 @@ class CacheBreakChecker:
         spec,
         verified_static,
         modeled,
+        modeled_read_share=1.0,
         write_tokens=None,
         ping_has_private_suffix=False,
     ):
@@ -543,6 +545,13 @@ class CacheBreakChecker:
             # The first ping adds the new answer to the foreground input. Only
             # the previously held block-rounded prefix is expected to be read.
             expected = prior["reusable"]
+            # Replay charges a fitted fraction of an otherwise matching prefix.
+            # The physical capacity remains the reference for provider receipts.
+            expected_reads = (
+                modeled_read_tokens(spec, expected, modeled_read_share)
+                if modeled
+                else expected
+            )
             if status != "completed":
                 reuse = "unverified"
             elif unverified_layout:
@@ -557,6 +566,8 @@ class CacheBreakChecker:
                 reuse = "zero_read"
             elif verified_static is not None and reads <= verified_static < expected:
                 reuse = "static_only"
+            elif modeled and 0 < expected_reads <= reads:
+                reuse = "expected_reuse"
             else:
                 reuse = "partial_read"
             if status != "completed":
@@ -618,6 +629,7 @@ class CacheBreakChecker:
                 "reuse_outcome": reuse,
                 "evidence_source": "modeled" if modeled else "provider",
                 "expected_reusable_tokens": expected,
+                "expected_cache_read_tokens": expected_reads,
                 "ping_has_private_suffix": private,
                 "foreground_reusable_tokens": foreground,
                 "input_tokens": None if modeled else input_tokens,

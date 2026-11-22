@@ -618,6 +618,43 @@ class PingReceipts(unittest.TestCase):
             self.assertIsNone(s.ping_view(run_id="r", at=510))
             self.assertEqual(self.next_account(s, 520)["anchor_response_id"], "answer")
 
+    def test_fitted_reads_confirm_only_the_modeled_prefix(self):
+        for tid, share, reads, outcome in (
+            ("match", 0.999, 2045, "refresh_confirmed"),
+            ("one-short", 0.999, 2044, "partial_read"),
+            ("zero-share", 0.0, 0, "zero_read"),
+            ("rounds-to-zero", 0.0001, 1, "static_only"),
+            ("header-only", 0.125, 256, "static_only"),
+        ):
+            with self.subTest(tid=tid):
+                self.policy.cache_read_share = 1.0
+                session = self.start(tid)
+                session.policy.cache_read_share = share
+                size = session.ping_view(run_id="r", at=255).tokens
+                session.acknowledge_ping(
+                    run_id="r",
+                    at=255,
+                    modeled_cached_input_tokens=reads,
+                    modeled_cache_write_input_tokens=size - reads,
+                    modeled_output_tokens=3,
+                )
+                event = session.last_ping_receipt
+                self.assertEqual(event["outcome"], outcome)
+                self.assertEqual(event["expected_reusable_tokens"], 2048)
+                self.assertEqual(event["expected_cache_read_tokens"], int(2048 * share))
+                self.assertEqual(event["modeled_cached_tokens"], reads)
+                self.assertEqual(
+                    event["modeled_cache_write_input_tokens"], size - reads
+                )
+                self.assertIsNone(event["observed_cached_tokens"])
+
+        self.policy.cache_read_share = 1.0
+        session = self.start("provider")
+        session.policy.cache_read_share = 0.999
+        session.acknowledge_ping(run_id="r", at=255, response=self.response(reads=2045))
+        self.assertEqual(session.last_ping_receipt["outcome"], "partial_read")
+        self.assertEqual(session.last_ping_receipt["expected_cache_read_tokens"], 2048)
+
     def test_modeled_receipt_is_disjoint_from_provider_evidence_and_occupancy(self):
         s = self.start()
         self.assertTrue(

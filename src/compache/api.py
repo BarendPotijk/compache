@@ -324,6 +324,11 @@ class Policy:
                 "retrieved": recipe.retrieval_runs,
                 "matching_retrieved": recipe.protect_query_matches,
                 "always_under_tokens": recipe.keep_under_tokens,
+                **(
+                    {"cited_answer_runs": recipe.cited_answer_runs}
+                    if recipe.cited_answer_runs != 0
+                    else {}
+                ),
             },
             "max_pings": self.max_pings,
             "coverage": chosen.get("coverage"),
@@ -352,6 +357,10 @@ class Policy:
             if recipe.protect_query_matches and recipe.retrieval_runs is not None:
                 lines.append(
                     "Earlier retrieved text that matches the new question stays too."
+                )
+            if recipe.cited_answer_runs != 0:
+                lines.append(
+                    f"Keep visible sources cited by {_window(recipe.cited_answer_runs, 'answers')}."
                 )
             if recipe.keep_under_tokens:
                 lines.append(
@@ -462,7 +471,8 @@ class Session:
         """The request to send for a new user message and the text retrieved for it.
 
         Each retrieved item is text, or a dict with `text` and optionally
-        `document_id`, `version` and `chunk_id`. Call again with the same
+        `part_id`, `document_id`, `version` and `chunk_id`. An explicit part ID
+        identifies this occurrence and must be unique in the thread. Call again with the same
         arguments to retry a request that was never answered.
         """
         run = self._run + 1
@@ -470,7 +480,19 @@ class Session:
         parts = [Source(f"{prefix}:input", "input", run, question)]
         for k, item in enumerate(retrieved, 1):
             fields = {"text": item} if isinstance(item, str) else dict(item)
-            part_id = f"{prefix}:retrieval:{k}"
+            part_id = fields.get("part_id", f"{prefix}:retrieval:{k}")
+            if (
+                not isinstance(part_id, str)
+                or not part_id.strip()
+                or part_id.strip() != part_id
+            ):
+                raise ContractError(
+                    "a retrieval part_id must be a nonempty trimmed string"
+                )
+            if part_id == f"{prefix}:output":
+                raise ContractError(
+                    "a retrieval part_id collides with the current answer"
+                )
             parts.append(
                 Source(
                     part_id,
@@ -503,18 +525,37 @@ class Session:
             plan,
         )
 
-    def complete(self, turn: Turn, answer: str, *, at=None, usage=None):
+    def complete(
+        self, turn: Turn, answer: str, *, at=None, usage=None, cited_part_ids=()
+    ):
         """Record the answer to `turn`. Returns when the next ping is due, if one is.
 
         `usage` is the provider's usage for the answer call, as a dict in
         Anthropic's or OpenAI's shape. With it the session tracks real input
         sizes and notices a cache that stopped hitting. Without it the request
-        is taken to be cached the way the model's rules say.
+        is taken to be cached the way the model's rules say. If the host
+        records which visible retrievals the answer cited, pass their part IDs.
         """
         if self._pending is None:
             raise ContractError("no prepared turn to complete")
         request, parts = self._pending
-        source = Source(f"{request.run_id}:output", "output", request.run_index, answer)
+        source = Source(
+            f"{request.run_id}:output",
+            "output",
+            request.run_index,
+            answer,
+            cited_part_ids=cited_part_ids,
+        )
+        if source.cited_part_ids:
+            visible = {
+                p.part_id
+                for p in turn.parts
+                if p.kind == "retrieval" and p.part_id not in turn.archived_ids
+            }
+            if not set(source.cited_part_ids) <= visible:
+                raise ContractError(
+                    "cited_part_ids must name visible retrievals in the answered request"
+                )
         counters = _counters(usage)
         if not counters:
             spec = self.policy.spec

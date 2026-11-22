@@ -118,6 +118,7 @@ def solve_workload(
         max(len(t.runs) for t in threads),
         kinds=kinds,
         keep_under_tokens=size_ladder(threads, spec),
+        include_citations=any(r.cited_part_ids for t in threads for r in t.runs),
         extra_windows=evidence_windows(labelled(), labels),
     )
     rows = fit_recipes(

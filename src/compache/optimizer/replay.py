@@ -352,7 +352,11 @@ def _run_arm(
                 ctx.pending = None
                 if candidate:
                     answer = Source(
-                        run.output.part_id, "output", run.run_index, run.output.text
+                        run.output.part_id,
+                        "output",
+                        run.run_index,
+                        run.output.text,
+                        cited_part_ids=run.cited_part_ids,
                     )
                     # The trace associates its input meter with the historical
                     # generation. Its normalized part IDs omit the submitted
