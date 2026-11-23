@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Price compache against OpenClaw's defaults with the calculator's cost model.
-//   node scripts/openclaw_comparison.mjs [--requirement 0.95] [--model sonnet] [--json docs/assets/data/openclaw.json]
+//   node scripts/openclaw_comparison.mjs [--requirement 0.8] [--model sonnet] [--json docs/assets/data/openclaw.json]
 // Prints cost per 1,000 turns for every model preset at three thread lengths. --json also writes the
 // rows of one model, which scripts/figures.py draws as docs/assets/openclaw-cost.svg.
 import {writeFileSync} from 'node:fs';
@@ -8,7 +8,7 @@ import {parseArgs} from 'node:util';
 import {simulate} from '../site/engine.mjs';
 import {applyPreset, presets} from '../site/models.mjs';
 
-const {values: args} = parseArgs({options: {requirement: {type: 'string', default: '0.95'}, json: {type: 'string'}, model: {type: 'string', default: 'sonnet'}}});
+const {values: args} = parseArgs({options: {requirement: {type: 'string', default: '0.8'}, json: {type: 'string'}, model: {type: 'string', default: 'sonnet'}}});
 const requirement = Number(args.requirement);
 // Median and 95th-percentile turns per thread. The first pair is the calculator default.
 const LENGTHS = [[8, 20], [30, 60], [80, 140]];

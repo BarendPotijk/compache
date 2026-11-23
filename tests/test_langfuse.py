@@ -108,103 +108,6 @@ def tool_loop(session="s1", model="claude-sonnet-5-5"):
 
 
 class RebuildTests(unittest.TestCase):
-    def test_versioned_rag_envelope_preserves_source_ids_usage_and_hidden_candidates(
-        self,
-    ):
-        from helpers import thread
-
-        original = thread(tid="archived", n=2).to_dict()
-        parts, events = {}, []
-        for run in original["runs"]:
-            run["retrievals"].append(
-                {
-                    **run["retrievals"][0],
-                    "part_id": run["run_id"] + "-hidden",
-                    "exposed_to_model": False,
-                }
-            )
-            for kind, group in [
-                ("user", [run["input"]]),
-                ("retrieval", run["retrievals"]),
-                ("assistant", [run["output"]]),
-            ]:
-                parts.update(
-                    {
-                        p["part_id"]: {
-                            "role": "user" if kind == "retrieval" else kind,
-                            "part_id": p["part_id"],
-                            "content": p["text"],
-                            **(
-                                {"context_kind": "retrieval"}
-                                if kind == "retrieval"
-                                else {}
-                            ),
-                        }
-                        for p in group
-                    }
-                )
-            g = run["generation"]
-            g["usage"] = {"input": 100, "output": 2, "cache_read": 64, "cache_write": 0}
-            info = {
-                "thread_id": original["thread_id"],
-                "company_id": original["company_id"],
-                "run_id": run["run_id"],
-            }
-            base = {
-                "traceId": run["run_id"],
-                "sessionId": original["thread_id"],
-                "metadata": info,
-                "startTime": run["started_at"],
-                "endTime": run["ended_at"],
-            }
-            root = run["run_id"] + "-root"
-            events.extend(
-                [
-                    dict(
-                        base,
-                        id=root,
-                        name="synthetic-rag-run",
-                        type="SPAN",
-                        input=run["input"],
-                        output=run["output"],
-                    ),
-                    dict(
-                        base,
-                        id=root + "-r",
-                        name="retrieval",
-                        type="SPAN",
-                        parentObservationId=root,
-                        output={"candidates": run["retrievals"]},
-                    ),
-                    dict(
-                        base,
-                        id=g["observation_id"],
-                        name="answer-generation",
-                        type="GENERATION",
-                        parentObservationId=root,
-                        model=g["model"],
-                        usageDetails={
-                            "input": 36,
-                            "output": 2,
-                            "cache_read_input_tokens": 64,
-                        },
-                        input={
-                            "schema_version": "compache-rag-message-envelope-v1",
-                            "messages": [parts[p] for p in g["request_part_ids"]],
-                            "request_part_ids": g["request_part_ids"],
-                        },
-                        output=run["output"],
-                    ),
-                ]
-            )
-        actual, report = threads_from_observations(reversed(events))
-        self.assertEqual(report["turns"], 2)
-        self.assertEqual(actual[0]["runs"], original["runs"])
-        events[-1]["input"]["messages"] = events[-1]["input"]["messages"][::-1]
-        actual, report = threads_from_observations(events)
-        self.assertEqual(actual, [])
-        self.assertEqual(report["sessions_unreadable"], 1)
-
     def test_a_tool_loop_traced_call_by_call_becomes_one_run_per_question(self):
         rows = tool_loop()
         # Rows arrive newest first.
@@ -246,6 +149,14 @@ class RebuildTests(unittest.TestCase):
             dict(second.generation.usage),
             {"input": 2500, "output": 60, "cache_read": 1152, "cache_write": 0},
         )
+        # A cached counter that is reported counts, zero included. A call without one says nothing.
+        self.assertTrue(first.generation.cache_read_reported)
+        bare = tool_loop()
+        for item in bare[:2]:
+            del item["usageDetails"]["input_cached_tokens"]
+        unmetered = load_threads(threads_from_observations(bare)[0])[0].runs[0]
+        self.assertEqual(dict(unmetered.generation.usage)["input"], 1200)
+        self.assertFalse(unmetered.generation.cache_read_reported)
         found = recorded(threads)
         self.assertEqual(
             (

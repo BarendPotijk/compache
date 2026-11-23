@@ -61,13 +61,18 @@ def _arriving(run, spec):
 
 
 def measure_cache_reads(threads, spec, next_endpoint_reuse_fraction=None):
-    """Mean realized share on metered, in-TTL returns carrying the conversation."""
+    """Mean realized share on metered, in-TTL returns carrying the conversation.
+
+    A thread whose usage never shows a cache read or write says nothing: the
+    application may not have switched caching on, and its zeros are not misses.
+    """
     shares = []
     overlap = next_endpoint_reuse_fraction or {}
     if not spec.cache_ttl_seconds:
         return {"observations": 0, "share": None}
     for thread in threads:
-        if not any(run.generation.usage for run in thread.runs):
+        metered = [dict(r.generation.usage) for r in thread.runs if r.generation.usage]
+        if not any(u["cache_read"] or u["cache_write"] for u in metered):
             continue
         history = 0
         previous = None

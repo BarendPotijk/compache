@@ -52,7 +52,7 @@ If you keep turns instead of messages, write them directly:
 
 A turn that made several model calls can say so with `"calls": 3`. Parts are numbered `<thread>:<turn>:input`, `<thread>:<turn>:retrieval:<k>` and `<thread>:<turn>:output`. Labels refer to these IDs. A thread that spells out every identity itself, as the benchmark builders write them, is taken as is.
 
-For chatbots that record sources, a retrieval can carry a thread-unique `part_id`, such as `"lookup-17"`. An assistant message can then carry `"cited_part_ids": ["lookup-17"]`. In run-shaped traces, put the same list on the run. Use the IDs of retrieval occurrences the answer actually used. The fitter can then price keeping cited results for longer than other tool output. The lookback is chosen on the training threads. Ordinary dialogue and tool calls without source attribution can omit both fields.
+If your application records which sources an answer cited, say so: give the retrieved message a `"part_id"` that is unique in the thread, such as `"lookup-17"`, and the assistant message `"cited_part_ids": ["lookup-17"]`. With turns, put the list on the run. The fit can then keep cited sources longer than the rest of what was retrieved, for as long as your threads show it pays.
 
 A thread in either shape may also carry `"tools"`, the tool definitions sent on every request, and `"observed_until"`, when the record was read.
 
@@ -121,17 +121,15 @@ compache fit threads.jsonl --labels labels.jsonl --model claude-sonnet-5-5 -o po
 ```text
 Fitted on 4 threads, 71 turns (71 labelled) for claude-sonnet-5-5.
 
-Keep all questions, all answers and retrieved text from the last 3 turns.
-Parts of at most 422 tokens always stay.
-Send up to 3 keep-warm pings while a user is away.
-95% of labelled historical requirements retain their evidence in view.
-$27.22 per 1,000 turns against $50.25 keeping everything: 46% less.
+Keep questions from the last 4 turns, answers from the last 9 turns and retrieved text from the last turn.
+Send up to 1 keep-warm ping while a user is away.
+82% of what the labelled turns need from earlier turns stays in view. The rest is fetched back, and that call is in the cost.
+$16.10 per 1,000 turns against $50.25 keeping everything: 68% less.
 ```
 
 | Option | Use |
 |---|---|
 | `--model` | A model with a built-in price sheet (`compache models` lists them), or a JSON file of model spec fields for any other. Fields left out take the defaults of `ModelSpec`. It can be left out when the threads record their model, as a file from `compache pull` does |
-| `--retention-floor` | Minimum share of assessed historical requirements whose evidence a candidate must retain on the fit sample. Defaults to 0.95 |
 | `--system-prompt`, `--tools` | The text and tool definitions sent on every request, when the threads do not carry them |
 | `--observed-until` | When the record was cut, if conversations were still going and the threads do not say. By default every thread is taken to be over |
 | `--json` | Print the summary as JSON |
@@ -144,7 +142,7 @@ In Python, `compache.fit` returns a `Policy`: `policy.describe()` is the text ab
 compache replay heldout.jsonl --labels heldout-labels.jsonl --policy policy.json
 ```
 
-It prices the policy and keeping everything on the same arrivals, including every ping. With labels it also reports how much of what those threads needed stays in view and adds the cost of fetching the rest back. The JSON report gives retention by thread and counts unknown requirements separately. Each cost per 1,000 turns uses that policy’s completed answers. If either policy exhausts its context window, the report gives savings only for the turns both policies completed.
+It prices the policy and keeping everything on the same arrivals, including every ping. With labels it also reports how much of what those threads needed stays in view and adds the cost of fetching the rest back. A fit sits near its floor by construction, so this is the number to trust. `--json` adds the same per thread. If a request outgrows the model's context window, the costs are compared on the turns both sides answered.
 
 ## 5. Apply
 
@@ -170,8 +168,7 @@ if session.next_ping_at:                         # epoch seconds, or None
 | `session.ping_sent(at=..., usage=...)` | Records the ping. More pings follow only when its usage shows the cache was read |
 | `session.reopen(reference)` | Answers the model's `reopen` tool call with the archived text |
 
-If a tool provides source attribution, pass its occurrence IDs to `session.complete(turn, answer, cited_part_ids=[...])`. Use the same IDs on retrieved items in `session.prepare`, or read the generated IDs from `turn.parts`. The IDs are local metadata and add no text to the model request.
-
+- **Cited sources.** For a policy fitted with them, pass `session.complete(turn, answer, cited_part_ids=[...])`. The IDs are the `part_id` of items given to `prepare`, or the generated ones in `turn.parts`, and must be in view in that request. They add nothing to what the model is sent.
 - **Archived parts.** A cut replaces a part with a notice that carries a handle. Give the model `compache.REOPEN_TOOL` and `compache.REOPEN_INSTRUCTIONS`, and pass its tool calls to `session.reopen`.
 - **Placement.** `turn.messages` puts answers under `assistant` and everything else under `user`. If your application sends retrieved text another way, build the request from `turn.parts` and keep that mapping fixed.
 - **Tool loops.** Call `prepare` once per user message and append the calls of that turn yourself.

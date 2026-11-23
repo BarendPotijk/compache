@@ -113,7 +113,7 @@ class WorkloadSolveTests(unittest.TestCase):
                     {"sources": [{"part_id": source.part_id, "quote": source.text}]}
                 ]
             labels.extend(rows)
-        policy = self.solve(sample, labels, tradeoff_floor=0.8)
+        policy = self.solve(sample, labels)
         chosen = policy["solve"]["chosen"]
         self.assertEqual(chosen["recipe"]["retrieval_runs"], 1)
         self.assertAlmostEqual(chosen["coverage"], 5 / 6)
@@ -122,7 +122,7 @@ class WorkloadSolveTests(unittest.TestCase):
             chosen["expected_cost"], chosen["replayed_cost"] + chosen["recovery_cost"]
         )
         # Without the band no cut loses evidence, and the solver falls back to one that keeps it all.
-        strict = self.solve(sample, labels)["solve"]["chosen"]
+        strict = self.solve(sample, labels, tradeoff_floor=None)["solve"]["chosen"]
         self.assertTrue(strict["recipe"] is None or strict["coverage"] >= 0.95)
 
     def test_independent_labels_allow_a_cut_but_missing_labels_do_not(self):
@@ -139,7 +139,7 @@ class WorkloadSolveTests(unittest.TestCase):
     def test_live_cache_meters_change_the_fitted_schedule(self):
         from datetime import datetime, timedelta
 
-        def fit_share(share, **options):
+        def fit_share(share, caching=True, **options):
             sample = []
             for t in threads(400, n=12):
                 data = t.to_dict()
@@ -161,7 +161,10 @@ class WorkloadSolveTests(unittest.TestCase):
                     )
                     reads = int(prev * share) if i % 4 == 0 else 0
                     run["generation"]["usage"] = dict(
-                        input=size, output=5, cache_read=reads, cache_write=size - reads
+                        input=size,
+                        output=5,
+                        cache_read=reads,
+                        cache_write=size - reads if caching else 0,
                     )
                     prev = size
                     size += self.spec.part_tokens(run["output"]["text"])
@@ -178,6 +181,13 @@ class WorkloadSolveTests(unittest.TestCase):
         overlap = {f"t{i}-r{n}": 0.5 for i in range(4) for n in (4, 8)}
         edited = fit_share(0.1, next_endpoint_reuse_fraction=overlap)
         self.assertEqual(edited["cache_reads"], {"share": None, "observations": 0})
+        # An application that never switched caching on reports zero reads and
+        # zero writes. Those are not misses, so the provider's rules are assumed.
+        off = fit_share(0, caching=False)
+        self.assertEqual(off["cache_reads"], {"share": None, "observations": 0})
+        self.assertEqual(
+            off["planner_options"]["max_pings"], high["planner_options"]["max_pings"]
+        )
 
     def test_invalid_requests(self):
         sample = threads(400)

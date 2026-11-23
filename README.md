@@ -10,7 +10,7 @@ Modeled with the [cost calculator](https://barendpotijk.github.io/compache/) on 
 
 Two things drive the bill of a long thread: how much context every turn sends again, and whether the provider's cache has gone cold by the time the user returns. Each changes what the other is worth, and both depend on your traffic.
 
-![Historical policy sweep for an 80% admission floor, for users who return after 30 seconds, 4 minutes and 30 minutes](docs/assets/policy-map.svg)
+![Cost of every policy the fit priced, for users who return after 30 seconds, 4 minutes and 30 minutes](docs/assets/policy-map.svg)
 
 - **A default is one point for every workload.** Keeping everything costs 1.8 times the fitted policy when users return within seconds and 6.6 times when they take half an hour. OpenClaw's thresholds and Headroom's profiles are fixed points too.
 - **The two dials interact.** With users back after four minutes, pings save $50 per 1,000 turns while the whole history is kept and $4 once it is cut. The right ping schedule depends on the cut, and the other way round.
@@ -30,11 +30,10 @@ In about two seconds, on four sample handbook chats:
 ```text
 Fitted on 4 threads, 71 turns (71 labelled) for claude-sonnet-5-5.
 
-Keep all questions, all answers and retrieved text from the last 3 turns.
-Parts of at most 422 tokens always stay.
-Send up to 3 keep-warm pings while a user is away.
-95% of labelled historical requirements retain their evidence in view.
-$27.22 per 1,000 turns against $50.25 keeping everything: 46% less.
+Keep questions from the last 4 turns, answers from the last 9 turns and retrieved text from the last turn.
+Send up to 1 keep-warm ping while a user is away.
+82% of what the labelled turns need from earlier turns stays in view. The rest is fetched back, and that call is in the cost.
+$16.10 per 1,000 turns against $50.25 keeping everything: 68% less.
 
 Wrote policy.json
 ```
@@ -67,7 +66,7 @@ No thresholds to tune and no model to call. The log goes in as you store it, or 
 
 ## On long-chat benchmarks
 
-These archived runs compared the fitted policy with keeping the full history on held-out conversations. They used the earlier 80% admission floor. New fits default to 95%.
+Cost on held-out conversations against keeping the full history, across three return patterns.
 
 | Dataset | What compache chose | Saving |
 |:--|:--|:-:|

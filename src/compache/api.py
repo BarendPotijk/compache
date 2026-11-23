@@ -373,9 +373,10 @@ class Policy:
             else "Send no keep-warm pings."
         )
         if recipe is not None and summary["coverage"] is not None:
-            lines.append(
-                f"{summary['coverage']:.0%} of labelled historical requirements retain their evidence in view."
-            )
+            kept = f"{summary['coverage']:.0%} of what the labelled turns need from earlier turns stays in view."
+            if summary["coverage"] < 0.995:
+                kept += " The rest is fetched back, and that call is in the cost."
+            lines.append(kept)
         costs, saving = summary["cost_per_1000_turns"], summary["saving"]
         if costs and saving is not None:
             if costs["unit"] == "USD":

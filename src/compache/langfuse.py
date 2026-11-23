@@ -32,7 +32,7 @@ from .threads import Thread, cache_read_reported, canonical_usage, normalize_thr
 __all__ = ["fetch", "pull", "threads_from_observations"]
 
 CLOUD = "https://cloud.langfuse.com"
-_FIELDS = "core,basic,io,model,usage,metadata"
+_FIELDS = "core,basic,io,model,usage"
 _ROLES = {
     "system": "system",
     "developer": "system",
@@ -259,15 +259,11 @@ def _message(raw: Any) -> dict | None:
     if kind == "function_call_output":
         return {"role": "tool", "text": "", "results": [_plain(raw.get("output"))]}
     role = _ROLES.get(str(raw.get("role") or "").lower())
-    if role == "user" and raw.get("context_kind") == "retrieval":
-        role = "tool"
     if role is None:
         if kind in ("function_call", "reasoning"):
             return {"role": "assistant", "text": "", "results": []}
         return None
-    text, results = _blocks(
-        raw["parts"] if "parts" in raw else raw.get("content", raw.get("text"))
-    )
+    text, results = _blocks(raw["parts"] if "parts" in raw else raw.get("content"))
     if role == "tool":
         results, text = ([text] if text else []) + results, ""
     return {"role": role, "text": text, "results": results}
@@ -311,8 +307,6 @@ def _asked(value: Any) -> str:
     value = _loads(value)
     if isinstance(value, str):
         return value.strip()
-    if isinstance(value, dict) and isinstance(value.get("text"), str):
-        return value["text"]
     users = [m["text"] for m in _messages(value) if m["role"] == "user" and m["text"]]
     if users:
         return users[-1]
@@ -652,166 +646,25 @@ def _trace_log(calls, roots, found) -> tuple[list[dict], dict]:
     return messages, seen
 
 
-def _archived_thread(session_id, traces):
-    """Read the versioned Compache RAG envelope without changing its evidence IDs."""
-    runs, envelopes = [], {}
-    owner = provenance = None
-
-    def run_metadata(row):
-        value = _loads(row.get("metadata"))
-        if not isinstance(value, dict):
-            raise ContractError("missing RAG run metadata")
-        return {k: v for k, v in value.items() if k != "isRootObservation"}
-
-    # Older exports omitted the index. The canonical request chain orders them
-    # unambiguously: each later request also contains the preceding answer.
-    for group in traces.values():
-        roles = {r["name"]: r for r in group.values()}
-        if len(group) != 3 or set(roles) != {
-            "synthetic-rag-run",
-            "retrieval",
-            "answer-generation",
-        }:
-            raise ContractError("incomplete RAG observation group")
-        root, retrieval, call = (
-            roles[k] for k in ("synthetic-rag-run", "retrieval", "answer-generation")
-        )
-        meta = run_metadata(root)
-        if (
-            meta.get("thread_id") != session_id
-            or any(not isinstance(r.get("id"), str) for r in (root, retrieval, call))
-            or call.get("type") != "GENERATION"
-            or any(run_metadata(r) != meta for r in (retrieval, call))
-            or root.get("parentObservationId") is not None
-            or any(
-                r.get("parentObservationId") != root["id"] for r in (retrieval, call)
-            )
-        ):
-            raise ContractError("invalid RAG observation ancestry or metadata")
-        if runs and (owner, provenance) != (
-            meta.get("company_id"),
-            meta.get("provenance"),
-        ):
-            raise ContractError("inconsistent RAG thread metadata")
-        owner, provenance = meta.get("company_id"), meta.get("provenance")
-        env, documents = _loads(call.get("input")), _loads(retrieval.get("output"))
-        answer = _loads(root.get("output"))
-        if (
-            not isinstance(env, dict)
-            or env.get("schema_version") != "compache-rag-message-envelope-v1"
-            or not isinstance(env.get("messages"), list)
-            or not isinstance(documents, dict)
-            or answer != _loads(call.get("output"))
-        ):
-            raise ContractError("invalid RAG generation envelope")
-        run = {
-            "run_id": meta.get("run_id"),
-            "run_index": meta.get("run_index"),
-            "history_policy": meta.get("history_policy", "full_canonical"),
-            "started_at": root.get("startTime"),
-            "ended_at": root.get("endTime"),
-            "input": _loads(root.get("input")),
-            "output": answer,
-            "retrievals": documents.get("candidates"),
-            "generation": {
-                "observation_id": call["id"],
-                "started_at": call.get("startTime"),
-                "ended_at": call.get("endTime"),
-                "model": call.get("model"),
-                "usage": _usage(call.get("usageDetails")),
-                "request_part_ids": env.get("request_part_ids"),
-            },
-        }
-        if run["generation"]["usage"] is not None and not cache_read_reported(
-            call.get("usageDetails")
-        ):
-            run["generation"]["cache_read_reported"] = False
-        if not isinstance(env.get("request_part_ids"), list) or not isinstance(
-            run["run_id"], str
-        ):
-            raise ContractError("invalid archived run identity")
-        runs.append(run)
-        envelopes[run["run_id"]] = env["messages"]
-    runs.sort(key=lambda run: len(run["generation"]["request_part_ids"]))
-    for index, run in enumerate(runs, 1):
-        if run["run_index"] is None:
-            run["run_index"] = index
-        elif type(run["run_index"]) is not int or run["run_index"] != index:
-            raise ContractError("archived index disagrees with the request history")
-    data = {"thread_id": session_id, "company_id": owner, "runs": runs}
-    if provenance:
-        data["provenance"] = provenance
-    Thread(data)
-    parts = {}
-    for run in data["runs"]:
-        for kind, items in (
-            ("input", [run["input"]]),
-            ("retrieval", run["retrievals"]),
-            ("output", [run["output"]]),
-        ):
-            parts.update((p["part_id"], (kind, p.get("text"))) for p in items)
-        ids = run["generation"]["request_part_ids"]
-        messages = envelopes[run["run_id"]]
-        if len(ids) != len(messages):
-            raise ContractError("RAG envelope and request length differ")
-        for pid, message in zip(ids, messages):
-            kind, text = parts[pid]
-            if (
-                not isinstance(message, dict)
-                or message.get("part_id") != pid
-                or message.get("content") != text
-                or message.get("role") != ("assistant" if kind == "output" else "user")
-                or (message.get("context_kind") == "retrieval") != (kind == "retrieval")
-            ):
-                raise ContractError("RAG envelope and recorded part disagree")
-    return data
-
-
 def threads_from_observations(
     rows: Iterable[dict], *, observed_until: str | None = None
 ) -> tuple[list[dict], dict]:
     """Chat-log threads from Langfuse observation rows, and a report of what was left out.
 
     Rows are what `GET /api/public/v2/observations` returns with the fields
-    `core,basic,io,model,usage,metadata`. Every session with a readable conversation
+    `core,basic,io,model,usage`. Every session with a readable conversation
     becomes one thread that `fit`, `replay` and `profile` take as it is.
     """
     sessions: dict[str, dict] = defaultdict(
         lambda: {"calls": [], "found": defaultdict(list), "roots": {}}
     )
     trace_start: dict[str, str] = {}
-    archives = defaultdict(lambda: defaultdict(dict))
-    versioned = set()
-    conflicting = set()
     loose: set = set()
     report = Counter()
     for row in rows:
         if not isinstance(row, dict) or not row.get("startTime"):
             continue
         report["observations"] += 1
-        if row.get("sessionId") and row.get("name") in (
-            "synthetic-rag-run",
-            "retrieval",
-            "answer-generation",
-        ):
-            meta = _loads(row.get("metadata"))
-            env = (
-                _loads(row.get("input"))
-                if row.get("name") == "answer-generation"
-                else None
-            )
-            if (
-                isinstance(env, dict)
-                and env.get("schema_version") == "compache-rag-message-envelope-v1"
-            ):
-                versioned.add(row["sessionId"])
-            if isinstance(meta, dict) and "run_id" in meta:
-                sid = row["sessionId"]
-                group = archives[sid][row.get("traceId")]
-                oid = row.get("id")
-                if oid in group and group[oid] != row:
-                    conflicting.add(sid)
-                group[oid] = row
         slim = _slim(row)
         if not slim["session"]:
             loose.add(slim["trace"])
@@ -839,23 +692,6 @@ def threads_from_observations(
         calls, twice = _one_per_call(calls)
         report["calls_recorded_twice"] += twice
         report["model_calls"] += len(calls)
-        if session_id in versioned:
-            try:
-                if session_id in conflicting:
-                    raise ContractError("conflicting duplicate archived observation")
-                thread = _archived_thread(session_id, archives[session_id])
-                if len(thread["runs"]) != len(calls):
-                    raise ContractError("mixed archived and ordinary generations")
-            except ContractError:
-                report["sessions_unreadable"] += 1
-                continue
-            if observed_until:
-                thread["observed_until"] = observed_until
-            threads.append(thread)
-            report["threads"] += 1
-            report["turns"] += len(thread["runs"])
-            models.update(r["generation"]["model"] for r in thread["runs"])
-            continue
         if not any(c["text"] for c in calls):
             report["sessions_without_text"] += 1
             continue

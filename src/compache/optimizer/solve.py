@@ -54,7 +54,7 @@ def solve_workload(
     default_tools,
     retention_threads=None,
     retention_floor=0.95,
-    tradeoff_floor=None,
+    tradeoff_floor=0.8,
     unknowns="excluded",
     ping_counts=(0, 1, 3),
     folds=3,

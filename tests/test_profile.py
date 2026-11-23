@@ -148,7 +148,14 @@ class MeasureTests(unittest.TestCase):
         # Every return is inside the cache lifetime and reads six tenths of the last request.
         self.assertAlmostEqual(scenario(rows(0.6))["cacheHitShare"], 0.6, delta=0.01)
         self.assertEqual(scenario(rows(1.0))["cacheHitShare"], 1.0)
-        self.assertEqual(scenario(rows(0.0))["cacheHitShare"], 0)
+        # A record without any cache activity says nothing: caching may be switched off.
+        self.assertNotIn("cacheHitShare", scenario(rows(0.0)))
+        # One that writes to the cache and never reads it back does miss.
+        missed = rows(0.0)
+        for thread in missed:
+            for run in thread["runs"]:
+                run["usage"]["cache_write"] = run["usage"]["input"]
+        self.assertEqual(scenario(missed)["cacheHitShare"], 0)
         absent = rows(0.0)
         for thread in absent:
             for run in thread["runs"]:

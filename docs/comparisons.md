@@ -22,13 +22,13 @@ Defaults as documented at revision [`c49b553`](https://github.com/openclaw/openc
 
 | Models | 8-turn threads | 30-turn threads | 80-turn threads |
 |---|---|---|---|
-| Claude Fable 5.2, Opus 5.5, Sonnet 5.5 | 53% to 55% cheaper | 48% to 54% cheaper | 31% to 49% cheaper |
-| Claude Haiku 5.5 | 74% cheaper | 12% cheaper | 15% cheaper |
-| GPT-6 Astra, GPT-5.6 Terra, GPT-6 Luna | 54% cheaper | 68% cheaper | 60% cheaper |
+| Claude Fable 5.2, Opus 5.5, Sonnet 5.5 | 58% cheaper | 61% to 63% cheaper | 60% to 63% cheaper |
+| Claude Haiku 5.5 | 90% cheaper | 91% cheaper | 88% cheaper |
+| GPT-6 Astra, GPT-5.6 Terra, GPT-6 Luna | 59% cheaper | 80% cheaper | 82% cheaper |
 
 - The workload is the calculator's default: 25k retrieved tokens per turn, users back after a median of four minutes, and what later turns need as measured on DocChat. compache's policy is fitted on one set of threads and priced on another.
-- compache leaves 95% to 97% of what turns need in the request and fetches the rest back, on 1% to 3% of turns. OpenClaw leaves 92% to 99% in the request. With OpenAI its summaries stand in for up to 8% of what 80-turn threads need.
-- Haiku charges five times as much for a request above 100k tokens. OpenClaw's thresholds let requests grow past that, so the modeled cost depends on how often each policy crosses it.
+- compache leaves 81% to 93% of what turns need in the request and fetches the rest back, on 3% to 9% of turns. OpenClaw leaves 92% to 99% in the request. With OpenAI its summaries stand in for up to 8% of what 80-turn threads need.
+- Haiku charges five times as much for a request above 100k tokens. OpenClaw's thresholds let requests grow past that, and the fitted policy stays under it.
 
 ## Headroom
 

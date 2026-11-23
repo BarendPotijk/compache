@@ -56,12 +56,6 @@ def _parser() -> argparse.ArgumentParser:
         "fit", "Fit a policy and say what it saves on these threads", model=True
     )
     sub.add_argument(
-        "--retention-floor",
-        type=float,
-        default=0.95,
-        help="Minimum fraction of assessed historical requirements to keep (default 0.95)",
-    )
-    sub.add_argument(
         "--observed-until",
         help="When the record was cut, if conversations were still going",
     )
@@ -153,7 +147,6 @@ def _fit(args):
         args.labels,
         model=args.model,
         observed_until=args.observed_until,
-        retention_floor=args.retention_floor,
         **_header(args),
     )
     policy.save(args.output)
@@ -188,20 +181,19 @@ def _replay(args):
     detail = report.pop("detail")
     if args.output:
         _write(args.output, {**report, "detail": detail})
-    lines = [
-        f"{report['threads']:,} threads, {report['planned_turns']:,} planned turns."
-    ]
+    lines = [f"{report['threads']:,} threads, {report['planned_turns']:,} turns."]
     costs = report["cost_per_1000_turns"]
     if report["saving"] is None:
         lines.append(
-            f"Completed turns: policy {report['policy_turns']:,}, keep everything {report['baseline_turns']:,}."
+            "Some requests did not fit the model: the policy answers "
+            f"{report['policy_turns']:,} turns and keeping everything {report['baseline_turns']:,}."
         )
         common = report["common_prefix"]
         if common["turns"]:
             paired = common["cost_per_1000_turns"]
             lines.append(
-                f"Across {common['turns']:,} matched turns, cost per 1,000 turns was "
-                f"{_money(paired, 'policy')} with the policy and {_money(paired, 'keep_everything')} keeping everything."
+                f"On the {common['turns']:,} turns both answer: {_money(paired, 'policy')} per 1,000 turns "
+                f"with the policy against {_money(paired, 'keep_everything')} keeping everything."
             )
     else:
         lines.append(
@@ -210,8 +202,8 @@ def _replay(args):
         )
     if report["coverage"] is not None:
         lines.append(
-            f"{report['coverage']:.0%} of the {report['needs_history']:,} historical requirements retain "
-            f"their evidence in view. {report['tokens_kept']:.0%} of the history tokens are kept."
+            f"{report['coverage']:.0%} of the {report['needs_history']:,} labelled needs for earlier "
+            f"context are in view. {report['tokens_kept']:.0%} of the history tokens are kept."
         )
     lines.append(f"{report['pings']:,} keep-warm pings sent.")
     return report, "\n".join(lines)

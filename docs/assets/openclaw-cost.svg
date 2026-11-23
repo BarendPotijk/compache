@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="880" height="312" viewBox="0 0 880 312" role="img" aria-labelledby="t d">
 <title id="t">Cost per 1,000 turns on Claude Sonnet 5.5: OpenClaw against compache</title>
-<desc id="d">Modeled cost per 1,000 turns at three thread lengths. 8-turn threads: OpenClaw $208, compache $97; 30-turn threads: OpenClaw $260, compache $135; 80-turn threads: OpenClaw $278, compache $191.</desc>
+<desc id="d">Modeled cost per 1,000 turns at three thread lengths. 8-turn threads: OpenClaw $208, compache $86; 30-turn threads: OpenClaw $260, compache $100; 80-turn threads: OpenClaw $278, compache $111.</desc>
 <style>
 text{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;font-size:12px;fill:#0b0b0b}
 .surface{fill:#fcfcfb;stroke:rgba(11,11,11,.1)}
@@ -27,19 +27,19 @@ text{fill:#f0efec}.surface{fill:#1a1a19;stroke:rgba(255,255,255,.1)}.t2{fill:#c3
 <text x="176.0" y="123.0" class="b" text-anchor="end">8-turn threads</text>
 <path class="n" d="M190,100 h384.5 a4,4 0 0 1 4,4 v10 a4,4 0 0 1 -4,4 h-384.5 z"/>
 <text x="586.5" y="113.5" class="t2">$208</text>
-<path class="c" d="M190,120 h177.0 a4,4 0 0 1 4,4 v10 a4,4 0 0 1 -4,4 h-177.0 z"/>
-<text x="379.0" y="133.5" class="b">$97</text>
-<text x="856.0" y="123.0" class="h" text-anchor="end">53% less</text>
+<path class="c" d="M190,120 h157.6 a4,4 0 0 1 4,4 v10 a4,4 0 0 1 -4,4 h-157.6 z"/>
+<text x="359.6" y="133.5" class="b">$86</text>
+<text x="856.0" y="123.0" class="h" text-anchor="end">58% less</text>
 <text x="176.0" y="185.0" class="b" text-anchor="end">30-turn threads</text>
 <path class="n" d="M190,162 h481.4 a4,4 0 0 1 4,4 v10 a4,4 0 0 1 -4,4 h-481.4 z"/>
 <text x="683.4" y="175.5" class="t2">$260</text>
-<path class="c" d="M190,182 h248.6 a4,4 0 0 1 4,4 v10 a4,4 0 0 1 -4,4 h-248.6 z"/>
-<text x="450.6" y="195.5" class="b">$135</text>
-<text x="856.0" y="185.0" class="h" text-anchor="end">48% less</text>
+<path class="c" d="M190,182 h183.9 a4,4 0 0 1 4,4 v10 a4,4 0 0 1 -4,4 h-183.9 z"/>
+<text x="385.9" y="195.5" class="b">$100</text>
+<text x="856.0" y="185.0" class="h" text-anchor="end">61% less</text>
 <text x="176.0" y="247.0" class="b" text-anchor="end">80-turn threads</text>
 <path class="n" d="M190,224 h516.0 a4,4 0 0 1 4,4 v10 a4,4 0 0 1 -4,4 h-516.0 z"/>
 <text x="718.0" y="237.5" class="t2">$278</text>
-<path class="c" d="M190,244 h353.0 a4,4 0 0 1 4,4 v10 a4,4 0 0 1 -4,4 h-353.0 z"/>
-<text x="555.0" y="257.5" class="b">$191</text>
-<text x="856.0" y="247.0" class="h" text-anchor="end">31% less</text>
+<path class="c" d="M190,244 h203.8 a4,4 0 0 1 4,4 v10 a4,4 0 0 1 -4,4 h-203.8 z"/>
+<text x="405.8" y="257.5" class="b">$111</text>
+<text x="856.0" y="247.0" class="h" text-anchor="end">60% less</text>
 </svg>

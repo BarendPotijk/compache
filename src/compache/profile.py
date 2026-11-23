@@ -487,7 +487,7 @@ def profile(
         "plannedTurns": min(_MAX_TURNS, lengths["median"]),
         "plannedTurnsP95": min(_MAX_TURNS_P95, lengths["p95"]),
         "continuationProbability": 1,
-        "retentionRequirement": 0.95,
+        "retentionRequirement": 0.8,
         "pingOutputTokens": spec.ping_output_tokens,
         "recoveryOutputTokens": spec.expansion_output_tokens,
     }

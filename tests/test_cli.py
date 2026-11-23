@@ -80,10 +80,10 @@ class CommandTests(unittest.TestCase):
             base / "report.json",
         )
         self.assertEqual(status, 0)
-        self.assertIn("1 threads, 6 planned turns.", out)
+        self.assertIn("1 threads, 6 turns.", out)
         self.assertIn("per 1,000 turns with the policy", out)
         self.assertIn(
-            "100% of the 5 historical requirements retain their evidence in view.", out
+            "100% of the 5 labelled needs for earlier context are in view.", out
         )
         self.assertIn(
             "candidate", json.loads((base / "report.json").read_text())["detail"]
