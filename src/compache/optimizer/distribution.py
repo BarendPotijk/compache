@@ -463,13 +463,16 @@ def request_charge(
     return _charge(spec, input_tokens, shared_prefix_tokens, output_tokens, read_share)
 
 
+def modeled_read_tokens(spec, shared, read_share):
+    """Expected billed reads from a matching prefix, under the fitted cache model."""
+    eligible = shared // spec.cache_block_tokens * spec.cache_block_tokens
+    return int(eligible * read_share) if eligible >= spec.cache_min_tokens else 0
+
+
 def _input_buckets(spec, size, shared, read_share=1.0):
     if spec.cache_ttl_seconds <= 0 or size < spec.cache_min_tokens:
         return size, 0, 0
-    read = shared // spec.cache_block_tokens * spec.cache_block_tokens
-    if read < spec.cache_min_tokens:
-        read = 0
-    read = int(read * read_share)
+    read = modeled_read_tokens(spec, shared, read_share)
     return 0, size - read, read
 
 

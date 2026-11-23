@@ -70,6 +70,7 @@ def fit_workload(
             max((len(t.runs) for t in threads), default=1),
             kinds=kinds,
             keep_under_tokens=size_ladder(threads, spec),
+            include_citations=any(r.cited_part_ids for t in threads for r in t.runs),
             extra_windows=evidence_windows(threads, labels),
         )
         select = select or "cheapest"
@@ -1088,6 +1089,7 @@ class WorkloadSession:
             spec=spec,
             verified_static=verified_shared_static_tokens,
             modeled=modeled,
+            modeled_read_share=self.policy.cache_read_share,
             write_tokens=writes,
             ping_has_private_suffix=ping_has_private_suffix,
         )

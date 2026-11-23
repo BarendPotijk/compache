@@ -156,6 +156,50 @@ class FitTests(unittest.TestCase):
         self.assertEqual(report["detail"]["baseline"]["foreground_calls"], 24)
         self.assertGreater(report["detail"]["baseline"]["repeat_input_tokens"], 0)
 
+    def test_source_protection_is_fitted_only_where_it_pays(self):
+        def example(tid, needs_history):
+            runs, rows = [], []
+            for i in range(7):
+                at = 1767600000 + i * 2400
+                source_id = f"{tid}/lookup/{i}"
+                runs.append(
+                    {
+                        "started_at": at,
+                        "input": "Next question",
+                        "retrievals": [
+                            {"part_id": source_id, "text": "fact " * 1500},
+                            {"text": "noise " * 1500},
+                        ],
+                        "output": "Observed answer.",
+                        "cited_part_ids": [source_id]
+                        if i == 0 or not needs_history
+                        else [],
+                    }
+                )
+                rows.append(
+                    {
+                        "thread_id": tid,
+                        "run": i + 1,
+                        "needs": [[f"{tid}/lookup/0"]] if i and needs_history else [],
+                    }
+                )
+            return {"thread_id": tid, "runs": runs}, rows
+
+        for needs_history in (False, True):
+            group = [example(str(i), needs_history) for i in range(4)]
+            policy = compache.fit(
+                [t for t, _ in group],
+                [label for _, rows in group for label in rows],
+                model=SPEC,
+                share_headers=False,
+            )
+            held, rows = example("held", needs_history)
+            self.assertIsNotNone(policy.recipe)
+            self.assertEqual(policy.recipe.cited_answer_runs != 0, needs_history)
+            arm = compache.replay(policy, [held], rows)["detail"]["candidate"]
+            self.assertTrue(arm["complete"])
+            self.assertEqual(arm["historical_retained"], 6 if needs_history else 0)
+
     def test_too_little_data_is_refused(self):
         with self.assertRaises(compache.ContractError):
             compache.fit(threads(count=1), model=SPEC)
@@ -320,6 +364,17 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(reopened["status"], "ok")
         self.assertTrue(reopened["text"].startswith("An observed final answer."))
         self.assertEqual(session.reopen("no such thing")["status"], "not_found")
+
+    def test_session_accepts_source_ids_after_the_answer(self):
+        session = fitted().session("with-tools")
+        turn = session.prepare("Total?", [{"part_id": "row-xyz", "text": "12"}], at=1)
+        with self.assertRaises(compache.ContractError):
+            session.complete(turn, "12", cited_part_ids=["unknown"], at=2)
+        session.complete(turn, "12", cited_part_ids=["row-xyz"], at=2)
+        follow = session.prepare("And tax?", at=3)
+        answer = next(p for p in follow.plan.request.parts if p.kind == "output")
+        self.assertEqual(answer.cited_part_ids, ("row-xyz",))
+        self.assertFalse(any("cited_part_ids" in m for m in follow.messages))
 
     def test_retry_missing_usage_and_misuse(self):
         policy = fitted()

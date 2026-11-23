@@ -52,6 +52,8 @@ If you keep turns instead of messages, write them directly:
 
 A turn that made several model calls can say so with `"calls": 3`. Parts are numbered `<thread>:<turn>:input`, `<thread>:<turn>:retrieval:<k>` and `<thread>:<turn>:output`. Labels refer to these IDs. A thread that spells out every identity itself, as the benchmark builders write them, is taken as is.
 
+For chatbots that record sources, a retrieval can carry a thread-unique `part_id`, such as `"lookup-17"`. An assistant message can then carry `"cited_part_ids": ["lookup-17"]`. In run-shaped traces, put the same list on the run. Use the IDs of retrieval occurrences the answer actually used. The fitter can then price keeping cited results for longer than other tool output. The lookback is chosen on the training threads. Ordinary dialogue and tool calls without source attribution can omit both fields.
+
 A thread in either shape may also carry `"tools"`, the tool definitions sent on every request, and `"observed_until"`, when the record was read.
 
 ### From Langfuse
@@ -167,6 +169,8 @@ if session.next_ping_at:                         # epoch seconds, or None
 | `session.ping()` | When the timer fires: the request to send with the smallest output the provider allows, or `None` if the ping is no longer worth sending |
 | `session.ping_sent(at=..., usage=...)` | Records the ping. More pings follow only when its usage shows the cache was read |
 | `session.reopen(reference)` | Answers the model's `reopen` tool call with the archived text |
+
+If a tool provides source attribution, pass its occurrence IDs to `session.complete(turn, answer, cited_part_ids=[...])`. Use the same IDs on retrieved items in `session.prepare`, or read the generated IDs from `turn.parts`. The IDs are local metadata and add no text to the model request.
 
 - **Archived parts.** A cut replaces a part with a notice that carries a handle. Give the model `compache.REOPEN_TOOL` and `compache.REOPEN_INSTRUCTIONS`, and pass its tool calls to `session.reopen`.
 - **Placement.** `turn.messages` puts answers under `assistant` and everything else under `user`. If your application sends retrieved text another way, build the request from `turn.parts` and keep that mapping fixed.

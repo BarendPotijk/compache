@@ -48,10 +48,17 @@ class RetentionRecipe:
     retrieval_runs: int | None = None
     protect_query_matches: bool = False
     keep_under_tokens: int = 0
+    # Completed answers whose explicitly cited, still-visible retrievals survive a cut.
+    cited_answer_runs: int | None = 0
 
     def __post_init__(self):
         number(self.keep_under_tokens, "keep_under_tokens", integer=True)
-        for name in ("input_runs", "output_runs", "retrieval_runs"):
+        for name in (
+            "input_runs",
+            "output_runs",
+            "retrieval_runs",
+            "cited_answer_runs",
+        ):
             value = getattr(self, name)
             if value is not None:
                 number(value, name, integer=True)
@@ -66,6 +73,7 @@ def recipe_grid(
     protect_query_matches=(True, False),
     keep_under_tokens=(0,),
     extra_windows=None,
+    include_citations=False,
 ):
     """Candidate cuts: every combination of one window for each kind of part.
 
@@ -78,8 +86,8 @@ def recipe_grid(
     `extra_windows` adds windows per kind, for example the look-backs that
     `evidence_windows` reads off the labels. Each combination is repeated for
     every size in `keep_under_tokens`, under which a part is never archived.
-    The grid contains the narrowest combination of any two of its members, so
-    checking a combined cut never needs a recipe outside it.
+    When training answers record explicit source IDs, include_citations adds
+    cuts that keep the dialogue and vary how long referenced tool results stay.
     """
     sizes = tuple(keep_under_tokens)
     if not sizes or len(set(sizes)) != len(sizes):
@@ -117,7 +125,7 @@ def recipe_grid(
         retrievals.extend(
             (window, flag) for flag in flags for window in cuts("retrieval")
         )
-    return tuple(
+    base = tuple(
         RetentionRecipe(i, o, r, flag, size)
         for size in sizes
         for r, flag in retrievals
@@ -125,6 +133,20 @@ def recipe_grid(
         for o in outputs
         if (i, o, r) != (None, None, None)
     )
+
+    if not include_citations or "retrieval" not in kinds:
+        return base
+    # An alternative to cutting dialogue: keep answers and questions intact,
+    # and fit separate lifetimes for ordinary tool output and cited evidence.
+    citation_recipes = tuple(
+        RetentionRecipe(
+            retrieval_runs=window, keep_under_tokens=size, cited_answer_runs=age
+        )
+        for window in cuts("retrieval")
+        for age in (None, *windows)
+        for size in sizes
+    )
+    return base + citation_recipes
 
 
 def evidence_windows(threads, labels, quantiles=(0.8, 0.85, 0.9, 0.95, 0.975, 1.0)):
@@ -231,6 +253,13 @@ class RecipeView:
 def _checkpoint(request, recipe, archived, pins, spec):
     """Apply one cut to the mutable `archived` and `pins` sets and return `archived`."""
     archived.difference_update(pins)
+    if recipe.cited_answer_runs != 0:
+        for part in request.parts:
+            if part.kind == "output" and (
+                recipe.cited_answer_runs is None
+                or request.run_index - part.run_index <= recipe.cited_answer_runs
+            ):
+                pins.update(pid for pid in part.cited_part_ids if pid not in archived)
     if recipe.protect_query_matches:
         pins.update(protected_sources(request) - archived)
     # Empty retrieval turns do not displace a retained group. Every exposed
@@ -423,8 +452,13 @@ def _key(window, recipe):
 def _retrieval_key(recipe):
     window = recipe.retrieval_runs
     if window is None:
-        return (None, False, 0)
-    return (window, recipe.protect_query_matches, recipe.keep_under_tokens)
+        return (None, False, 0, 0)
+    return (
+        window,
+        recipe.protect_query_matches,
+        recipe.keep_under_tokens,
+        recipe.cited_answer_runs,
+    )
 
 
 def _thread_windows(thread, spec, recipes):
@@ -473,14 +507,14 @@ def _thread_windows(thread, spec, recipes):
     rank = {turn: j for j, turn in enumerate(groups)}
     wanted = {_retrieval_key(r) for r in recipes}
     leaving = {}
-    for window in {w for w, _, _ in wanted if w is not None}:
+    for window in {w for w, _, _, _ in wanted if w is not None}:
         leaving[window] = {
             p.part_id: groups[rank[p.run_index] + window] + 1
             for p in by_kind["retrieval"]
             if rank[p.run_index] + window < len(groups)
         }
     matches = {}
-    protected = [w for w, flag, _ in wanted if flag and leaving[w]]
+    protected = [w for w, flag, _, _ in wanted if flag and leaving[w]]
     if protected:
         # A source the current question matches stays until a turn that does not.
         start = min(min(leaving[w].values()) for w in protected)
@@ -493,7 +527,11 @@ def _thread_windows(thread, spec, recipes):
                 canonical[: len(run.generation.request_part_ids)],
             )
             matches[run.run_index] = protected_sources(request)
-    for window, flag, small in wanted:
+    references = defaultdict(list)
+    for run in runs:
+        for pid in run.cited_part_ids:
+            references[pid].append(run.run_index)
+    for window, flag, small, age in wanted:
         archived_at = (
             {}
             if window is None
@@ -501,12 +539,22 @@ def _thread_windows(thread, spec, recipes):
                 p: t for p, t in leaving[window].items() if not small or size[p] > small
             }
         )
-        if flag:
+        if flag or age != 0:
             for part_id, turn in archived_at.items():
-                while turn <= total and part_id in matches[turn]:
-                    turn += 1
+                cited = references.get(part_id, ())
+                while turn <= total:
+                    # Only answers completed before this cut could have cited the part.
+                    j = bisect_left(cited, turn)
+                    if age != 0 and j and (age is None or turn - cited[j - 1] <= age):
+                        turn = total + 1 if age is None else cited[j - 1] + age + 1
+                    elif flag and part_id in matches[turn]:
+                        turn += 1
+                    else:
+                        break
                 archived_at[part_id] = turn
-        table["retrieval"][(window, flag, small)] = _Window(archived_at, saving, total)
+        table["retrieval"][(window, flag, small, age)] = _Window(
+            archived_at, saving, total
+        )
     kind_of = {p.part_id: p.kind for p in canonical}
     return table, full, saving, kind_of
 
@@ -567,7 +615,11 @@ def _measure_recipes(
         by_thread[label["thread_id"]].append(label)
     reports = [
         {
-            "recipe": asdict(recipe),
+            "recipe": {
+                k: v
+                for k, v in asdict(recipe).items()
+                if k != "cited_answer_runs" or v != 0
+            },
             **dict.fromkeys(_COUNTERS, 0),
             "retention_floor": retention_floor,
             "tradeoff_floor": tradeoff_floor,
@@ -902,12 +954,24 @@ def fit_recipes(
                 )
                 for r in (accepted, recipe)
             )
+            # A recipe that keeps all retrievals imposes no citation expiry.
+            citation_windows = [
+                r.cited_answer_runs
+                for r in (accepted, recipe)
+                if r.retrieval_runs is not None
+            ]
+            citation_age = (
+                min((n for n in citation_windows if n is not None), default=None)
+                if citation_windows
+                else 0
+            )
             envelope = RetentionRecipe(
                 _narrower(accepted.input_runs, recipe.input_runs),
                 _narrower(accepted.output_runs, recipe.output_runs),
                 _narrower(accepted.retrieval_runs, recipe.retrieval_runs),
                 protects,
                 min(accepted.keep_under_tokens, recipe.keep_under_tokens),
+                citation_age,
             )
         if envelope not in metrics:
             metrics[envelope] = _measure_recipes(

@@ -152,6 +152,27 @@ class SimpleShapeTests(unittest.TestCase):
     def test_a_canonical_thread_is_unchanged(self):
         self.assertEqual(normalize_thread(sample()), sample())
 
+    def test_chat_log_citations_resolve_to_exposed_occurrences(self):
+        messages = [
+            {"role": "user", "at": 1, "content": "How many?"},
+            {"role": "tool", "part_id": "inv-1", "content": "Five"},
+            {"role": "assistant", "content": "Five", "cited_part_ids": ["inv-1"]},
+            {"role": "tool", "content": "Refreshed result"},
+            {
+                "role": "assistant",
+                "content": "Confirmed",
+                "cited_part_ids": ["inv-1", "chat:1:retrieval:2"],
+            },
+        ]
+        raw = {"thread_id": "chat", "messages": messages}
+        th = Thread(normalize_thread(raw))
+        self.assertEqual(th.runs[0].cited_part_ids, ("inv-1", "chat:1:retrieval:2"))
+        self.assertEqual(Thread(th.to_dict()).runs, th.runs)
+        for invalid in (["chat:1:retrieval:2"], ["inv-1", "inv-1"], "inv-1", [None]):
+            messages[2]["cited_part_ids"] = invalid
+            with self.assertRaises(ContractError):
+                Thread(normalize_thread(raw))
+
     def test_a_chat_log_becomes_runs(self):
         thread = Thread(normalize_thread(chat()))
         self.assertEqual(len(thread.runs), 2)

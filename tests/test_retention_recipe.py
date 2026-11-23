@@ -25,6 +25,43 @@ class RecipeTests(unittest.TestCase):
         self.thread = thread(n=5)
         self.req = Request.from_thread(self.thread, self.thread.runs[-1].run_id)
 
+    def test_cited_sources_expire_causally_in_fit_and_render(self):
+        data = self.thread.to_dict()
+        first = data["runs"][0]["retrievals"][0]["part_id"]
+        data["runs"][0]["cited_part_ids"] = [first]
+        # The later mention cannot restore an already archived occurrence.
+        data["runs"][3]["cited_part_ids"] = [first]
+        annotated = Thread(data)
+        for age, expected in (
+            (0, [False] * 4),
+            (1, [True, False, False, False]),
+            (2, [True, True, False, False]),
+            (None, [True] * 4),
+        ):
+            with self.subTest(age=age):
+                recipe = RetentionRecipe(retrieval_runs=0, cited_answer_runs=age)
+                archived = set()
+                visible = []
+                for r in annotated.runs:
+                    req = Request.from_thread(annotated, r.run_id)
+                    view = render_recipe(req, self.spec, recipe, archived_ids=archived)
+                    archived = view.archived_ids
+                    if r.run_index > 1:
+                        visible.append(first in view.full_part_ids)
+                self.assertEqual(visible, expected)
+                scored = fit_recipe(
+                    [annotated], labels_for(annotated, need_old=True), self.spec, recipe
+                )
+                self.assertEqual(scored["historical_retained"], sum(visible))
+        self.assertEqual(
+            self.req.parts, Request.from_thread(annotated, self.req.run_id).parts
+        )
+        observed = Request.from_thread(annotated, self.req.run_id)
+        self.assertEqual(
+            [handle("t", p) for p in self.req.parts],
+            [handle("t", p) for p in observed.parts],
+        )
+
     def test_typed_cut_keeps_current_and_complete_retrieval_groups(self):
         # No retrieval at run four. The last completed retrieval group is run three.
         req = Request(
