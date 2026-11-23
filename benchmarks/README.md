@@ -13,3 +13,7 @@ One package, three workloads, three different policies. Cost is against keeping 
 - **Answers hold.** On DocChat, Claude Sonnet 5.5 answered 24 of 30 held-out turns correctly from the policy's view and 25 from the full history, on a fifth of the tokens.
 
 Costs are modeled: every request and ping is priced with the provider's cache rules at the threads' own timestamps, and a cut pays for fetching back what it archived. DocChat and BEAM rebuild from the commands on their pages. The LongDS conversion is not in the repository.
+
+## Live
+
+[Live model calls](live/README.md): DocChat conversations played at their users' pace through five ways in, and what the provider billed. On Claude Haiku 5.5 the fitted policies cut the bill by 42% to 49% with as many answers right, whether fitted on past traces or on the model's own notes. On GPT-6 Luna, whose cache outlasts these users' breaks, they saved 2% to 5%.

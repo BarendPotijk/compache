@@ -1,0 +1,130 @@
+{
+ "subtitle": "DocChat, 5 held-out conversations of 10 to 12 turns, played at their users' pace. Billed by the providers through OpenRouter.",
+ "ways": [
+  {
+   "name": "OpenAI SDK, wrapped",
+   "detail": [
+    "Chat Completions, a search tool",
+    "Claude Haiku 5.5"
+   ],
+   "arms": [
+    {
+     "name": "No policy",
+     "cost": 2.671
+    },
+    {
+     "name": "Default policy",
+     "cost": 1.433
+    },
+    {
+     "name": "Fitted on past traces",
+     "cost": 1.424
+    },
+    {
+     "name": "Fitted on the model's notes",
+     "cost": 1.403
+    }
+   ]
+  },
+  {
+   "name": "OpenAI SDK, wrapped",
+   "detail": [
+    "Chat Completions, passages pasted in",
+    "Claude Haiku 5.5"
+   ],
+   "arms": [
+    {
+     "name": "No policy",
+     "cost": 2.422
+    },
+    {
+     "name": "Default policy",
+     "cost": 1.713
+    },
+    {
+     "name": "Fitted on past traces",
+     "cost": 1.305
+    },
+    {
+     "name": "Fitted on the model's notes",
+     "cost": 1.241
+    }
+   ]
+  },
+  {
+   "name": "Anthropic SDK, through the proxy",
+   "detail": [
+    "Messages, a search tool",
+    "Claude Haiku 5.5"
+   ],
+   "arms": [
+    {
+     "name": "No policy",
+     "cost": 2.9
+    },
+    {
+     "name": "Default policy",
+     "cost": 1.52
+    },
+    {
+     "name": "Fitted on past traces",
+     "cost": 1.537
+    },
+    {
+     "name": "Fitted on the model's notes",
+     "cost": 1.539
+    }
+   ]
+  },
+  {
+   "name": "LangChain agent, its clients wrapped",
+   "detail": [
+    "Chat Completions, a search tool",
+    "Claude Haiku 5.5"
+   ],
+   "arms": [
+    {
+     "name": "No policy",
+     "cost": 2.713
+    },
+    {
+     "name": "Default policy",
+     "cost": 1.486
+    },
+    {
+     "name": "Fitted on past traces",
+     "cost": 1.514
+    },
+    {
+     "name": "Fitted on the model's notes",
+     "cost": 1.575
+    }
+   ]
+  },
+  {
+   "name": "OpenAI SDK, wrapped",
+   "detail": [
+    "Responses, a search tool",
+    "GPT-6 Luna"
+   ],
+   "arms": [
+    {
+     "name": "No policy",
+     "cost": 0.898
+    },
+    {
+     "name": "Default policy",
+     "cost": 0.855
+    },
+    {
+     "name": "Fitted on past traces",
+     "cost": 0.877
+    },
+    {
+     "name": "Fitted on the model's notes",
+     "cost": 0.857
+    }
+   ]
+  }
+ ]
+}
