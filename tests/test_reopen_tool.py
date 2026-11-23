@@ -68,6 +68,62 @@ class ReopenTests(unittest.TestCase):
             reopen(request, {"reference": "KIND-88"})["text"], original.text
         )
 
+    def test_words_that_form_no_phrase_find_the_part_that_holds_most_of_them(self):
+        seal = retrieval(
+            "seal",
+            "x " * 400
+            + "Maintenance of the K-40. The mechanical seal is replaced every 2,400 hours.",
+        )
+        cover = retrieval(
+            "cover",
+            "Warranty of the K-40. Seals and bearings are covered for 6 months.",
+            run=2,
+        )
+        request = Request("t", "r3", 3, "m", (seal, cover))
+        # A model's own wording, which is nowhere in the text as a phrase.
+        found = reopen(request, {"reference": "K-40 mechanical seal replacement"})
+        self.assertEqual((found["status"], found["part_id"]), ("ok", "seal"))
+        # It opens near the first of the words, as a phrase does.
+        self.assertGreater(found["offset"], 500)
+        self.assertIn("mechanical seal is replaced", found["text"])
+        # A phrase that is there wins over words that are spread around.
+        exact = reopen(request, {"reference": "bearings are covered"})
+        self.assertEqual(exact["part_id"], "cover")
+        # Parts that hold equally many are offered as matches.
+        tie = reopen(request, {"reference": "the K-40 pump"})
+        self.assertEqual(
+            (tie["status"], [m["part_id"] for m in tie["matches"]]),
+            ("matches", ["seal", "cover"]),
+        )
+        # Under half of the words is not a find, and one word is a phrase or nothing.
+        for reference in ("gearbox oil change for the K-40", "gearbox", "lubricant"):
+            self.assertEqual(
+                reopen(request, {"reference": reference})["status"], "not_found"
+            )
+
+    def test_questions_and_answers_are_searched_only_when_asked_for(self):
+        # An application that pastes what it retrieved into the question keeps its sources there.
+        pasted = Source(
+            "r1-in",
+            "input",
+            1,
+            "Context: clause 7 caps liability at 2 million. Question: what is the cap?",
+        )
+        answer = Source("r1-out", "output", 1, "Liability is capped at 2 million.")
+        fetched = retrieval("r2-doc", "Clause 9 covers termination.", run=2)
+        request = Request("t", "r3", 3, "m", (pasted, answer, fetched))
+        self.assertEqual(
+            reopen(request, {"reference": "caps liability"})["status"], "not_found"
+        )
+        everywhere = ("retrieval", "input", "output")
+        found = reopen(request, {"reference": "caps liability"}, search=everywhere)
+        self.assertEqual((found["status"], found["part_id"]), ("ok", "r1-in"))
+        # Retrieved text is searched first, and a match there is not outvoted.
+        first = reopen(request, {"reference": "clause termination"}, search=everywhere)
+        self.assertEqual(first["part_id"], "r2-doc")
+        with self.assertRaises(ContractError):
+            reopen(request, {"reference": "x"}, search=("summary",))
+
     def test_literal_opens_near_deep_evidence_and_handle_pages_losslessly(self):
         fact = "Case Q.42+[A] was approved."
         body = "☀🌷" * 7000 + "\n" + fact + "\n" + "λ" * 7000

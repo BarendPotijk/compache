@@ -11,11 +11,14 @@ from pathlib import Path
 
 from . import __version__
 from .api import Policy, fit, replay
+from .defaults import default_policy
 from .errors import ContractError
 from .labels import build_packet, label_index
 from .models import _sheet, known_models
 from .optimizer.contracts import ModelSpec
 from .profile import history_resent, measure, profile
+from .record import is_record
+from .record import load as load_record
 from .threads import load_threads, read_jsonl
 
 
@@ -90,9 +93,15 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_argument("--sample", type=int, default=200, help="How many runs to label")
     sub.add_argument("--seed", default="0")
 
-    text = "Read the conversations of a Langfuse project into a threads file"
+    text = "Read the conversations kept in Langfuse, MLflow or an OpenTelemetry export into a threads file"
     sub = commands.add_parser("pull", help=text, description=text)
-    sub.add_argument("source", choices=["langfuse"])
+    sub.add_argument("source", choices=["langfuse", "mlflow", "otel"])
+    sub.add_argument(
+        "export",
+        nargs="?",
+        type=Path,
+        help="A file already exported, read instead of the API. Needed for otel",
+    )
     sub.add_argument("-o", "--output", type=Path, default=Path("threads.jsonl.gz"))
     sub.add_argument("--days", type=float, default=30, help="How far back to read")
     sub.add_argument("--since", help="Read from this time instead")
@@ -104,13 +113,69 @@ def _parser() -> argparse.ArgumentParser:
         default=[],
         help="Only traces with this tag. Repeat for any of several",
     )
-    sub.add_argument("--filter", help="More conditions, as a Langfuse filter in JSON")
+    sub.add_argument(
+        "--filter",
+        help="More conditions: a Langfuse filter in JSON, or an MLflow filter string",
+    )
+    sub.add_argument(
+        "--tracking-uri", help="The MLflow server. Left out, MLFLOW_TRACKING_URI"
+    )
+    sub.add_argument(
+        "--experiment",
+        action="append",
+        default=[],
+        help="An MLflow experiment ID. Repeat for several. Left out, experiment 0",
+    )
     sub.add_argument(
         "--rows",
         type=Path,
-        help="Observations already exported, as JSON or JSONL, instead of the API",
+        help="The same as the export file: observations or traces as JSON or JSONL",
     )
     sub.add_argument("--json", action="store_true", help="Print JSON")
+
+    text = "Write the policy for the default workload, to start from before there is a record"
+    sub = commands.add_parser("default", help=text, description=text)
+    sub.add_argument(
+        "--model",
+        required=True,
+        help=f"A known model ({', '.join(known_models())}) or a JSON file of model spec fields",
+    )
+    sub.add_argument("-o", "--output", type=Path, default=Path("policy.json"))
+    sub.add_argument("--json", action="store_true", help="Print JSON")
+
+    text = "Run compache behind a base URL: apply a policy, keep a record, or both"
+    sub = commands.add_parser("proxy", help=text, description=text)
+    sub.add_argument("--policy", type=Path, help="A fitted policy to apply")
+    sub.add_argument(
+        "--record",
+        type=Path,
+        help="A folder to record conversations in, without their text",
+    )
+    sub.add_argument(
+        "--sample",
+        type=float,
+        default=0.0,
+        help="Share of turns whose reply is asked what it needed. Needs --record",
+    )
+    sub.add_argument(
+        "--notes",
+        choices=["apart", "inline"],
+        default="apart",
+        help="Ask in a short request of its own after the reply, or in the reply itself",
+    )
+    sub.add_argument("--host", default="127.0.0.1")
+    sub.add_argument("--port", type=int, default=8787)
+    sub.add_argument(
+        "--upstream", help="One base URL to forward everything to, such as a gateway's"
+    )
+    sub.add_argument(
+        "--openai-url", help="Where OpenAI's API goes instead of api.openai.com"
+    )
+    sub.add_argument(
+        "--anthropic-url",
+        help="Where Anthropic's API goes instead of api.anthropic.com",
+    )
+    sub.add_argument("--gemini-url", help="Where Gemini's API goes instead of Google's")
 
     listing = commands.add_parser(
         "models", help="List the models with a built-in price sheet"
@@ -319,7 +384,11 @@ def _profile(args):
 
 def _check(args):
     threads = load_threads(args.threads)
-    labels = list(read_jsonl(args.labels)) if args.labels else []
+    if args.labels:
+        labels = list(read_jsonl(args.labels))
+    else:
+        # A record folder carries its own labels.
+        labels = load_record(args.threads)[1] if is_record(args.threads) else []
     # Building the index validates every label against what its run could see.
     label_index(threads, labels)
     measured = measure(threads, ModelSpec(threads[0].runs[0].generation.model), labels)
@@ -363,7 +432,10 @@ def _exported(path: Path) -> list:
         data = json.loads(text)
     except json.JSONDecodeError:
         return [json.loads(line) for line in text.splitlines() if line.strip()]
-    return data.get("data") or [] if isinstance(data, dict) else data
+    if isinstance(data, dict):
+        # An API response: Langfuse keeps its rows under `data`, MLflow its traces under `traces`.
+        return data.get("data") or data.get("traces") or [data]
+    return data
 
 
 _LEFT_OUT = (
@@ -408,23 +480,44 @@ _LEFT_OUT = (
 
 
 def _pull(args):
-    from .langfuse import pull
+    export = args.rows or args.export
+    window = dict(since=args.since, until=args.until, days=args.days)
+    if args.source == "otel":
+        from .otel import pull
 
-    options = {}
-    if args.rows:
-        options["rows"] = _exported(args.rows)
+        if export is None:
+            raise ContractError(
+                "pull otel reads an export file: compache pull otel spans.jsonl"
+            )
+        threads, report = pull(export, until=args.until)
+    elif args.source == "mlflow":
+        from .mlflow import pull
+
+        if export is not None:
+            threads, report = pull(traces=_exported(export), until=args.until)
+        else:
+            threads, report = pull(
+                tracking_uri=args.tracking_uri,
+                experiment_ids=args.experiment or ["0"],
+                filter=args.filter,
+                **window,
+            )
     else:
-        conditions = json.loads(args.filter) if args.filter else []
-        options.update(
-            environment=args.environment,
-            tags=args.tag,
-            filters=conditions if isinstance(conditions, list) else [conditions],
-        )
-    threads, report = pull(
-        since=args.since, until=args.until, days=args.days, **options
-    )
+        from .langfuse import pull
+
+        if export is not None:
+            threads, report = pull(rows=_exported(export), **window)
+        else:
+            conditions = json.loads(args.filter) if args.filter else []
+            threads, report = pull(
+                environment=args.environment,
+                tags=args.tag,
+                filters=conditions if isinstance(conditions, list) else [conditions],
+                **window,
+            )
+    rows = "observations" if args.source == "langfuse" else "spans"
     lines = [
-        f"Read {report.get('observations', 0):,} observations: {report.get('model_calls', 0):,} "
+        f"Read {report.get('observations', 0):,} {rows}: {report.get('model_calls', 0):,} "
         f"model calls in {report.get('sessions', 0):,} sessions."
     ]
     notes = [text.format(report[key]) for key, text in _LEFT_OUT if report.get(key)]
@@ -456,6 +549,21 @@ def _pull(args):
     return {"output": str(args.output), **report}, "\n".join(lines)
 
 
+def _default(args):
+    policy = default_policy(args.model)
+    policy.save(args.output)
+    summary = policy.summary
+    lines = [
+        f"Fitted to the default workload, not to yours, for {summary['model']}.",
+        "",
+        policy.describe(),
+        "",
+        f"Wrote {args.output}",
+        "Next: apply it and record your own traffic, then fit on the record.",
+    ]
+    return summary, "\n".join(lines)
+
+
 def _models(args):
     models = _sheet()["models"]
     lines = [f"Prices per million tokens, checked {_sheet()['checked']}."]
@@ -474,12 +582,22 @@ _COMMANDS = {
     "check": _check,
     "packets": _packets,
     "pull": _pull,
+    "default": _default,
     "models": _models,
 }
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    if args.command == "proxy":
+        # Runs until interrupted, so it is imported and started apart from the commands that report.
+        from .proxy import main as run_proxy
+
+        try:
+            return run_proxy(args)
+        except (ContractError, OSError, ValueError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
     try:
         result, text = _COMMANDS[args.command](args)
     except (ContractError, OSError, json.JSONDecodeError) as exc:

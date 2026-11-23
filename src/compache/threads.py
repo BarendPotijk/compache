@@ -11,6 +11,9 @@ and the answer. One JSON object per line, in any of three shapes:
 `normalize_thread` turns the first two into the third. `Thread` validates it.
 The first two may also say which `model` answered, which `tools` every request
 carried and until when the thread was observed. `recorded` reads those.
+
+A part of explicit runs may be given by its size alone, as `{"bytes": 812}`.
+That is how `compache.record` keeps conversations without keeping their text.
 """
 
 from __future__ import annotations
@@ -26,11 +29,14 @@ from pathlib import Path
 from typing import Any, Iterable, Iterator
 
 from .errors import ContractError
+from .record import is_record
+from .record import load as load_record
 
 __all__ = [
     "ContractError",
     "Thread",
     "canonical_usage",
+    "filler",
     "load_threads",
     "normalize_thread",
     "read_jsonl",
@@ -434,6 +440,13 @@ def canonical_usage(usage: Any) -> dict | None:
         write = count("cache_creation_input_tokens") or 0
         fresh = count("input_tokens")
         total = None if fresh is None else fresh + read + write
+    elif "promptTokenCount" in usage:
+        # Gemini: the prompt count includes what was cached, and thoughts are billed as output.
+        total = count("promptTokenCount")
+        read, write = count("cachedContentTokenCount") or 0, 0
+        output = (count("candidatesTokenCount") or 0) + (
+            count("thoughtsTokenCount") or 0
+        )
     else:
         total = count("input_tokens")
         if total is None:
@@ -443,7 +456,11 @@ def canonical_usage(usage: Any) -> dict | None:
             or count("prompt_tokens_details", "cached_tokens")
             or 0
         )
-        write = count("input_tokens_details", "cache_write_tokens") or 0
+        write = (
+            count("input_tokens_details", "cache_write_tokens")
+            or count("prompt_tokens_details", "cache_write_tokens")
+            or 0
+        )
     if total is None or output is None or read + write > total:
         return None
     return {"input": total, "output": output, "cache_read": read, "cache_write": write}
@@ -495,10 +512,15 @@ def recorded(rows: Iterable[Any]) -> dict:
         if not isinstance(row, dict):
             continue
         prompt = system_prompt_of(row)
+        if prompt is None and row.get("system_bytes"):
+            # A record of sizes: the prompt's size stands in for its text.
+            prompt = filler(row["system_bytes"])
         if prompt:
             prompts[prompt] += 1
         if isinstance(row.get("tools"), list) and row["tools"]:
             tools[json.dumps(row["tools"], ensure_ascii=False, sort_keys=True)] += 1
+        elif row.get("tools_bytes"):
+            tools[json.dumps([filler(row["tools_bytes"])])] += 1
         default = row.get("model")
         for message in row.get("messages") or ():
             if isinstance(message, dict) and message.get("role") == "assistant":
@@ -668,10 +690,28 @@ def _runs_from_messages(messages: Any, thread_id: str) -> list[dict]:
     return runs
 
 
+def filler(size: Any) -> str:
+    """Stand-in text of `size` bytes for a part recorded by its size alone.
+
+    A record made without keeping any text still says how large each part was,
+    and the size is all a fit reads from a part. The stand-in holds no word, so
+    nothing in it can match a question.
+    """
+    if type(size) is not int or size < 0:
+        raise ContractError("bytes: expected a nonnegative integer")
+    return "." * size
+
+
 def _named_part(value: Any, part_id: str) -> dict:
     if value is None or isinstance(value, str):
         return {"part_id": part_id, "text": value}
     if isinstance(value, dict):
+        if "bytes" in value:
+            if value.get("text") is not None:
+                raise ContractError("a part has text or bytes, not both")
+            value = {k: v for k, v in value.items() if k != "bytes"} | {
+                "text": filler(value["bytes"])
+            }
         return value if "part_id" in value else {"part_id": part_id, **value}
     raise ContractError("a part is text or an object")
 
@@ -700,8 +740,8 @@ def normalize_thread(data: Any, *, model: str | None = None) -> dict:
     thread_id = _id(data.get("thread_id"), "thread_id")
     default_model = data.pop("model", None)
     # What `recorded` reads: about the record, not part of the conversation.
-    data.pop("tools", None)
-    data.pop("observed_until", None)
+    for key in ("tools", "observed_until", "system_bytes", "tools_bytes"):
+        data.pop(key, None)
     if "messages" in data:
         if "runs" in data:
             raise ContractError("a thread has either messages or runs")
@@ -768,7 +808,13 @@ def _files(path: Path) -> list[Path]:
 
 
 def read_jsonl(path: str | Path) -> Iterator[dict]:
-    """JSON objects from a JSONL file, a gzipped one, or a folder of either."""
+    """JSON objects from a JSONL file, a gzipped one, or a folder of either.
+
+    A record folder of `compache.record` yields its conversations as threads.
+    """
+    if is_record(path):
+        yield from load_record(path)[0]
+        return
     for file in _files(Path(path)):
         opener = gzip.open if file.name.endswith(".gz") else open
         with opener(file, "rt", encoding="utf-8") as stream:

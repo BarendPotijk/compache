@@ -93,7 +93,7 @@ def _metadata(thread_id: str, source: Source) -> dict:
     return info
 
 
-def _find_sources(parts, reference):
+def _find_sources(parts, reference, search=("retrieval",)):
     # An exact part ID selects one canonical occurrence. Document and chunk
     # names can be shared by multiple versions or retrievals.
     for part in parts:
@@ -103,17 +103,68 @@ def _find_sources(parts, reference):
     named = [(p, 0) for p in retrieved if reference in (p.document_id, p.chunk_id)]
     if named:
         return named
+    # The kinds are searched in the order given: a match in the first is not
+    # outvoted by one in a later kind.
+    groups = [[p for p in parts if p.kind == kind] for kind in search]
+    for find in (_find_phrase, _find_by_words):
+        for group in groups:
+            matches = find(group, reference)
+            if matches:
+                return matches
+    return []
 
+
+def _find_phrase(parts, reference):
     # Treat punctuation literally and avoid partial matches inside compound IDs.
     left = r"(?<![\w-])" if re.match(r"[\w-]", reference[0]) else ""
     right = r"(?![\w-])" if re.match(r"[\w-]", reference[-1]) else ""
     pattern = re.compile(left + re.escape(reference) + right, re.IGNORECASE)
     matches = []
-    for part in retrieved:
+    for part in parts:
         match = pattern.search(part.text)
         if match is not None:
             matches.append((part, max(0, match.start() - 192)))
     return matches
+
+
+_STOP = frozenset(
+    "the and for from with that this what which when where how are was were has have had "
+    "not but its about into than then also".split()
+)
+
+
+def _find_by_words(parts, reference):
+    """The parts that hold most of a reference's words, when none holds such a phrase.
+
+    A model asks for "K-40 seal replacement" where the text says "the seal of
+    the K-40 is replaced". A word counts when the text has it whole, or, for a
+    long word, another word with the same first five letters. Only the parts
+    with the most words are returned, and only if they hold at least half.
+    """
+    words = [
+        w
+        for w in dict.fromkeys(re.findall(r"[\w-]+", reference.lower()))
+        if len(w) >= 3 and w not in _STOP
+    ]
+    if len(words) < 2:
+        return []
+    patterns = [
+        re.compile(
+            r"(?<![\w-])"
+            + (re.escape(w[:5]) + r"[\w-]*" if len(w) >= 6 else re.escape(w))
+            + r"(?![\w-])",
+            re.IGNORECASE,
+        )
+        for w in words
+    ]
+    scored = []
+    for part in parts:
+        found = [m for m in (p.search(part.text) for p in patterns) if m is not None]
+        if 2 * len(found) >= len(words):
+            start = min(m.start() for m in found)
+            scored.append((len(found), part, max(0, start - 192)))
+    best = max((count for count, _, _ in scored), default=0)
+    return [(part, start) for count, part, start in scored if count == best]
 
 
 def reopen(
@@ -121,13 +172,16 @@ def reopen(
     arguments: dict,
     *,
     archived_ids: Set[str] | None = None,
+    search: tuple[str, ...] = ("retrieval",),
 ) -> dict:
     """Resolve a model call against earlier exposed parts of this request.
 
     Pass the host's archived canonical part IDs to restrict recovery further.
     A handle or part ID addresses any eligible source kind. Free-text lookup
-    searches original retrievals. No projected summary or evaluation labels are
-    used. Character offsets index Python strings (Unicode code points).
+    searches original retrievals: for the phrase, then for most of its words.
+    `search` names other kinds to search after them, for a conversation that
+    keeps its sources in its questions. No projected summary or evaluation
+    labels are used. Character offsets index Python strings (Unicode code points).
     """
     if not isinstance(arguments, dict) or set(arguments) - {"reference", "offset"}:
         raise ContractError("reopen accepts only reference and optional offset")
@@ -142,6 +196,8 @@ def reopen(
         raise ContractError("reopen offset must be a nonnegative integer")
     if archived_ids is not None and not isinstance(archived_ids, Set):
         raise ContractError("archived_ids must be a set of canonical part IDs")
+    if not search or set(search) - {"retrieval", "input", "output"}:
+        raise ContractError("search names retrieval, input or output")
     parts = [
         p
         for p in request.parts
@@ -152,7 +208,7 @@ def reopen(
     if reference.startswith("ctx:"):
         matches = [(p, 0) for p in parts if handle(request.thread_id, p) == reference]
     else:
-        matches = _find_sources(parts, reference)
+        matches = _find_sources(parts, reference, search)
     if not matches:
         return {"status": "not_found", "hint": _NOT_FOUND_HINT}
     if len(matches) == 1:

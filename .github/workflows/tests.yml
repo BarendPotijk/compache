@@ -24,6 +24,19 @@ jobs:
         run: python -m pip install . pytest
       - name: Test
         run: python -m pytest -q
+  sdks:
+    # The provider SDKs and LangChain, with compache in their request path, against a local stand-in.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install
+        run: python -m pip install . pytest openai anthropic google-genai langchain langchain-openai langgraph
+      - name: Test
+        run: python -m pytest -q tests/test_wrap.py
   calculator:
     runs-on: ubuntu-latest
     timeout-minutes: 10

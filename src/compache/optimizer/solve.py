@@ -68,6 +68,7 @@ def solve_workload(
     count_tokens=None,
     calls_per_run=None,
     next_endpoint_reuse_fraction=None,
+    match_questions=True,
     salt="compache-solve-v1",
     **planner_options,
 ):
@@ -86,6 +87,10 @@ def solve_workload(
     `calls_per_run` maps run IDs to the model calls that turn made. A call after
     the first re-sends the turn's request and reads it from the cache, in the
     fit of returns and in every candidate's replay alike.
+
+    `match_questions=False` leaves out the cuts that keep retrieved text which
+    matches the new question. Threads recorded by size alone have no words to
+    match, so the fit could not tell what such a cut keeps.
 
     `threads` supply demand and cost. `retention_threads` supply the labelled
     runs when those differ, for example when graded questions are appended to a
@@ -120,6 +125,7 @@ def solve_workload(
         keep_under_tokens=size_ladder(threads, spec),
         include_citations=any(r.cited_part_ids for t in threads for r in t.runs),
         extra_windows=evidence_windows(labelled(), labels),
+        protect_query_matches=(True, False) if match_questions else (False,),
     )
     rows = fit_recipes(
         labelled(),

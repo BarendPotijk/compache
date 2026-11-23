@@ -6,7 +6,13 @@ from compache.labels import build_packet
 from compache.threads import Thread
 
 
-def thread(tid="t", company="a", n=3, gap=600, body_size=1000):
+QUESTION = "Describe this unrelated new item."
+ANSWER = "An observed final answer."
+
+
+def thread(
+    tid="t", company="a", n=3, gap=600, body_size=1000, question=QUESTION, answer=ANSWER
+):
     origin = datetime(2026, 1, 1, tzinfo=timezone.utc)
     runs = []
     history = []
@@ -14,7 +20,7 @@ def thread(tid="t", company="a", n=3, gap=600, body_size=1000):
         rid = f"{tid}-r{i}"
         start = origin + timedelta(seconds=(i - 1) * gap)
         finish = start + timedelta(seconds=30)
-        inp = {"part_id": rid + "-in", "text": "Describe this unrelated new item."}
+        inp = {"part_id": rid + "-in", "text": question}
         ret = {
             "part_id": rid + "-doc",
             "text": f"Unique document {i}. " + "x " * body_size,
@@ -23,7 +29,7 @@ def thread(tid="t", company="a", n=3, gap=600, body_size=1000):
             "chunk_id": "one",
             "exposed_to_model": True,
         }
-        out = {"part_id": rid + "-out", "text": "An observed final answer."}
+        out = {"part_id": rid + "-out", "text": answer}
         ids = history + [inp["part_id"], ret["part_id"]]
         runs.append(
             {

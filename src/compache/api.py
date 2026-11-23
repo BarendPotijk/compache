@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 import weakref
 from dataclasses import dataclass
@@ -19,6 +20,8 @@ from .optimizer.replay import arm_costs, replay_workload
 from .optimizer.retention import RetentionRecipe
 from .optimizer.session import WorkloadPolicy, WorkloadSession
 from .optimizer.solve import solve_workload
+from .record import SIZES_ONLY, is_record
+from .record import load as load_record
 from .threads import (
     cache_read_reported,
     canonical_usage,
@@ -38,6 +41,13 @@ def _rows(source) -> list:
     if isinstance(source, (str, Path)):
         return list(read_jsonl(source))
     return list(source)
+
+
+def _labels(labels, threads) -> list:
+    """Label rows as given, or those a record folder of threads carries itself."""
+    if labels is None and is_record(threads):
+        return load_record(threads)[1]
+    return _rows(labels)
 
 
 def _threads(source, model=None):
@@ -99,13 +109,17 @@ def fit(
     `observed_until` is when the record was cut, for a record that ends while
     conversations were still going. `options` go to the solver.
     """
+    labels = _labels(labels, threads)
     threads, spec, found, model = _threads(threads, model)
     if system_prompt is None:
         system_prompt = found["system_prompt"] or ""
     tools = list(found["tools"] or ()) if tools is None else list(tools)
+    if all(t.to_dict().get("provenance") == SIZES_ONLY for t in threads):
+        # No words to match a question against: see `solve_workload`.
+        options.setdefault("match_questions", False)
     artifact = solve_workload(
         threads,
-        _rows(labels),
+        labels,
         spec,
         observation_end=_observed_until(
             threads, observed_until or found["observed_until"]
@@ -149,8 +163,8 @@ def replay(policy, threads, labels=None, *, observed_until=None, **options) -> d
     """
     if not isinstance(policy, Policy):
         policy = Policy(policy)
+    labels = _labels(labels, threads)
     threads, _, found, _ = _threads(threads, policy.spec)
-    labels = _rows(labels)
     header = policy.artifact.get("header") or {}
     # Threads share a cached system prompt in the replay if they did in the fit.
     options.setdefault("share_headers", header.get("share_headers", True))
@@ -247,6 +261,7 @@ class Policy:
         self.artifact = artifact
         self._compiled = None
         self._checker = None
+        self._lock = threading.Lock()
 
     @classmethod
     def load(cls, path) -> Policy:
@@ -390,10 +405,13 @@ class Policy:
 
     def session(self, thread_id: str, *, system_prompt=None, tools=None) -> Session:
         """The session of one conversation. Keep it for as long as the conversation lives."""
-        if self._compiled is None:
-            self._compiled = WorkloadPolicy(self.artifact)
-            self._checker = CacheBreakChecker()
-            weakref.finalize(self, self._checker.close)
+        with self._lock:
+            # Conversations open at the same moment on a server: set up once, and in full.
+            if self._compiled is None:
+                checker = CacheBreakChecker()
+                weakref.finalize(self, checker.close)
+                self._checker = checker
+                self._compiled = WorkloadPolicy(self.artifact)
         header = self.artifact.get("header") or {}
         return Session(
             self,
@@ -466,20 +484,10 @@ class Session:
             tuple(self._history) + tuple(parts),
         )
 
-    def prepare(
-        self, question: str, retrieved=(), *, at=None, system_prompt=None, tools=None
-    ) -> Turn:
-        """The request to send for a new user message and the text retrieved for it.
-
-        Each retrieved item is text, or a dict with `text` and optionally
-        `part_id`, `document_id`, `version` and `chunk_id`. An explicit part ID
-        identifies this occurrence and must be unique in the thread. Call again with the same
-        arguments to retry a request that was never answered.
-        """
-        run = self._run + 1
-        prefix = f"{self.thread_id}:{run}"
-        parts = [Source(f"{prefix}:input", "input", run, question)]
-        for k, item in enumerate(retrieved, 1):
+    def _retrieved(self, run, items, first) -> list[Source]:
+        """Retrieved items of one run as parts, numbered from `first`."""
+        prefix, parts = f"{self.thread_id}:{run}", []
+        for k, item in enumerate(items, first):
             fields = {"text": item} if isinstance(item, str) else dict(item)
             part_id = fields.get("part_id", f"{prefix}:retrieval:{k}")
             if (
@@ -494,18 +502,35 @@ class Session:
                 raise ContractError(
                     "a retrieval part_id collides with the current answer"
                 )
+            if not isinstance(fields.get("text"), str):
+                raise ContractError("a question and every retrieved item need text")
             parts.append(
                 Source(
                     part_id,
                     "retrieval",
                     run,
-                    fields.get("text"),
+                    fields["text"],
                     fields.get("document_id", part_id),
                     fields.get("version", "1"),
                     fields.get("chunk_id", part_id),
                 )
             )
-        if any(not isinstance(p.text, str) for p in parts):
+        return parts
+
+    def prepare(
+        self, question: str, retrieved=(), *, at=None, system_prompt=None, tools=None
+    ) -> Turn:
+        """The request to send for a new user message and the text retrieved for it.
+
+        Each retrieved item is text, or a dict with `text` and optionally
+        `part_id`, `document_id`, `version` and `chunk_id`. An explicit part ID
+        identifies this occurrence and must be unique in the thread. Call again with the same
+        arguments to retry a request that was never answered.
+        """
+        run = self._run + 1
+        parts = [Source(f"{self.thread_id}:{run}:input", "input", run, question)]
+        parts += self._retrieved(run, retrieved, 1)
+        if not isinstance(question, str):
             raise ContractError("a question and every retrieved item need text")
         request = self._request(run, parts)
         plan = self._engine.prepare(
@@ -526,18 +551,44 @@ class Session:
             plan,
         )
 
+    def extend(self, turn: Turn, retrieved) -> Turn:
+        """Add text retrieved while `turn` is being answered, such as the results of a tool loop.
+
+        The history stays as `prepare` sent it and the new items follow it, so
+        the cached prefix is untouched. Returns the turn to pass to `complete`.
+        """
+        if self._pending is None or self._pending[0] is not turn.plan.request:
+            raise ContractError("no prepared turn to extend")
+        request, parts = self._pending
+        found = sum(p.kind == "retrieval" for p in parts)
+        added = self._retrieved(request.run_index, retrieved, found + 1)
+        plan = self._engine.extend(turn.plan, added)
+        self._pending = (plan.request, parts + tuple(added))
+        view = plan.view
+        return Turn(view.parts, view.archived_ids, view.tokens, turn.action, plan)
+
     def complete(
-        self, turn: Turn, answer: str, *, at=None, usage=None, cited_part_ids=()
+        self,
+        turn: Turn,
+        answer: str,
+        *,
+        at=None,
+        usage=None,
+        last_usage=None,
+        cited_part_ids=(),
     ):
         """Record the answer to `turn`. Returns when the next ping is due, if one is.
 
         `usage` is the provider's usage for the answer call, as a dict in
         Anthropic's or OpenAI's shape. With it the session tracks real input
         sizes and notices a cache that stopped hitting. Without it the request
-        is taken to be cached the way the model's rules say. If the host
-        records which visible retrievals the answer cited, pass their part IDs.
+        is taken to be cached the way the model's rules say. When the turn made
+        several calls, `usage` is that of the first and `last_usage` that of
+        the last: the first shows what the turn found cached, the last what it
+        leaves there. If the host records which visible retrievals the answer
+        cited, pass their part IDs.
         """
-        if self._pending is None:
+        if self._pending is None or self._pending[0] is not turn.plan.request:
             raise ContractError("no prepared turn to complete")
         request, parts = self._pending
         source = Source(
@@ -558,8 +609,25 @@ class Session:
                     "cited_part_ids must name visible retrievals in the answered request"
                 )
         counters = _counters(usage)
-        if not counters:
-            spec = self.policy.spec
+        final = _counters(last_usage)
+        spec = self.policy.spec
+        if counters and final:
+            # The first call says what the turn found cached, the last what it leaves.
+            left = final["input_tokens"]
+            if final["cache_write_input_tokens"]:
+                left = min(
+                    left,
+                    (final["cached_input_tokens"] or 0)
+                    + final["cache_write_input_tokens"],
+                )
+            left = left // spec.cache_block_tokens * spec.cache_block_tokens
+            cacheable = spec.cache_ttl_seconds > 0 and left >= spec.cache_min_tokens
+            counters = {
+                "input_tokens": final["input_tokens"],
+                "cached_input_tokens": counters["cached_input_tokens"],
+                "reusable_input_tokens": left if cacheable else 0,
+            }
+        elif not counters:
             cached = turn.tokens // spec.cache_block_tokens * spec.cache_block_tokens
             cacheable = spec.cache_ttl_seconds > 0 and cached >= spec.cache_min_tokens
             counters = {"reusable_input_tokens": cached if cacheable else 0}
@@ -608,8 +676,12 @@ class Session:
             **_counters(usage),
         )
 
-    def reopen(self, reference: str, offset: int = 0) -> dict:
-        """Resolve the model's `reopen` tool call against this conversation's archive."""
+    def reopen(self, reference: str, offset: int = 0, *, search=("retrieval",)) -> dict:
+        """Resolve the model's `reopen` tool call against this conversation's archive.
+
+        Words that are not a reference are looked for in retrieved text. `search`
+        adds `"input"` and `"output"`, for a conversation whose questions hold its sources.
+        """
         if self._pending is not None:
             request = self._pending[0]
         elif self._run:
@@ -619,4 +691,4 @@ class Session:
         arguments = {"reference": reference}
         if offset:
             arguments["offset"] = offset
-        return _reopen(request, arguments)
+        return _reopen(request, arguments, search=tuple(search))
