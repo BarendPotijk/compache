@@ -122,8 +122,72 @@ class WorkloadSolveTests(unittest.TestCase):
             chosen["expected_cost"], chosen["replayed_cost"] + chosen["recovery_cost"]
         )
         # Without the band no cut loses evidence, and the solver falls back to one that keeps it all.
-        strict = self.solve(sample, labels, tradeoff_floor=0.95)["solve"]["chosen"]
+        strict = self.solve(sample, labels, tradeoff_floor=None)["solve"]["chosen"]
         self.assertTrue(strict["recipe"] is None or strict["coverage"] >= 0.95)
+
+    def test_independent_labels_allow_a_cut_but_missing_labels_do_not(self):
+        sample = threads(3630)
+        labels = [r for t in sample for r in labels_for(t)]
+        solved = self.solve(sample, labels)["solve"]["chosen"]
+        self.assertIsNotNone(solved["recipe"])
+        self.assertIsNone(solved["coverage"])
+        # The last run's demand could include any part archived earlier.
+        sparse = [r for r in labels if r["target_run_id"] != sample[0].runs[-1].run_id]
+        self.assertIsNone(self.solve(sample, sparse)["solve"]["chosen"]["recipe"])
+        self.assertIsNone(self.solve(sample)["solve"]["chosen"]["recipe"])
+
+    def test_live_cache_meters_change_the_fitted_schedule(self):
+        from datetime import datetime, timedelta
+
+        def fit_share(share, caching=True, **options):
+            sample = []
+            for t in threads(400, n=12):
+                data = t.to_dict()
+                prev = size = 0
+                for i, run in enumerate(data["runs"]):
+                    if not i:
+                        start = datetime.fromisoformat(run["started_at"])
+                    else:
+                        start += timedelta(seconds=120 if i % 4 == 0 else 400)
+                    run["started_at"] = run["generation"]["started_at"] = (
+                        start.isoformat()
+                    )
+                    run["ended_at"] = run["generation"]["ended_at"] = (
+                        start + timedelta(seconds=30)
+                    ).isoformat()
+                    size += sum(
+                        self.spec.part_tokens(p["text"])
+                        for p in (run["input"], *run["retrievals"])
+                    )
+                    reads = int(prev * share) if i % 4 == 0 else 0
+                    run["generation"]["usage"] = dict(
+                        input=size,
+                        output=5,
+                        cache_read=reads,
+                        cache_write=size - reads if caching else 0,
+                    )
+                    prev = size
+                    size += self.spec.part_tokens(run["output"]["text"])
+                sample.append(Thread(data))
+            return self.solve(sample, **options)
+
+        low, high = fit_share(0.1), fit_share(1)
+        self.assertEqual(low["cache_reads"]["observations"], 8)
+        self.assertAlmostEqual(low["cache_reads"]["share"], 0.1, places=3)
+        self.assertEqual(low["planner_options"]["max_pings"], 0)
+        self.assertGreater(high["planner_options"]["max_pings"], 0)
+        # Both timely returns follow a declared prefix edit. They give no
+        # evidence of the provider hit share on an otherwise matching prefix.
+        overlap = {f"t{i}-r{n}": 0.5 for i in range(4) for n in (4, 8)}
+        edited = fit_share(0.1, next_endpoint_reuse_fraction=overlap)
+        self.assertEqual(edited["cache_reads"], {"share": None, "observations": 0})
+        # An application that never switched caching on reports zero reads and
+        # zero writes. Those are not misses, so the provider's rules are assumed.
+        off = fit_share(0, caching=False)
+        self.assertEqual(off["cache_reads"], {"share": None, "observations": 0})
+        self.assertEqual(
+            off["planner_options"]["max_pings"], high["planner_options"]["max_pings"]
+        )
 
     def test_invalid_requests(self):
         sample = threads(400)

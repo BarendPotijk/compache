@@ -10,13 +10,14 @@ from .contracts import ModelSpec, digest, number
 from .distribution import (
     fit_distribution,
     freeze_distribution,
+    measure_cache_reads,
     plan_distribution,
     plan_distribution_idle,
     repeat_ping_charge,
 )
 from .edit_accounting import EditErrorHistory, InputAnchor, PartMeter, estimate_input
-from .parts import Request, Source, wire_part
 from .header_traffic import fit_shared_header_traffic, header_traffic_signature
+from .parts import Request, Source, wire_part
 from .retention import (
     RecipeView,
     RetentionRecipe,
@@ -69,6 +70,7 @@ def fit_workload(
             max((len(t.runs) for t in threads), default=1),
             kinds=kinds,
             keep_under_tokens=size_ladder(threads, spec),
+            include_citations=any(r.cited_part_ids for t in threads for r in t.runs),
             extra_windows=evidence_windows(threads, labels),
         )
         select = select or "cheapest"
@@ -102,6 +104,7 @@ def fit_workload(
         "schema_version": "compache-workload-planner-v1",
         "model_spec": spec.to_dict(),
         "demand": forecasts,
+        "cache_reads": measure_cache_reads(threads, spec, next_endpoint_reuse_fraction),
         "recipes": scores,
         "retention_floor": retention_floor,
         "recipe_selection": {
@@ -160,7 +163,11 @@ class WorkloadPolicy:
         if max_pings is None:
             # A solved policy carries the ping count that was cheapest on its threads.
             max_pings = (artifact.get("planner_options") or {}).get("max_pings", 1)
+        share = artifact.get("cache_reads", {}).get("share")
+        self.cache_read_share = 1.0 if share is None else share
+        number(self.cache_read_share, "cache read share", 0, 1)
         self.options = {
+            "cache_read_share": self.cache_read_share,
             "lookahead": lookahead,
             "branches": branches,
             "seed": seed,
@@ -589,7 +596,11 @@ class WorkloadSession:
         decision["ambient_source"] = ambient_source
         decision["header"] = header_usage(header, reuse)
         decision["header"]["planned_input_cost"] = price_header(
-            spec, header, chosen.tokens, max(thread_match, reuse.eligible_tokens)
+            spec,
+            header,
+            chosen.tokens,
+            max(thread_match, reuse.eligible_tokens),
+            self.policy.cache_read_share,
         )
         plan = PlannedRun(
             request,
@@ -908,6 +919,7 @@ class WorkloadSession:
                 capacity,
                 output,
                 uncached_input_rate=uncached_rate,
+                read_share=self.policy.cache_read_share,
             ),
             expected_cost_if_stopped=costs.get(0),
             expected_cost_if_continued=min(continued, default=None),
@@ -1077,6 +1089,7 @@ class WorkloadSession:
             spec=spec,
             verified_static=verified_shared_static_tokens,
             modeled=modeled,
+            modeled_read_share=self.policy.cache_read_share,
             write_tokens=writes,
             ping_has_private_suffix=ping_has_private_suffix,
         )
@@ -1175,7 +1188,7 @@ def header_usage(header, reuse):
     }
 
 
-def price_header(spec, header, request_tokens, matching_tokens):
+def price_header(spec, header, request_tokens, matching_tokens, read_share=1.0):
     """Model the header portion of this request's input charge once, in wire order."""
     eligible = spec.cache_ttl_seconds > 0 and request_tokens >= spec.cache_min_tokens
     factor = spec.input_price_factor(request_tokens)
@@ -1185,8 +1198,9 @@ def price_header(spec, header, request_tokens, matching_tokens):
         // spec.cache_block_tokens
         * spec.cache_block_tokens
     )
-    if not eligible or reads < spec.cache_min_tokens:
-        reads = 0
+    reads = (
+        int(reads * read_share) if eligible and reads >= spec.cache_min_tokens else 0
+    )
     sizes = {
         "system_prompt": header.system_tokens,
         "default_tools": header.default_tool_tokens,

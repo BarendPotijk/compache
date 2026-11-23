@@ -32,8 +32,8 @@ Fitted on 4 threads, 71 turns (71 labelled) for claude-sonnet-5-5.
 
 Keep questions from the last 4 turns, answers from the last 9 turns and retrieved text from the last turn.
 Send up to 1 keep-warm ping while a user is away.
-82% of the labelled turns that need earlier context still have it in view. The rest fetch it back, and that call is in the cost.
-$16.08 per 1,000 turns against $50.25 keeping everything: 68% less.
+82% of what the labelled turns need from earlier turns stays in view. The rest is fetched back, and that call is in the cost.
+$16.10 per 1,000 turns against $50.25 keeping everything: 68% less.
 
 Wrote policy.json
 ```

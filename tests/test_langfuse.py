@@ -149,6 +149,14 @@ class RebuildTests(unittest.TestCase):
             dict(second.generation.usage),
             {"input": 2500, "output": 60, "cache_read": 1152, "cache_write": 0},
         )
+        # A cached counter that is reported counts, zero included. A call without one says nothing.
+        self.assertTrue(first.generation.cache_read_reported)
+        bare = tool_loop()
+        for item in bare[:2]:
+            del item["usageDetails"]["input_cached_tokens"]
+        unmetered = load_threads(threads_from_observations(bare)[0])[0].runs[0]
+        self.assertEqual(dict(unmetered.generation.usage)["input"], 1200)
+        self.assertFalse(unmetered.generation.cache_read_reported)
         found = recorded(threads)
         self.assertEqual(
             (

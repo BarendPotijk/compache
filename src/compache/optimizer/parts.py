@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import cached_property, lru_cache
 
-from compache.threads import ContractError, Thread
+from compache.threads import ContractError, Thread, citation_ids
 
 from .contracts import canonical, digest, number
 
@@ -20,6 +20,8 @@ class Source:
     document_id: str = ""
     version: str = ""
     chunk_id: str = ""
+    # Adapter metadata, never part of the rendered prefix or expansion handle.
+    cited_part_ids: tuple[str, ...] = field(default=(), compare=False)
 
     def __post_init__(self):
         if (
@@ -29,12 +31,24 @@ class Source:
         ):
             raise ContractError("invalid source identity/kind")
         number(self.run_index, "source run_index", 1, integer=True)
+        if self.cited_part_ids != ():
+            object.__setattr__(
+                self, "cited_part_ids", citation_ids(self.cited_part_ids)
+            )
+        if self.cited_part_ids and self.kind != "output":
+            raise ContractError("only an observed output can cite retrieved parts")
         if self.text is not None and not isinstance(self.text, str):
             raise ContractError("source text must be string or null")
 
     @cached_property
     def fingerprint(self):
-        return digest({k: getattr(self, k) for k in self.__dataclass_fields__})
+        return digest(
+            {
+                k: getattr(self, k)
+                for k in self.__dataclass_fields__
+                if k != "cited_part_ids"
+            }
+        )
 
     @cached_property
     def wire(self):
@@ -77,7 +91,15 @@ class Request:
                     r.generation.model,
                     tuple(parts),
                 )
-            parts.append(Source(r.output.part_id, "output", r.run_index, r.output.text))
+            parts.append(
+                Source(
+                    r.output.part_id,
+                    "output",
+                    r.run_index,
+                    r.output.text,
+                    cited_part_ids=r.cited_part_ids,
+                )
+            )
         raise ContractError("unknown run for request")
 
     def __post_init__(self):
@@ -90,6 +112,18 @@ class Request:
             p.run_index > self.run_index for p in self.parts
         ):
             raise ContractError("request contains duplicate or future parts")
+        if any(p.cited_part_ids for p in self.parts):
+            available = {}
+            for p in self.parts:
+                if p.kind == "retrieval":
+                    available[p.part_id] = p.run_index
+                if any(
+                    pid not in available or available[pid] > p.run_index
+                    for pid in p.cited_part_ids
+                ):
+                    raise ContractError(
+                        "answer citations must reference earlier exposed retrievals"
+                    )
         if any(
             p.kind not in ("input", "retrieval", "output")
             or (p.kind == "output" and p.run_index == self.run_index)

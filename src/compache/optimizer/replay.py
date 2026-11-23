@@ -3,20 +3,24 @@
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from heapq import heappop, heappush
-from itertools import count
+from itertools import accumulate, count
 
 from compache.errors import ContractError
+from compache.labels import label_index
 
 from .cache_breaks import CacheBreakChecker, CacheScope
 from .contracts import digest, number, seconds
-from .distribution import repeat_input_usage, validate_calls_per_run
-from compache.labels import label_index
-
-from .parts import Request, Source
+from .distribution import (
+    _input_buckets,
+    repeat_input_usage,
+    request_charge,
+    validate_calls_per_run,
+)
 from .host_ledger import compare_host_ledger, host_contract
+from .parts import Request, Source
 from .retention import RetentionRecipe, assess, matched_prefix_tokens, render_recipe
-from .shared_prefix import SharedPrefixCatalog
 from .session import WorkloadPolicy, WorkloadSession
+from .shared_prefix import SharedPrefixCatalog
 
 __all__ = ["compare_host_ledger", "replay_workload"]
 
@@ -30,7 +34,7 @@ def _block_capacity(tokens, spec):
     )
 
 
-def _charge(view, prior, at, output_tokens, spec, header, reuse, order):
+def _charge(view, prior, at, output_tokens, spec, header, reuse, order, read_share=1.0):
     """Price one logical provider invocation. Static headers may hit without a thread history."""
     own = 0
     if prior is not None:
@@ -42,10 +46,10 @@ def _charge(view, prior, at, output_tokens, spec, header, reuse, order):
                 previous, view, stable_overhead_tokens=view.overhead_tokens
             )
     shared = max(own, reuse.eligible_tokens)
-    reads = min(view.tokens, _block_capacity(shared, spec))
+    fresh, writes, reads = _input_buckets(
+        spec, view.tokens, min(view.tokens, shared), read_share
+    )
     eligible = spec.cache_ttl_seconds > 0 and view.tokens >= spec.cache_min_tokens
-    writes = view.tokens - reads if eligible else 0
-    fresh = view.tokens - reads - writes
     cold_rate = spec.write_multiplier if eligible else 1.0
     cold_input_cost = view.tokens * cold_rate * spec.input_price_factor(view.tokens)
     cost = spec.token_charge(fresh, writes, reads, output_tokens)
@@ -95,6 +99,8 @@ def _header_usage(reads_per_call, header, order, calls):
 class _ThreadReplay:
     scope: CacheScope
     session: WorkloadSession | None
+    part_sizes: dict
+    cumulative_sizes: tuple
     prior: tuple | None = None
     pending: tuple | None = None
     failed: bool = False
@@ -149,8 +155,11 @@ def _run_arm(
             if candidate
             else None
         )
-        contexts[tid] = _ThreadReplay(scope, session)
         canonical = Request.from_thread(thread, thread.runs[-1].run_id).parts
+        sizes = {p.part_id: spec.part_tokens(p.text) for p in canonical}
+        contexts[tid] = _ThreadReplay(
+            scope, session, sizes, tuple(accumulate(sizes.values(), initial=0))
+        )
         for run in thread.runs:
             start = seconds(run.started_at)
             send = seconds(run.generation.started_at)
@@ -262,10 +271,35 @@ def _run_arm(
                     else spec.text_tokens(run.output.text)
                 )
                 charge = _charge(
-                    view, ctx.prior, at, out, spec, header, reuse, component_order
+                    view,
+                    ctx.prior,
+                    at,
+                    out,
+                    spec,
+                    header,
+                    reuse,
+                    component_order,
+                    policy.cache_read_share,
                 )
                 grade = assess(labels.get(run.run_id), view.full_part_ids)
+                recovery = 0.0
+                for alternatives in grade["restore_alternatives"]:
+                    restored = min(
+                        sum(ctx.part_sizes[p] for p in missing)
+                        for missing in alternatives
+                    )
+                    recovery += request_charge(
+                        spec,
+                        view.tokens + restored,
+                        view.tokens,
+                        spec.expansion_output_tokens,
+                        policy.cache_read_share,
+                    )
                 row = dict(
+                    labeled=run.run_id in labels,
+                    projected_recovery_cost=recovery,
+                    canonical_part_tokens=ctx.cumulative_sizes[len(req.parts)],
+                    sent_part_tokens=sum(view.part_tokens),
                     thread_id=tid,
                     run_id=run.run_id,
                     run_index=run.run_index,
@@ -274,6 +308,8 @@ def _run_arm(
                     action=action,
                     historical_required=grade["historical_requirements_assessed"],
                     historical_retained=grade["historical_requirements_retained"],
+                    unknown_requirements=grade["unknown_requirements"],
+                    assessed_requirements=grade["assessed_requirements"],
                     unassessable=not grade["assessable"],
                     changed=bool(view.archived_ids),
                     assessed_miss=bool(grade["missed_requirements"]),
@@ -291,7 +327,9 @@ def _run_arm(
                 ledger.append(row)
                 if observed_calls is not None and observed_calls > 1:
                     additional = observed_calls - 1
-                    repeat = repeat_input_usage(spec, view.tokens, additional)
+                    repeat = repeat_input_usage(
+                        spec, view.tokens, additional, policy.cache_read_share
+                    )
                     ledger.append(
                         dict(
                             thread_id=tid,
@@ -314,7 +352,11 @@ def _run_arm(
                 ctx.pending = None
                 if candidate:
                     answer = Source(
-                        run.output.part_id, "output", run.run_index, run.output.text
+                        run.output.part_id,
+                        "output",
+                        run.run_index,
+                        run.output.text,
+                        cited_part_ids=run.cited_part_ids,
                     )
                     # The trace associates its input meter with the historical
                     # generation. Its normalized part IDs omit the submitted
@@ -359,6 +401,7 @@ def _run_arm(
                     header,
                     reuse,
                     component_order,
+                    policy.cache_read_share,
                 )
                 confirmed = ctx.session.acknowledge_ping(
                     run_id=run_id,
@@ -387,6 +430,18 @@ def _run_arm(
     finally:
         check.close()
     return _summarize(ledger, failures, threads)
+
+
+def arm_costs(rows):
+    """Charge each dispatch and extrapolate observed evidence misses over completed turns."""
+    answers = [row for row in rows if row["role"] == "answer"]
+    labelled = sum(row["labeled"] for row in answers)
+    recovery = (
+        sum(row["projected_recovery_cost"] for row in answers) * len(answers) / labelled
+        if labelled
+        else 0.0
+    )
+    return len(answers), sum(row["cost_input_equivalents"] for row in rows), recovery
 
 
 def _summarize(ledger, failures, threads):

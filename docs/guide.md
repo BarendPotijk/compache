@@ -52,6 +52,8 @@ If you keep turns instead of messages, write them directly:
 
 A turn that made several model calls can say so with `"calls": 3`. Parts are numbered `<thread>:<turn>:input`, `<thread>:<turn>:retrieval:<k>` and `<thread>:<turn>:output`. Labels refer to these IDs. A thread that spells out every identity itself, as the benchmark builders write them, is taken as is.
 
+If your application records which sources an answer cited, say so: give the retrieved message a `"part_id"` that is unique in the thread, such as `"lookup-17"`, and the assistant message `"cited_part_ids": ["lookup-17"]`. With turns, put the list on the run. The fit can then keep cited sources longer than the rest of what was retrieved, for as long as your threads show it pays.
+
 A thread in either shape may also carry `"tools"`, the tool definitions sent on every request, and `"observed_until"`, when the record was read.
 
 ### From Langfuse
@@ -121,8 +123,8 @@ Fitted on 4 threads, 71 turns (71 labelled) for claude-sonnet-5-5.
 
 Keep questions from the last 4 turns, answers from the last 9 turns and retrieved text from the last turn.
 Send up to 1 keep-warm ping while a user is away.
-82% of the labelled turns that need earlier context still have it in view. The rest fetch it back, and that call is in the cost.
-$16.08 per 1,000 turns against $50.25 keeping everything: 68% less.
+82% of what the labelled turns need from earlier turns stays in view. The rest is fetched back, and that call is in the cost.
+$16.10 per 1,000 turns against $50.25 keeping everything: 68% less.
 ```
 
 | Option | Use |
@@ -140,7 +142,7 @@ In Python, `compache.fit` returns a `Policy`: `policy.describe()` is the text ab
 compache replay heldout.jsonl --labels heldout-labels.jsonl --policy policy.json
 ```
 
-It prices the policy and keeping everything on the same arrivals, including every ping. With labels it also reports how much of what those threads needed stays in view and adds the cost of fetching the rest back. A fit sits near its floor by construction, so this is the number to trust.
+It prices the policy and keeping everything on the same arrivals, including every ping. With labels it also reports how much of what those threads needed stays in view and adds the cost of fetching the rest back. A fit sits near its floor by construction, so this is the number to trust. `--json` adds the same per thread. If a request outgrows the model's context window, the costs are compared on the turns both sides answered.
 
 ## 5. Apply
 
@@ -166,6 +168,7 @@ if session.next_ping_at:                         # epoch seconds, or None
 | `session.ping_sent(at=..., usage=...)` | Records the ping. More pings follow only when its usage shows the cache was read |
 | `session.reopen(reference)` | Answers the model's `reopen` tool call with the archived text |
 
+- **Cited sources.** For a policy fitted with them, pass `session.complete(turn, answer, cited_part_ids=[...])`. The IDs are the `part_id` of items given to `prepare`, or the generated ones in `turn.parts`, and must be in view in that request. They add nothing to what the model is sent.
 - **Archived parts.** A cut replaces a part with a notice that carries a handle. Give the model `compache.REOPEN_TOOL` and `compache.REOPEN_INSTRUCTIONS`, and pass its tool calls to `session.reopen`.
 - **Placement.** `turn.messages` puts answers under `assistant` and everything else under `user`. If your application sends retrieved text another way, build the request from `turn.parts` and keep that mapping fixed.
 - **Tool loops.** Call `prepare` once per user message and append the calls of that turn yourself.

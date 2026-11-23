@@ -181,12 +181,20 @@ def _replay(args):
     detail = report.pop("detail")
     if args.output:
         _write(args.output, {**report, "detail": detail})
-    lines = [f"{report['threads']:,} threads, {report['turns']:,} turns."]
+    lines = [f"{report['threads']:,} threads, {report['planned_turns']:,} turns."]
     costs = report["cost_per_1000_turns"]
     if report["saving"] is None:
         lines.append(
-            "Some requests did not fit the model, so there is no comparable cost."
+            "Some requests did not fit the model: the policy answers "
+            f"{report['policy_turns']:,} turns and keeping everything {report['baseline_turns']:,}."
         )
+        common = report["common_prefix"]
+        if common["turns"]:
+            paired = common["cost_per_1000_turns"]
+            lines.append(
+                f"On the {common['turns']:,} turns both answer: {_money(paired, 'policy')} per 1,000 turns "
+                f"with the policy against {_money(paired, 'keep_everything')} keeping everything."
+            )
     else:
         lines.append(
             f"{_money(costs, 'policy')} per 1,000 turns with the policy against "
@@ -194,8 +202,8 @@ def _replay(args):
         )
     if report["coverage"] is not None:
         lines.append(
-            f"{report['coverage']:.0%} of the {report['needs_history']:,} turns that need earlier "
-            f"context have it in view. {report['tokens_kept']:.0%} of the history tokens are kept."
+            f"{report['coverage']:.0%} of the {report['needs_history']:,} labelled needs for earlier "
+            f"context are in view. {report['tokens_kept']:.0%} of the history tokens are kept."
         )
     lines.append(f"{report['pings']:,} keep-warm pings sent.")
     return report, "\n".join(lines)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import time
+import weakref
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -14,11 +15,17 @@ from .optimizer.cache_breaks import CacheBreakChecker, CacheScope
 from .optimizer.contracts import ModelSpec, seconds
 from .optimizer.parts import Request, Source
 from .optimizer.recovery import reopen as _reopen
-from .optimizer.replay import replay_workload
-from .optimizer.retention import RetentionRecipe, fit_recipes
+from .optimizer.replay import arm_costs, replay_workload
+from .optimizer.retention import RetentionRecipe
 from .optimizer.session import WorkloadPolicy, WorkloadSession
 from .optimizer.solve import solve_workload
-from .threads import canonical_usage, load_threads, read_jsonl, recorded
+from .threads import (
+    cache_read_reported,
+    canonical_usage,
+    load_threads,
+    read_jsonl,
+    recorded,
+)
 
 __all__ = ["Policy", "Session", "Turn", "fit", "replay"]
 
@@ -65,23 +72,6 @@ def _observed_until(threads, given):
         seconds=_HORIZON_SECONDS
     )
     return end.isoformat().replace("+00:00", "Z")
-
-
-def _recovery_cost(spec, row, turns):
-    """What fetching back the lost requirements costs, carried from labelled turns to all."""
-    labelled = row["turns"] - row["unlabeled_runs"]
-    if not labelled:
-        return 0.0
-    lost = row["historical_required"] - row["historical_retained"]
-    return (
-        turns
-        / labelled
-        * (
-            spec.read_multiplier * row["recovery_view_tokens"]
-            + spec.write_multiplier * row["recovery_restored_tokens"]
-            + spec.output_multiplier * spec.expansion_output_tokens * lost
-        )
-    )
 
 
 def fit(
@@ -131,6 +121,13 @@ def fit(
         "labelled_turns": scored[0]["turns"] - scored[0]["unlabeled_runs"]
         if scored
         else 0,
+        "unknown_requirements": scored[0]["unknown_requirements"] if scored else 0,
+        "assessed_requirements": scored[0]["direct_required"]
+        + scored[0]["historical_required"]
+        if scored
+        else 0,
+        "unknown_turns": scored[0]["unknown_runs"] if scored else 0,
+        "historical_requirements": scored[0]["historical_required"] if scored else 0,
         "candidate_cuts": len(scored),
     }
     # The policy file keeps the cut that won. The priced candidates stay under `solve`.
@@ -152,7 +149,7 @@ def replay(policy, threads, labels=None, *, observed_until=None, **options) -> d
     """
     if not isinstance(policy, Policy):
         policy = Policy(policy)
-    threads, spec, found, _ = _threads(threads, policy.spec)
+    threads, _, found, _ = _threads(threads, policy.spec)
     labels = _rows(labels)
     header = policy.artifact.get("header") or {}
     # Threads share a cached system prompt in the replay if they did in the fit.
@@ -169,35 +166,63 @@ def replay(policy, threads, labels=None, *, observed_until=None, **options) -> d
         default_tools=header.get("default_tools", []),
         **options,
     )
-    turns = detail["baseline"]["answers"]
-    keep = detail["baseline"]["totals"]["cost_input_equivalents"]
-    replayed = detail["candidate"]["totals"]["cost_input_equivalents"]
-    complete = detail["candidate"]["complete"] and detail["baseline"]["complete"]
-    recipe, held, recovery = policy.recipe, None, 0.0
-    if recipe is not None:
-        held = fit_recipes(threads, labels, spec, [recipe], retention_floor=0.0)[0]
-        recovery = _recovery_cost(spec, held, turns)
+    candidate, baseline = detail["candidate"], detail["baseline"]
+    turns, replayed, recovery = arm_costs(candidate["ledger"])
     cost = replayed + recovery
+    baseline_turns, keep, _ = arm_costs(baseline["ledger"])
+    complete = candidate["complete"] and baseline["complete"]
+    answers = [r for r in candidate["ledger"] if r["role"] == "answer"]
+    per_thread = {}
+    for row in answers:
+        counts = per_thread.setdefault(row["thread_id"], [0, 0])
+        counts[0] += row["historical_retained"]
+        counts[1] += row["historical_required"]
+    full_tokens = sum(r["canonical_part_tokens"] for r in answers)
+    common_runs = {r["run_id"] for r in answers} & {
+        r["run_id"] for r in baseline["ledger"] if r["role"] == "answer"
+    }
+    paired = {}
+    for name, arm in (("policy", candidate), ("keep_everything", baseline)):
+        _, charges, extra = arm_costs(
+            [r for r in arm["ledger"] if r["run_id"] in common_runs]
+        )
+        paired[name] = charges + extra
     return {
         "threads": len(threads),
         "turns": turns,
+        "planned_turns": candidate["planned_answers"],
+        "policy_turns": turns,
+        "baseline_turns": baseline_turns,
         "complete": complete,
         "policy_cost": cost,
         "replayed_cost": replayed,
         "recovery_cost": recovery,
         "keep_everything_cost": keep,
         "saving": 1 - cost / keep if complete and keep else None,
-        "pings": detail["candidate"]["pings"],
-        "needs_history": held["historical_required"] if held and labels else None,
-        "coverage": held["historical_retained"] / held["historical_required"]
-        if held and held["historical_required"]
+        "common_prefix": {
+            "turns": len(common_runs),
+            "cost_per_1000_turns": policy._per_1000_turns(paired, len(common_runs)),
+            "saving": 1 - paired["policy"] / paired["keep_everything"]
+            if paired["keep_everything"]
+            else None,
+        },
+        "pings": candidate["pings"],
+        "needs_history": candidate["historical_required"] if labels else None,
+        "coverage": candidate["coverage"],
+        "coverage_by_thread": {
+            tid: {"retained": n, "required": d, "coverage": n / d if d else None}
+            for tid, (n, d) in per_thread.items()
+        },
+        "unassessable_turns": candidate["unassessable_runs"],
+        "unknown_requirements": sum(r["unknown_requirements"] for r in answers),
+        "assessed_requirements": sum(r["assessed_requirements"] for r in answers),
+        "tokens_kept": sum(r["sent_part_tokens"] for r in answers) / full_tokens
+        if full_tokens
         else None,
-        "tokens_kept": held["projected_tokens"] / held["canonical_tokens"]
-        if held and held["canonical_tokens"]
-        else 1.0,
-        "cost_per_1000_turns": policy._per_1000_turns(
-            {"policy": cost, "keep_everything": keep}, turns
-        ),
+        "cost_per_1000_turns": {
+            **policy._per_1000_turns({"policy": cost}, turns),
+            **policy._per_1000_turns({"keep_everything": keep}, baseline_turns),
+        },
         "detail": detail,
     }
 
@@ -253,15 +278,21 @@ class Policy:
     def _per_1000_turns(self, costs, turns):
         """Costs per 1,000 turns: in dollars for a known model, else in input tokens."""
         price = (self.artifact.get("pricing") or {}).get("input_price_per_million")
-        scale = 1000 / turns if turns else 0.0
+        scale = 1000 / turns if turns else None
         if price is None:
             return {
                 "unit": "input-token equivalents",
-                **{k: v * scale for k, v in costs.items()},
+                **{
+                    k: v * scale if scale is not None else None
+                    for k, v in costs.items()
+                },
             }
         return {
             "unit": "USD",
-            **{k: v * scale * price / 1e6 for k, v in costs.items()},
+            **{
+                k: v * scale * price / 1e6 if scale is not None else None
+                for k, v in costs.items()
+            },
         }
 
     @property
@@ -281,6 +312,10 @@ class Policy:
             "threads": len(self.artifact["training_threads"]),
             "turns": solved.get("turns"),
             "labelled_turns": fitted.get("labelled_turns", 0),
+            "unknown_requirements": fitted.get("unknown_requirements"),
+            "assessed_requirements": fitted.get("assessed_requirements"),
+            "unknown_turns": fitted.get("unknown_turns"),
+            "historical_requirements": fitted.get("historical_requirements"),
             "keep": None
             if recipe is None
             else {
@@ -289,6 +324,11 @@ class Policy:
                 "retrieved": recipe.retrieval_runs,
                 "matching_retrieved": recipe.protect_query_matches,
                 "always_under_tokens": recipe.keep_under_tokens,
+                **(
+                    {"cited_answer_runs": recipe.cited_answer_runs}
+                    if recipe.cited_answer_runs != 0
+                    else {}
+                ),
             },
             "max_pings": self.max_pings,
             "coverage": chosen.get("coverage"),
@@ -318,6 +358,10 @@ class Policy:
                 lines.append(
                     "Earlier retrieved text that matches the new question stays too."
                 )
+            if recipe.cited_answer_runs != 0:
+                lines.append(
+                    f"Keep visible sources cited by {_window(recipe.cited_answer_runs, 'answers')}."
+                )
             if recipe.keep_under_tokens:
                 lines.append(
                     f"Parts of at most {recipe.keep_under_tokens} tokens always stay."
@@ -329,10 +373,10 @@ class Policy:
             else "Send no keep-warm pings."
         )
         if recipe is not None and summary["coverage"] is not None:
-            lines.append(
-                f"{summary['coverage']:.0%} of the labelled turns that need earlier context "
-                "still have it in view. The rest fetch it back, and that call is in the cost."
-            )
+            kept = f"{summary['coverage']:.0%} of what the labelled turns need from earlier turns stays in view."
+            if summary["coverage"] < 0.995:
+                kept += " The rest is fetched back, and that call is in the cost."
+            lines.append(kept)
         costs, saving = summary["cost_per_1000_turns"], summary["saving"]
         if costs and saving is not None:
             if costs["unit"] == "USD":
@@ -349,6 +393,7 @@ class Policy:
         if self._compiled is None:
             self._compiled = WorkloadPolicy(self.artifact)
             self._checker = CacheBreakChecker()
+            weakref.finalize(self, self._checker.close)
         header = self.artifact.get("header") or {}
         return Session(
             self,
@@ -384,7 +429,9 @@ def _counters(usage) -> dict:
         return {}
     return {
         "input_tokens": counted["input"],
-        "cached_input_tokens": counted["cache_read"],
+        "cached_input_tokens": counted["cache_read"]
+        if cache_read_reported(usage)
+        else None,
         "cache_write_input_tokens": counted["cache_write"],
     }
 
@@ -425,7 +472,8 @@ class Session:
         """The request to send for a new user message and the text retrieved for it.
 
         Each retrieved item is text, or a dict with `text` and optionally
-        `document_id`, `version` and `chunk_id`. Call again with the same
+        `part_id`, `document_id`, `version` and `chunk_id`. An explicit part ID
+        identifies this occurrence and must be unique in the thread. Call again with the same
         arguments to retry a request that was never answered.
         """
         run = self._run + 1
@@ -433,7 +481,19 @@ class Session:
         parts = [Source(f"{prefix}:input", "input", run, question)]
         for k, item in enumerate(retrieved, 1):
             fields = {"text": item} if isinstance(item, str) else dict(item)
-            part_id = f"{prefix}:retrieval:{k}"
+            part_id = fields.get("part_id", f"{prefix}:retrieval:{k}")
+            if (
+                not isinstance(part_id, str)
+                or not part_id.strip()
+                or part_id.strip() != part_id
+            ):
+                raise ContractError(
+                    "a retrieval part_id must be a nonempty trimmed string"
+                )
+            if part_id == f"{prefix}:output":
+                raise ContractError(
+                    "a retrieval part_id collides with the current answer"
+                )
             parts.append(
                 Source(
                     part_id,
@@ -466,18 +526,37 @@ class Session:
             plan,
         )
 
-    def complete(self, turn: Turn, answer: str, *, at=None, usage=None):
+    def complete(
+        self, turn: Turn, answer: str, *, at=None, usage=None, cited_part_ids=()
+    ):
         """Record the answer to `turn`. Returns when the next ping is due, if one is.
 
         `usage` is the provider's usage for the answer call, as a dict in
         Anthropic's or OpenAI's shape. With it the session tracks real input
         sizes and notices a cache that stopped hitting. Without it the request
-        is taken to be cached the way the model's rules say.
+        is taken to be cached the way the model's rules say. If the host
+        records which visible retrievals the answer cited, pass their part IDs.
         """
         if self._pending is None:
             raise ContractError("no prepared turn to complete")
         request, parts = self._pending
-        source = Source(f"{request.run_id}:output", "output", request.run_index, answer)
+        source = Source(
+            f"{request.run_id}:output",
+            "output",
+            request.run_index,
+            answer,
+            cited_part_ids=cited_part_ids,
+        )
+        if source.cited_part_ids:
+            visible = {
+                p.part_id
+                for p in turn.parts
+                if p.kind == "retrieval" and p.part_id not in turn.archived_ids
+            }
+            if not set(source.cited_part_ids) <= visible:
+                raise ContractError(
+                    "cited_part_ids must name visible retrievals in the answered request"
+                )
         counters = _counters(usage)
         if not counters:
             spec = self.policy.spec

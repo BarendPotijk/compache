@@ -48,6 +48,7 @@ _RUN_FIELDS = {
     "started_at",
     "ended_at",
     "history_policy",
+    "cited_part_ids",
     "input",
     "output",
     "retrievals",
@@ -61,6 +62,7 @@ _GENERATION_FIELDS = {
     "model",
     "usage",
     "request_part_ids",
+    "cache_read_reported",
 }
 _USAGE_FIELDS = {"input", "output", "cache_read", "cache_write"}
 _RETRIEVAL_FIELDS = {"document_id", "version", "chunk_id", "exposed_to_model"}
@@ -70,6 +72,22 @@ def _id(value: Any, name: str) -> str:
     if not isinstance(value, str) or not value.strip() or value != value.strip():
         raise ContractError(f"{name}: expected nonempty trimmed string")
     return value
+
+
+def citation_ids(value) -> tuple[str, ...]:
+    """Ordered, unique retrieval part IDs referenced by a completed answer."""
+    if (
+        not isinstance(value, (list, tuple))
+        or any(
+            not isinstance(pid, str) or not pid.strip() or pid.strip() != pid
+            for pid in value
+        )
+        or len(set(value)) != len(value)
+    ):
+        raise ContractError(
+            "cited_part_ids must be a sequence of distinct retrieval IDs"
+        )
+    return tuple(value)
 
 
 def _time(value: Any, name: str) -> datetime:
@@ -138,6 +156,7 @@ class Generation:
     ended_at: str
     usage: tuple[tuple[str, int], ...] | None
     request_part_ids: tuple[str, ...]
+    cache_read_reported: bool = True
 
 
 @dataclass(frozen=True)
@@ -153,6 +172,7 @@ class Run:
     generation: Generation
     # Model calls the turn made, when the record says. None means not recorded.
     calls: int | None = None
+    cited_part_ids: tuple[str, ...] = ()
 
 
 def _typed_part(part: dict, retrieval: bool = False) -> Part:
@@ -200,6 +220,7 @@ class Thread:
                 g["ended_at"],
                 tuple(sorted(usage.items())) if usage is not None else None,
                 tuple(g["request_part_ids"]),
+                g.get("cache_read_reported", True),
             )
             runs.append(
                 Run(
@@ -213,6 +234,7 @@ class Thread:
                     tuple(_typed_part(p, True) for p in r["retrievals"]),
                     generation,
                     r.get("calls"),
+                    tuple(r.get("cited_part_ids", ())),
                 )
             )
         self.runs = tuple(runs)
@@ -286,9 +308,20 @@ class Thread:
                     if part_id in seen:
                         raise ContractError("duplicate part_id: " + part_id)
                     seen[part_id] = (i, kind, part)
+            for pid in citation_ids(run.get("cited_part_ids", ())):
+                if (
+                    pid not in seen
+                    or seen[pid][1] != "retrieval"
+                    or not seen[pid][2]["exposed_to_model"]
+                ):
+                    raise ContractError(
+                        "cited_part_ids must refer to retrievals already exposed in this thread"
+                    )
             g = run.get("generation")
             if not isinstance(g, dict):
                 raise ContractError("exactly one generation object required")
+            if type(g.get("cache_read_reported", True)) is not bool:
+                raise ContractError("cache_read_reported must be boolean")
             if set(g) - _GENERATION_FIELDS:
                 raise ContractError("unknown generation fields")
             observation = _id(g.get("observation_id"), "observation_id")
@@ -353,6 +386,22 @@ def _iso(value: Any, name: str) -> str:
             )
         return value
     raise ContractError(f"{name}: expected an ISO timestamp or epoch seconds")
+
+
+def cache_read_reported(usage: Any) -> bool:
+    """Whether a receipt supplied a read meter, including an explicit zero."""
+    if not isinstance(usage, dict):
+        dump = getattr(usage, "model_dump", None)
+        usage = dump() if callable(dump) else None
+    if not isinstance(usage, dict):
+        return False
+    counts = [
+        v for k, v in usage.items() if "cache" in k and ("read" in k or "cached" in k)
+    ]
+    for key in ("input_tokens_details", "prompt_tokens_details"):
+        if isinstance(usage.get(key), dict):
+            counts.append(usage[key].get("cached_tokens"))
+    return any(type(n) is int and n >= 0 for n in counts)
 
 
 def canonical_usage(usage: Any) -> dict | None:
@@ -503,13 +552,14 @@ def _turn_usage(usages: list) -> dict | None:
     }
 
 
-def _runs_from_messages(messages: Any) -> list[dict]:
+def _runs_from_messages(messages: Any, thread_id: str) -> list[dict]:
     """Group a chat log into runs: a user message, what was retrieved, the answer."""
     if not isinstance(messages, list):
         raise ContractError("messages must be an array")
     runs: list[dict] = []
     current: dict | None = None
     waiting: list[dict] = []
+    exposed_ids: set[str] = set()
 
     def close():
         nonlocal current
@@ -523,6 +573,16 @@ def _runs_from_messages(messages: Any) -> list[dict]:
                     "output": "\n\n".join(current["answers"]),
                     # Every assistant message is one model call.
                     "calls": current["calls"],
+                    **(
+                        {"cited_part_ids": list(current["cited"])}
+                        if current["cited"]
+                        else {}
+                    ),
+                    **(
+                        {"generation": {"cache_read_reported": False}}
+                        if current["usages"] and not current["read_reported"]
+                        else {}
+                    ),
                     **(
                         {"usage": _turn_usage(current["usages"])}
                         if current["usages"]
@@ -546,6 +606,8 @@ def _runs_from_messages(messages: Any) -> list[dict]:
             part = {"text": text}
             if isinstance(message.get("id"), str) and message["id"].strip():
                 part["id"] = message["id"].strip()
+            if "part_id" in message:
+                part["part_id"] = _id(message["part_id"], "part_id")
             found.append(part)
         if role == "user" and text:
             if current is not None and current["answers"]:
@@ -559,19 +621,31 @@ def _runs_from_messages(messages: Any) -> list[dict]:
                     "started_at": at,
                     "ended_at": None,
                     "questions": [],
-                    "retrievals": waiting,
+                    "retrievals": [],
                     "answers": [],
+                    "cited": {},
                     "usages": [],
                     "calls": 0,
                     "model": None,
                 }
+                found = waiting + found
                 waiting = []
             current["questions"].append(text)
         elif role == "assistant" and current is not None:
+            citations = citation_ids(message.get("cited_part_ids", ()))
+            if any(pid not in exposed_ids for pid in citations):
+                raise ContractError(
+                    "assistant citations must name retrievals already exposed"
+                )
+            current["cited"].update(dict.fromkeys(citations))
             if text:
                 current["answers"].append(text)
             if at is not None:
                 current["ended_at"] = at
+            if current["calls"] == 0:
+                current["read_reported"] = message.get(
+                    "cache_read_reported", cache_read_reported(message.get("usage"))
+                )
             current["calls"] += 1
             if message.get("usage") is not None:
                 current["usages"].append(message["usage"])
@@ -581,6 +655,10 @@ def _runs_from_messages(messages: Any) -> list[dict]:
         # Retrieved text belongs to the run of the last user message. Before the
         # first user message it waits for that run.
         if current is not None:
+            for k, part in enumerate(found, len(current["retrievals"]) + 1):
+                exposed_ids.add(
+                    part.get("part_id", f"{thread_id}:{len(runs) + 1}:retrieval:{k}")
+                )
             current["retrievals"].extend(found)
         else:
             waiting.extend(found)
@@ -627,7 +705,7 @@ def normalize_thread(data: Any, *, model: str | None = None) -> dict:
     if "messages" in data:
         if "runs" in data:
             raise ContractError("a thread has either messages or runs")
-        data["runs"] = _runs_from_messages(data.pop("messages"))
+        data["runs"] = _runs_from_messages(data.pop("messages"), thread_id)
     data.setdefault("company_id", "default")
     runs = data.get("runs")
     if not isinstance(runs, list) or not runs:
@@ -658,6 +736,8 @@ def normalize_thread(data: Any, *, model: str | None = None) -> dict:
         generation.setdefault("observation_id", f"{run_id}:generation")
         generation.setdefault("started_at", run["started_at"])
         generation.setdefault("ended_at", run["ended_at"])
+        if usage is not None and not cache_read_reported(usage):
+            generation.setdefault("cache_read_reported", False)
         generation.setdefault("usage", canonical_usage(usage))
         generation.setdefault("model", recorded or default_model or "unspecified")
         if model is not None:

@@ -60,6 +60,55 @@ def _arriving(run, spec):
     return sum(spec.part_tokens(t) for t in texts)
 
 
+def measure_cache_reads(threads, spec, next_endpoint_reuse_fraction=None):
+    """Mean realized share on metered, in-TTL returns carrying the conversation.
+
+    A thread whose usage never shows a cache read or write says nothing: the
+    application may not have switched caching on, and its zeros are not misses.
+    """
+    shares = []
+    overlap = next_endpoint_reuse_fraction or {}
+    if not spec.cache_ttl_seconds:
+        return {"observations": 0, "share": None}
+    for thread in threads:
+        metered = [dict(r.generation.usage) for r in thread.runs if r.generation.usage]
+        if not any(u["cache_read"] or u["cache_write"] for u in metered):
+            continue
+        history = 0
+        previous = None
+        for run in thread.runs:
+            g = run.generation
+            usage = dict(g.usage) if g.usage else None
+            visible = [
+                run.input,
+                run.output,
+                *(p for p in run.retrievals if p.exposed_to_model),
+            ]
+            if any(part.text is None for part in visible):
+                # Subsequent history size is also unknown after a masked turn.
+                break
+            expected = history + _arriving(run, spec)
+            sent = seconds(g.started_at)
+            # A much smaller input indicates an already trimmed or rewritten request.
+            carries_history = usage is not None and usage["input"] >= 0.8 * expected
+            if previous and carries_history and g.cache_read_reported:
+                run_id, at, size = previous
+                capacity = size // spec.cache_block_tokens * spec.cache_block_tokens
+                if (
+                    0 <= sent - at < spec.cache_ttl_seconds
+                    and overlap.get(run_id) in (None, 1.0)
+                    and capacity >= max(1, spec.cache_min_tokens)
+                    and usage["input"] >= spec.cache_min_tokens
+                ):
+                    shares.append(min(1.0, usage["cache_read"] / capacity))
+            previous = (run.run_id, sent, usage["input"]) if carries_history else None
+            history = expected + spec.part_tokens(run.output.text)
+    return {
+        "observations": len(shares),
+        "share": sum(shares) / len(shares) if shares else None,
+    }
+
+
 def fit_distribution(
     threads,
     spec: ModelSpec,
@@ -408,39 +457,53 @@ def freeze_distribution(profile, spec):
     )
 
 
-def request_charge(spec, input_tokens, shared_prefix_tokens, output_tokens):
+def request_charge(
+    spec, input_tokens, shared_prefix_tokens, output_tokens, read_share=1.0
+):
     """Price one request in fresh-input-token equivalents, matching replay.Cache."""
     number(input_tokens, "input_tokens", integer=True)
     number(shared_prefix_tokens, "shared_prefix_tokens", 0, input_tokens, integer=True)
     number(output_tokens, "output_tokens", integer=True)
-    return _charge(spec, input_tokens, shared_prefix_tokens, output_tokens)
+    number(read_share, "read_share", 0, 1)
+    return _charge(spec, input_tokens, shared_prefix_tokens, output_tokens, read_share)
 
 
-def _input_buckets(spec, size, shared):
+def modeled_read_tokens(spec, shared, read_share):
+    """Expected billed reads from a matching prefix, under the fitted cache model."""
+    eligible = shared // spec.cache_block_tokens * spec.cache_block_tokens
+    return int(eligible * read_share) if eligible >= spec.cache_min_tokens else 0
+
+
+def _input_buckets(spec, size, shared, read_share=1.0):
     if spec.cache_ttl_seconds <= 0 or size < spec.cache_min_tokens:
         return size, 0, 0
-    read = shared // spec.cache_block_tokens * spec.cache_block_tokens
-    if read < spec.cache_min_tokens:
-        read = 0
+    read = modeled_read_tokens(spec, shared, read_share)
     return 0, size - read, read
 
 
-def _charge(spec, size, shared, output):
-    fresh, writes, reads = _input_buckets(spec, size, shared)
+def _charge(spec, size, shared, output, read_share=1.0):
+    fresh, writes, reads = _input_buckets(spec, size, shared, read_share)
     return spec.token_charge(fresh, writes, reads, output)
 
 
 def repeat_ping_charge(
-    spec, input_tokens, reusable_tokens, output_tokens, *, uncached_input_rate=None
+    spec,
+    input_tokens,
+    reusable_tokens,
+    output_tokens,
+    *,
+    uncached_input_rate=None,
+    read_share=1.0,
 ):
     """Forecast a repeat's rounded reads and price its residual at the receipt rate."""
-    if uncached_input_rate is None:
-        return request_charge(spec, input_tokens, reusable_tokens, output_tokens)
-    number(uncached_input_rate, "uncached_input_rate")
+    number(read_share, "read_share", 0, 1)
     number(input_tokens, "input_tokens", integer=True)
     number(reusable_tokens, "reusable_tokens", 0, input_tokens, integer=True)
     number(output_tokens, "output_tokens", integer=True)
-    _, _, reads = _input_buckets(spec, input_tokens, reusable_tokens)
+    if uncached_input_rate is None:
+        return _charge(spec, input_tokens, reusable_tokens, output_tokens, read_share)
+    number(uncached_input_rate, "uncached_input_rate")
+    _, _, reads = _input_buckets(spec, input_tokens, reusable_tokens, read_share)
     input_cost = (
         reads * spec.read_multiplier + (input_tokens - reads) * uncached_input_rate
     )
@@ -449,7 +512,7 @@ def repeat_ping_charge(
     ) + output_tokens * spec.output_rate(input_tokens)
 
 
-def repeat_input_usage(spec, input_tokens, additional_calls):
+def repeat_input_usage(spec, input_tokens, additional_calls, read_share=1.0):
     """Price the initial input view on subsequent physical calls in one run.
 
     Each call is modeled as reusing that view inside the TTL. Block rounding
@@ -458,14 +521,14 @@ def repeat_input_usage(spec, input_tokens, additional_calls):
     """
     number(input_tokens, "input_tokens", integer=True)
     number(additional_calls, "additional_calls", integer=True)
-    fresh, writes, reads = _input_buckets(spec, input_tokens, input_tokens)
+    fresh, writes, reads = _input_buckets(spec, input_tokens, input_tokens, read_share)
     return {
         "input_tokens": additional_calls * input_tokens,
         "fresh_input_tokens": additional_calls * fresh,
         "cache_write_tokens": additional_calls * writes,
         "cache_read_tokens": additional_calls * reads,
         "cost_input_equivalents": additional_calls
-        * _charge(spec, input_tokens, input_tokens, 0),
+        * _charge(spec, input_tokens, input_tokens, 0, read_share),
     }
 
 
@@ -735,6 +798,7 @@ class _Search:
         shared_header_tokens,
         ambient_header_tokens,
         ambient_hit_probability,
+        cache_read_share,
     ):
         number(run_index, "run_index", 1, integer=True)
         number(lookahead, "lookahead", 1, 4, integer=True)
@@ -747,6 +811,8 @@ class _Search:
             raise ContractError("invalid ping availability or demand sampler")
         if type(ping_has_private_suffix) is not bool:
             raise ContractError("ping_has_private_suffix must be boolean")
+        number(cache_read_share, "cache_read_share", 0, 1)
+        self.read_share = cache_read_share
         self.private_ping = ping_has_private_suffix
         self.actual_idle = False
         self.ping_economics = {}
@@ -849,12 +915,12 @@ class _Search:
         return max(0, round(expm1(log_size)))
 
     def foreground_cost(self, pos, size, shared):
-        cost = _charge(self.spec, size, shared, 0)
+        cost = _charge(self.spec, size, shared, 0, self.read_share)
         header = min(size, self.ambient_header_tokens)
         if pos > self.index and self.ambient_hit_probability and header > shared:
             # Other threads may preserve the same header on either path.
             cost += self.ambient_hit_probability * (
-                _charge(self.spec, size, header, 0) - cost
+                _charge(self.spec, size, header, 0, self.read_share) - cost
             )
         return cost
 
@@ -876,7 +942,9 @@ class _Search:
         # is exact for this term regardless of the response quadrature.
         expected_calls, _ = self.demand.call_forecast(pos)
         if expected_calls > 1:
-            total += (expected_calls - 1) * _charge(self.spec, size, size, 0)
+            total += (expected_calls - 1) * _charge(
+                self.spec, size, size, 0, self.read_share
+            )
         for (out, history_out, duration), p in responses:
             if size + margin + out > self.spec.context_tokens:
                 return inf
@@ -946,8 +1014,12 @@ class _Search:
         ping_costs = [0.0]
         if deadlines:
             if after_ping is None:
-                first = _charge(self.spec, held, initial_prefix, output)
-                repeat = _charge(self.spec, held, repeat_prefix, output)
+                first = _charge(
+                    self.spec, held, initial_prefix, output, self.read_share
+                )
+                repeat = _charge(
+                    self.spec, held, repeat_prefix, output, self.read_share
+                )
             else:
                 first = repeat = repeat_ping_charge(
                     self.spec,
@@ -955,6 +1027,7 @@ class _Search:
                     repeat_prefix,
                     output,
                     uncached_input_rate=after_ping.uncached_input_rate,
+                    read_share=self.read_share,
                 )
             ping_costs.extend(first + n * repeat for n in range(len(deadlines)))
         scores = []
@@ -1096,6 +1169,7 @@ def plan_distribution(
     shared_header_tokens=0,
     ambient_header_tokens=0,
     ambient_hit_probability=0.0,
+    cache_read_share=1.0,
 ):
     """Choose the feasible current view with lowest expected cost over `lookahead` runs.
 
@@ -1127,6 +1201,7 @@ def plan_distribution(
         shared_header_tokens=shared_header_tokens,
         ambient_header_tokens=ambient_header_tokens,
         ambient_hit_probability=ambient_hit_probability,
+        cache_read_share=cache_read_share,
     )
     try:
         costs = {
@@ -1185,6 +1260,7 @@ def plan_distribution_idle(
     shared_header_tokens=0,
     ambient_header_tokens=0,
     ambient_hit_probability=0.0,
+    cache_read_share=1.0,
 ):
     """Optimize a cancel-on-return ping schedule and costs over `lookahead` future runs.
 
@@ -1235,6 +1311,7 @@ def plan_distribution_idle(
         shared_header_tokens=shared_header_tokens,
         ambient_header_tokens=ambient_header_tokens,
         ambient_hit_probability=ambient_hit_probability,
+        cache_read_share=cache_read_share,
     )
     search.actual_idle = True
     extra = {"ping_economics": search.ping_economics}

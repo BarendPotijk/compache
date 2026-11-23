@@ -27,7 +27,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Iterator
 
 from .errors import ContractError
-from .threads import Thread, canonical_usage, normalize_thread
+from .threads import Thread, cache_read_reported, canonical_usage, normalize_thread
 
 __all__ = ["fetch", "pull", "threads_from_observations"]
 
@@ -437,6 +437,7 @@ def _slim(row: dict) -> dict:
             answer=_answer(row.get("output")),
             model=row.get("model") or None,
             usage=_usage(row.get("usageDetails")),
+            read_reported=cache_read_reported(row.get("usageDetails")),
             text=bool(sent),
         )
     elif kind in ("RETRIEVER", "TOOL"):
@@ -583,6 +584,7 @@ def _chat_log(calls, found, trace_start, trace_first) -> tuple[list[dict], dict]
         entry = {"role": "assistant", "content": call["answer"], "at": call["end"]}
         if call["usage"]:
             entry["usage"] = call["usage"]
+            entry["cache_read_reported"] = call["read_reported"]
         if call["model"]:
             entry["model"] = call["model"]
         messages.append(entry)
@@ -625,6 +627,7 @@ def _trace_log(calls, roots, found) -> tuple[list[dict], dict]:
             }
             if call["usage"]:
                 entry["usage"] = call["usage"]
+                entry["cache_read_reported"] = call["read_reported"]
             if call["model"]:
                 entry["model"] = call["model"]
             messages.append(entry)

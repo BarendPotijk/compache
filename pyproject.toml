@@ -1,6 +1,6 @@
 [project]
 name = "compache"
-version = "0.11.0"
+version = "0.12.0"
 description = "Fit prompt caching and context compaction to your own conversation traces."
 readme = "README.md"
 authors = [
