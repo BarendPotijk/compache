@@ -4,6 +4,7 @@ manifest_version: 2
 description: Cuts the cost of long conversations. Trims the history when the prompt cache has expired, by a policy fitted to your own conversations, and lets the model fetch a trimmed part back.
 license: Apache-2.0
 homepage: https://github.com/BarendPotijk/compache
+requires_hermes: ">=0.23.0"
 tags: [context-engine, prompt-caching, cost]
 python_dependencies:
   - "compache>=0.14,<1"
