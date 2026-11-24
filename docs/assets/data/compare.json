@@ -1,0 +1,93 @@
+{
+ "model": "Claude Sonnet 5.5",
+ "removed": {
+  "Headroom, target ratio 0.5": 0.3274442366761251,
+  "Kompressor": 0.02946537848748254
+ },
+ "clocks": [
+  {
+   "away_seconds": 30,
+   "turns": 625,
+   "arms": [
+    {
+     "name": "Whole history, default cache",
+     "cost": 34.13792527999998
+    },
+    {
+     "name": "Headroom, target ratio 0.5",
+     "cost": 23.893691359999995
+    },
+    {
+     "name": "Kompressor",
+     "cost": 28.997518879999994
+    },
+    {
+     "name": "Whole history, cache kept warm",
+     "cost": 27.593803199999996,
+     "cache_seconds": 3600,
+     "max_pings": 0
+    },
+    {
+     "name": "compache",
+     "cost": 19.40107264
+    }
+   ]
+  },
+  {
+   "away_seconds": 240,
+   "turns": 625,
+   "arms": [
+    {
+     "name": "Whole history, default cache",
+     "cost": 143.31422864000004
+    },
+    {
+     "name": "Headroom, target ratio 0.5",
+     "cost": 99.21386288
+    },
+    {
+     "name": "Kompressor",
+     "cost": 38.47128031999994
+    },
+    {
+     "name": "Whole history, cache kept warm",
+     "cost": 37.168010239999994,
+     "cache_seconds": 3600,
+     "max_pings": 1
+    },
+    {
+     "name": "compache",
+     "cost": 24.109866880000002
+    }
+   ]
+  },
+  {
+   "away_seconds": 1800,
+   "turns": 625,
+   "arms": [
+    {
+     "name": "Whole history, default cache",
+     "cost": 286.19429263999996
+    },
+    {
+     "name": "Headroom, target ratio 0.5",
+     "cost": 197.45377328000006
+    },
+    {
+     "name": "Kompressor",
+     "cost": 151.11645296000015
+    },
+    {
+     "name": "Whole history, cache kept warm",
+     "cost": 107.72950175999999,
+     "cache_seconds": 3600,
+     "max_pings": 6
+    },
+    {
+     "name": "compache",
+     "cost": 43.07061775999999
+    }
+   ]
+  }
+ ]
+}

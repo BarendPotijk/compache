@@ -1,14 +1,60 @@
 # Other tools compared
 
-The [calculator](https://barendpotijk.github.io/compache/) prices your workload against all of these at once, and against your own rules.
+Tools for this bill come in two kinds. **Cache tools** keep the whole history and keep it cached. **Compressors** make single results smaller. compache decides what stays in the request and when the cache is worth keeping, together, from your own conversations. The [calculator](https://barendpotijk.github.io/compache/) prices your workload against all of these and against your own rules.
 
-Every tool below ships fixed rules. compache fits the rule to recorded traffic and decides compaction and cache keep-warm together. That is the difference, and the table says what was and was not measured.
+![Cost per 1,000 turns of document chats for users back after 30 seconds, 4 minutes and 30 minutes: whole history, Headroom, Kompressor, whole history with the cache kept warm, and compache](assets/compare-cost.svg)
 
-| Tool | What it does by default | Fitted to traffic | Keeps the cache warm | Compared how |
+- **Against the best a cache tool can do,** compache costs 30%, 35% and 60% less. That bar is the cheapest of ten settings, five-minute or one-hour entries with up to eight pings, picked on the very chats it is priced on.
+- **Against a compressor,** 19% to 78% less than Headroom and 33% to 71% less than Kompressor. Retrieved prose compresses little: by a third at Headroom's setting for documents, by 3% in Kompressor.
+- **They combine.** Headroom's smaller passages under compache's policy would cost 13% to 24% less than compache alone.
+- **Cost only.** No answers were compared. compache keeps 92%, 85% and 76% of what these turns need in view and pays for fetching back the rest. Headroom's third is words taken out of the passages.
+
+| Tool | What it does | While a user is away | Fitted to traffic | Compared how |
 |---|---|---|---|---|
-| OpenClaw | Clears old tool results or summarizes at fixed shares of the context window | No | No | Modeled in the [calculator](calculator.md) |
-| Headroom | Compresses the content of new tool output, keeps every message, one of four fixed profiles | No | No | Not run head to head |
-| Provider compaction | Compacts on the server at a context-size threshold | No | No | Not modeled |
+| compache | Keeps in view what later turns need, trims when the cache has expired, fetches back | Pings while they pay | What stays, and the pings | |
+| caching.ai | Keeps every token, and the provider's cache warm | Pings, or one-hour entries | The entries' lifetime | Modeled: the cheapest cache setting |
+| OptScale Kompressor | Shrinks tool output for coding agents | One-hour entries after a first long pause. Its pings are for running tools | The lifetime | Run on the text, its cache rule modeled |
+| Headroom | Compresses the content of new tool output, keeps every message | Nothing | No | Run on the text |
+| OpenClaw | Clears old tool results or summarizes at fixed shares of the window | Nothing | No | Modeled in the [calculator](calculator.md) |
+| Provider compaction | Compacts on the server at a context-size threshold | Nothing | No | Not modeled |
+
+Run it: [`benchmarks/compare`](../benchmarks/compare/README.md). The chats are the 15 held-out [DocChat](../benchmarks/docchat/README.md) threads, 625 turns, at Claude Sonnet 5.5 list prices.
+
+## caching.ai
+
+Read on 2026-11-24 from [its site](https://caching.ai) and [documentation](https://caching.ai/docs).
+
+- **What it does.** A proxy behind a base-URL change. It adds cache marks where a request has none, sends one-token pings on Anthropic where that is switched on, and Auto-Tune picks five-minute or one-hour entries from how far apart calls come. It changes nothing a request holds.
+- **What it reports.** 67% saved on support-style traffic with pauses longer than the cache lifetime, pings included, against calling the provider directly. The cloud costs 20% of net savings.
+- **Not run.** Its site calls the core open source, but the repository it links could not be opened. The chart has what a cache tool can reach at best instead.
+- **Its best idea is the one-hour entry,** which costs twice the input price to write instead of one and a quarter times. Alone it takes these chats from $143 to $39 for users back after four minutes. compache's policies use the provider's default lifetime. With one-hour entries the same cut would cost $32 instead of $43 for users back after half an hour, and more than it does now in the other two cases.
+
+## OptScale
+
+Read on 2026-11-24.
+
+- **[OptScale](https://github.com/hystax/optscale)**, Apache-2.0, manages cloud spend. It does not touch model calls.
+- **[The OptScale AI gateway](https://optscale.ai)** routes between models and compresses inline. It is a commercial service and was not run.
+- **[Kompressor](https://github.com/hystax/optscale-kompressor)**, MIT, is the compressor behind it, a proxy for coding agents. Run as 1.6.1 with its packaged settings for Claude. It removed 3% of DocChat's retrieved text. Its adaptive one-hour entries do most of what it saves here. Its pings go out while a tool runs, since it takes an answer to be possibly the last, so no user's pause is bridged.
+- **What it reports.** 23% off the bill of Codex on GPT-5.5 and 20% off Claude Code on Opus 5.5, on Terminal-Bench. That is the traffic it is made for: long logs and build output, of which it removed 63%.
+
+## Headroom
+
+Run as 0.45.0 on 2026-11-24, and read first-hand: README, documentation and source of [headroomlabs-ai/headroom](https://github.com/headroomlabs-ai/headroom).
+
+| Passages that come back as | Removed |
+|---|---|
+| Text, base install | 0% |
+| Text, with its text model | 12% |
+| Text, with its text model at `target_ratio=0.5`, its setting for documents, as in the chart | 33% |
+| JSON | 98%. Every passage becomes a handle that the model has to call for |
+
+- **Adoption.** `compress(messages, model=...)` in process, a proxy behind a base-URL change, or `headroom wrap <agent>`. It needs no recorded traffic.
+- **What it is for.** Tool output with structure in it: its README reports 21% to 57% fewer input tokens on four agent scenarios and over 90% on repeated JSON and logs, and says to skip it for prose.
+- **History and cache.** It never drops a message. Told how many messages the request before held, it left them as they were in 624 of 625 turns here, so the cached prefix holds. It sends no keep-warm request.
+- **Recovery.** Compressed content can be fetched back through a retrieve tool, in the proxy.
+
+The two are not alternatives. Headroom makes a single tool result smaller. compache decides which whole parts stay in the request and when the cache is kept warm.
 
 ## OpenClaw
 
@@ -34,31 +80,11 @@ Defaults as documented at revision [`c49b553`](https://github.com/openclaw/openc
 - compache leaves 80% to 92% of what turns need in the request and fetches the rest back, on 3% to 9% of turns. OpenClaw leaves 92% to 99% in the request. With OpenAI its summaries stand in for up to 8% of what 80-turn threads need.
 - Haiku charges five times as much for a request above 100k tokens. OpenClaw's thresholds let requests grow past that, and the fitted policy stays under it.
 
-## Headroom
-
-Read first-hand on 2026-11-21 from the README, documentation and source of [headroomlabs-ai/headroom](https://github.com/headroomlabs-ai/headroom), release 0.44.0.
-
-- **Adoption.** `compress(messages, model=...)` in process, a proxy behind a base-URL change, or `headroom wrap <agent>`. It needs no recorded traffic.
-- **Rules.** Four profiles (`coding`, `balanced`, `agent-90`, `general`) with fixed thresholds. It records statistics about tool output, and its documentation says those do not change request-time decisions.
-- **History.** "Headroom never drops messages from the conversation history." It shrinks what a tool returned: 21% to 57% fewer input tokens on its four agent scenarios, over 90% on repeated JSON and log lines, little on prose.
-- **Cache.** The default mode compresses only the newest part of each turn and forwards earlier turns byte for byte, so it does not break the cached prefix. It sends no keep-warm request. Recompacting a cold prefix and estimating the cache lifetime from traffic exist as options that are off by default.
-- **Recovery.** Compressed content can be fetched back through a retrieve tool, in the proxy.
-
-The two are not alternatives. Headroom makes a single tool result smaller. compache decides which whole parts stay in the request and when the cache is kept warm, from how your users return and what your turns need. No head-to-head run exists, so no number is claimed here.
-
 ## Provider-side compaction
 
 Anthropic's tool-result clearing and compaction, and OpenAI's compaction endpoint, act at a context-size threshold. They do not know how your users return or which earlier parts later turns need, and they send no keep-warm request. The calculator models Anthropic's clearing as OpenClaw configures it.
 
-## The long cache
-
-Anthropic keeps an entry for an hour at 2× the input price for a write instead of 1.25×, and OpenAI for 12 hours at 2.5×. For an app that sends everything it is the simplest saving there is. Priced by the calculator on DocChat's profiles with Claude Sonnet 5.5, per 1,000 turns, mean of six seeds:
-
-| Users back after | Everything, 5-minute cache | Everything, 1-hour cache | compache, 5-minute cache | compache against the 1-hour cache |
-|---|---|---|---|---|
-| 30 seconds | $25 | $27 | $17 | 39% less |
-| 4 minutes | $127 | $29 | $19 | 33% less |
-| 30 minutes | $260 | $129 | $34 | 74% less |
+OpenAI's counterpart to Anthropic's one-hour entry is a 12-hour one at 2.5× the input price for a write, in the Responses API only.
 
 ## In the calculator
 
