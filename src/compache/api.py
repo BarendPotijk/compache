@@ -509,6 +509,7 @@ class Policy:
             "cache_lifetime_seconds": self.cache_lifetime,
             "header_lifetime_seconds": self.header_lifetime,
             "coverage": chosen.get("coverage"),
+            "missed_calls": chosen.get("missed_calls"),
             "saving": solved.get("saving_fraction"),
             "cost_per_1000_calls": None
             if None in costs.values()
@@ -531,8 +532,9 @@ class Policy:
             )
         if recipe.rounds is not None and summary["coverage"] is not None:
             kept = f"{summary['coverage']:.0%} of the calls that rely on an earlier result find it in view."
-            if summary["coverage"] < 0.995:
-                kept += " The rest fetch it back, and that call is in the cost."
+            if summary["missed_calls"]:
+                share = summary["missed_calls"] / summary["calls"]
+                kept += f" The others, {share:.1%} of all calls, fetch it back, and that is in the cost."
             lines.append(kept)
         costs, saving = summary["cost_per_1000_calls"], summary["saving"]
         if costs and saving is not None:

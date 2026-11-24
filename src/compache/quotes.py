@@ -37,7 +37,13 @@ def spoken(text: str, calls: Any = ()) -> str:
             except ValueError:
                 pass
         values = arguments.values() if isinstance(arguments, dict) else [arguments]
-        said += [v if isinstance(v, str) else json.dumps(v) for v in values]
+        for value in values:
+            text = value if isinstance(value, str) else json.dumps(value)
+            said.append(text)
+            if "\\n" in text:
+                # Code that holds a text, as a patch in a script does.
+                plain = text.replace("\\n", "\n").replace("\\t", "\t")
+                said.append(plain.replace('\\"', '"').replace("\\'", "'"))
     return "\n".join(said)
 
 

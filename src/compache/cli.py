@@ -25,6 +25,9 @@ from .proxy import main as run_proxy
 from .record import is_record
 from .record import load as load_record
 from .threads import load_threads, read_jsonl
+from .transcripts import AGENTS as TRANSCRIPTS
+from .transcripts import imported
+from .transcripts import pull as pull_sessions
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -118,14 +121,18 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_argument("--sample", type=int, default=200, help="How many runs to label")
     sub.add_argument("--seed", default="0")
 
-    text = "Read the conversations kept in Langfuse, MLflow or an OpenTelemetry export into a threads file"
+    text = (
+        "Read the conversations kept in Langfuse, MLflow or an OpenTelemetry export, or the sessions "
+        "that Claude Code or Codex keeps on this machine, into a threads file"
+    )
     sub = commands.add_parser("pull", help=text, description=text)
-    sub.add_argument("source", choices=["langfuse", "mlflow", "otel"])
+    sub.add_argument("source", choices=["langfuse", "mlflow", "otel", *TRANSCRIPTS])
     sub.add_argument(
         "export",
         nargs="?",
         type=Path,
-        help="A file already exported, read instead of the API. Needed for otel",
+        help="A file already exported, read instead of the API. Needed for otel. For an agent, "
+        "where it keeps its sessions, if not where it does by default",
     )
     sub.add_argument("-o", "--output", type=Path, default=Path("threads.jsonl.gz"))
     sub.add_argument("--days", type=float, default=30, help="How far back to read")
@@ -250,7 +257,21 @@ def _parser() -> argparse.ArgumentParser:
 
     text = "Fit again what a record has grown enough for"
     sub = commands.add_parser("learn", help=text, description=text)
-    sub.add_argument("folder", type=Path, help="A folder that is learned in")
+    sub.add_argument(
+        "folder",
+        type=Path,
+        help="A folder that is learned in, or the name of an agent run with `compache wrap`",
+    )
+    sub.add_argument(
+        "--from",
+        dest="source",
+        choices=list(TRANSCRIPTS),
+        help="First add the sessions this agent keeps on this machine, as sizes and times",
+    )
+    sub.add_argument(
+        "--sessions", type=Path, help="Where it keeps them, if not where by default"
+    )
+    sub.add_argument("--days", type=float, default=30, help="How far back to read them")
     sub.add_argument("--json", action="store_true", help="Print JSON")
 
     text = "Check that compache works here and say what it can be used with"
@@ -620,7 +641,9 @@ _LEFT_OUT = (
 def _pull(args):
     export = args.rows or args.export
     window = dict(since=args.since, until=args.until, days=args.days)
-    if args.source == "otel":
+    if args.source in TRANSCRIPTS:
+        threads, report = pull_sessions(args.source, export, **window)
+    elif args.source == "otel":
         from .otel import pull
 
         if export is None:
@@ -654,9 +677,12 @@ def _pull(args):
                 **window,
             )
     rows = "observations" if args.source == "langfuse" else "spans"
+    read = f"Read {report.get('observations', 0):,} {rows}"
+    if args.source in TRANSCRIPTS:
+        read = f"Read {report['files']:,} files"
     lines = [
-        f"Read {report.get('observations', 0):,} {rows}: {report.get('model_calls', 0):,} "
-        f"model calls in {report.get('sessions', 0):,} sessions."
+        f"{read}: {report.get('model_calls', 0):,} model calls in "
+        f"{report.get('sessions', 0):,} sessions."
     ]
     notes = [text.format(report[key]) for key, text in _LEFT_OUT if report.get(key)]
     if not threads:
@@ -730,17 +756,29 @@ def _stats(args):
 
 
 def _learn(args):
-    learner = Learner(args.folder)
+    folder = args.folder
+    if len(folder.parts) == 1 and not folder.exists():
+        # The name of an agent, whose folder `wrap` makes.
+        folder = home() / folder
+    lines, report = [], {}
+    if args.source:
+        report = imported(folder, args.source, args.sessions, days=args.days)
+        lines.append(
+            f"Added {report['added']:,} of {report['sessions']:,} sessions, "
+            f"{report['model_calls']:,} model calls, as sizes and times."
+        )
+    learner = Learner(folder)
     before = dict(learner._state)
     learner.refit(wait=True)
     new = {
         k: v for k, v in learner._state.items() if k != "lasting" and before.get(k) != v
     }
-    lines = [
+    fitted = [
         f"Fitted {key} on {entry['calls']:,} calls: {entry['saving']:.0%} less than keeping everything."
         for key, entry in new.items()
     ]
-    return new, "\n".join(lines) or "Nothing has grown enough for a new fit."
+    lines += fitted or ["Nothing has grown enough for a new fit."]
+    return {"fitted": new, **report}, "\n".join(lines)
 
 
 def _models(args):

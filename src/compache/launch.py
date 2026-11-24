@@ -33,6 +33,7 @@ from .learn import Learner
 from .live import Live
 from .proxy import DEFAULTS, serve
 from .record import Recorder
+from .transcripts import AGENTS as TRANSCRIPTS
 
 __all__ = ["AGENTS", "Agent", "home", "main", "prepared"]
 
@@ -310,6 +311,13 @@ def main(args) -> int:
     if not args.quiet:
         for line in _said(live, kept.calls):
             print(line, file=sys.stderr)
+        if live.learner is not None and kept.calls and not live.learner.fitted:
+            if name in TRANSCRIPTS:
+                print(
+                    f"compache: to start from your past sessions, as sizes and times: "
+                    f"compache learn {name} --from {name}",
+                    file=sys.stderr,
+                )
     if live.learner is not None and kept.calls:
         # Fitting takes a few seconds, and the user has the terminal back by then.
         subprocess.Popen(

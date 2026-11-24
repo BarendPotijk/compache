@@ -248,6 +248,11 @@ class Learner:
             with self._lock:
                 self._opened[found[0]] = at
 
+    @property
+    def fitted(self) -> list[str]:
+        """The policies that were fitted on the record, by model and kind."""
+        return sorted(key for key in self._state if key != "lasting")
+
     def fitted_on(self, model, tools: bool = True) -> dict | None:
         """On how much a model's policy was fitted and when, or None while it is the default."""
         found = self._key(model, tools)

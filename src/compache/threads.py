@@ -693,6 +693,15 @@ def _called(message: dict) -> list:
     return [a for a in found if a is not None]
 
 
+def _reasoned(message: dict) -> bool:
+    """Whether an assistant message keeps reasoning that later requests carry."""
+    content = message.get("content")
+    return any(
+        isinstance(block, dict) and "thinking" in str(block.get("type"))
+        for block in (content if isinstance(content, list) else ())
+    )
+
+
 def _runs_from_messages(messages: Any, thread_id: str) -> list[dict]:
     """Group a chat log into runs: a user message, what was retrieved, the answer."""
     if not isinstance(messages, list):
@@ -820,6 +829,9 @@ def _runs_from_messages(messages: Any, thread_id: str) -> list[dict]:
                 if counted is not None:
                     current["steps"][-1]["input_tokens"] = counted["input"]
                     current["steps"][-1]["output_tokens"] = counted["output"]
+                if _reasoned(message):
+                    thought = reasoning_tokens(message["usage"]) or 0
+                    current["steps"][-1]["thought_tokens"] = thought
                 current["usages"].append(message["usage"])
             current["model"] = message.get("model") or current["model"]
         elif role not in ("user", "assistant") and role not in RETRIEVAL_ROLES:

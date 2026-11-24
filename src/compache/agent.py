@@ -57,11 +57,13 @@ REOPEN_OUTPUT_TOKENS = 32
 LOOP_CALLS = 4
 # Least share of the calls that rely on an earlier result that find it in view.
 FLOOR = 0.85
-# Fewer such calls than this say too little about which results can go.
-_LEAST_RELYING = 40
+# Where few calls rely on one at all, the most of all calls that may miss one.
+MOST_MISSED = 0.01
+# So many relying calls make the share speak, and so many calls the count of misses.
+_LEAST_RELYING, _LEAST_KNOWN = 40, 200
 # How far the provider's count of a text is taken to be from four bytes a token, at most.
 _MOST_OFF = 4.0
-_ROUNDS = (1, 2, 3, 5, 8, 12, 20, 30)
+_ROUNDS = (3, 5, 8, 12, 20, 30)
 _RATIOS = (0.5, 1.0, 1.5, 2.0, 3.0, None)
 _TOOL_PINGS = (0, 1, 3, 8, 11)
 _USER_PINGS = (0, 1, 3)
@@ -553,11 +555,17 @@ def _ages(conversations) -> list[int]:
 
 def _cuts(conversations, spec) -> list[AgentRecipe]:
     """The cuts worth pricing: a grid that follows how far back these conversations reach."""
-    ages = _ages(conversations)
-    if sum(bool(c.needs) for calls in conversations for c in calls) < _LEAST_RELYING:
+    if sum(c.needs is not None for calls in conversations for c in calls) < (
+        _LEAST_KNOWN
+    ):
         # Too little says what can go: only the cut that public runs taught is considered.
         return [replace(default_recipe(spec), tool_pings=0, user_pings=0)]
-    reach = {ages[min(len(ages) - 1, int(q * len(ages)))] + 1 for q in (0.8, 0.9, 0.95)}
+    ages = _ages(conversations)
+    reach = {
+        max(_ROUNDS[0], ages[min(len(ages) - 1, int(q * len(ages)))] + 1)
+        for q in (0.8, 0.9, 0.95)
+        if ages
+    }
     return [
         AgentRecipe(rounds, ratio)
         for rounds in sorted({*_ROUNDS} | reach)
@@ -578,17 +586,18 @@ def fit_agent(
     """Fit what an agent's conversations keep, on recorded ones. Returns a policy artifact.
 
     `floor` is the least share of calls that rely on an earlier result and find
-    it in view. The rest are priced as fetching it back. Every lifetime is
-    priced for the whole request, and the longer ones for its instructions and
-    tools alone.
+    it in view. Where calls rarely rely on one, the misses are held to a share
+    of all calls instead. They are priced as fetching it back. Every lifetime
+    is priced for the whole request, and the longer ones for its instructions
+    and tools alone.
     """
     conversations = _conversations(threads, spec, header_tokens, labels)
     if sum(map(len, conversations)) < 2:
         raise ContractError("fitting an agent's policy needs recorded calls")
     specs = {s.cache_ttl_seconds: s for s in (spec, *lifetimes)}
     cuts = _cuts(conversations, spec)
-    # A cut that public runs taught is not held to a floor that these say too little about.
-    known = len(cuts) > 1
+    known = sum(c.needs is not None for calls in conversations for c in calls)
+    relying = sum(bool(c.needs) for calls in conversations for c in calls)
     rows = []
 
     def price(recipe, asked, header=None):
@@ -609,9 +618,13 @@ def fit_agent(
         return result
 
     def allowed(row):
-        if row["recipe"]["rounds"] is None or not known:
+        # A cut that public runs taught is not held to a floor that these say too little about.
+        if row["recipe"]["rounds"] is None or len(cuts) == 1:
             return True
-        return row["coverage"] is not None and row["coverage"] >= floor
+        missed = row["missed_calls"]
+        if relying >= _LEAST_RELYING and row["coverage"] >= floor:
+            return True
+        return (missed + 1) / known <= MOST_MISSED
 
     for asked in specs.values():
         price(AgentRecipe(), asked)
@@ -682,7 +695,8 @@ def fit_agent(
             "unit": "fresh_input_token_equivalents",
             "calls": sum(map(len, conversations)),
             "turns": sum(len(t.runs) for t in threads),
-            "relying_calls": sum(bool(x.needs) for c in conversations for x in c),
+            "relying_calls": relying,
+            "known_calls": known,
             "floor": floor,
             "chosen": chosen,
             "keep_everything_cost": keep,
@@ -731,21 +745,15 @@ def replay_agent(
 
 
 def default_recipe(spec: ModelSpec) -> AgentRecipe:
-    """Where to start without recorded conversations, by how cheap the model's cache reads are.
+    """Where to start without recorded conversations.
 
-    What does best over seven kinds of sessions made of 174 public coding-agent runs, from
-    one task at a stretch to prompts of eight calls with a user in between
-    (benchmarks/agents/public.py): the cheaper a read, the less it is worth to write a
-    conversation again for leaving something out.
+    What does well over seven kinds of sessions made of 174 public coding-agent runs, from
+    one task at a stretch to prompts of eight calls with a user in between, and over sessions
+    of real issues with Claude Code and Codex (benchmarks/agents).
     """
     if spec.cache_ttl_seconds <= 0:
-        return AgentRecipe(rounds=12, ratio=0.0)
-    cheap = spec.read_multiplier <= 0.06
-    return AgentRecipe(
-        rounds=8 if cheap else 12,
-        ratio=2.0 if cheap else 1.5,
-        tool_pings=3,
-    )
+        return AgentRecipe(rounds=8, ratio=0.0)
+    return AgentRecipe(rounds=8, ratio=2.0, tool_pings=3)
 
 
 def default_header(spec: ModelSpec, lifetimes) -> ModelSpec | None:

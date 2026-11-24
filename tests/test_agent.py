@@ -217,6 +217,18 @@ class FitTests(unittest.TestCase):
         self.assertGreaterEqual(solved["chosen"]["coverage"], agent.FLOOR)
         self.assertGreater(solved["relying_calls"], 40)
 
+    def test_where_little_is_relied_on_few_calls_may_miss(self):
+        """Agents that rarely quote: what counts is how many of all calls would have to fetch back."""
+        rows = runs(10, quotes=0.03, tokens=2_500, seed=4)
+        threads = compache.load_threads(rows, model=SPEC.model_id)
+        fitted = agent.fit_agent(threads, SPEC)
+        solved = fitted["solve"]
+        self.assertLess(solved["relying_calls"], 40)
+        self.assertGreaterEqual(solved["known_calls"], 200)
+        self.assertLess(fitted["recipe"]["rounds"], 8, "less is kept than the default")
+        missed = solved["chosen"]["missed_calls"]
+        self.assertLessEqual((missed + 1) / solved["known_calls"], agent.MOST_MISSED)
+
     def test_it_holds_on_runs_it_has_not_seen(self):
         train, test = self.threads[::2], self.threads[1::2]
         fitted = agent.fit_agent(train, SPEC)
@@ -227,10 +239,13 @@ class FitTests(unittest.TestCase):
 
     def test_what_is_chosen_is_the_cheapest_that_may_be(self):
         fitted = agent.fit_agent(self.threads, SPEC)
+        known = fitted["solve"]["known_calls"]
         allowed = [
             row
             for row in fitted["solve"]["candidates"]
-            if row["recipe"]["rounds"] is None or (row["coverage"] or 0) >= agent.FLOOR
+            if row["recipe"]["rounds"] is None
+            or (row["coverage"] or 0) >= agent.FLOOR
+            or (row["missed_calls"] + 1) / known <= agent.MOST_MISSED
         ]
         self.assertEqual(
             fitted["solve"]["chosen"]["cost"], min(row["cost"] for row in allowed)
@@ -440,10 +455,8 @@ class PolicyTests(unittest.TestCase):
         ]
         self.assertFalse(compache.fit(rows, model="claude-sonnet-5-5").agentic)
 
-    def test_the_default_follows_the_price_of_a_cache_read(self):
-        dear = agent.default_recipe(model_spec("claude-haiku-5-5"))
-        cheap = agent.default_recipe(model_spec("claude-sonnet-5-5"))
-        self.assertGreater(dear.rounds, cheap.rounds)
+    def test_the_default_without_a_cache_keeps_to_its_rounds(self):
+        self.assertEqual(agent.default_recipe(model_spec("claude-haiku-5-5")).rounds, 8)
         none = agent.default_recipe(replace(SPEC, cache_ttl_seconds=0))
         self.assertEqual(none.ratio, 0.0)
         self.assertFalse(none.tool_pings)
