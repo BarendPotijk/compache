@@ -108,6 +108,7 @@ class Recorder:
                     step["bytes"],
                     step["output_tokens"],
                     list(step["needs"]),
+                    step["input_tokens"],
                 ]
                 for step in steps
             ]
@@ -201,7 +202,7 @@ def _ids(name: str, labels, last: int, counts: list[int]) -> tuple[list, list]:
 def _steps(name: str, rows, counts: list[int]) -> list[dict]:
     """A turn's calls, with what each quoted as part IDs."""
     made, seen = [], 0
-    for started, ended, results, size, output, needs in rows:
+    for started, ended, results, size, output, needs, counted in rows:
         # An application may have dropped results while its turn went on.
         seen = min(max(seen, results), counts[-1])
         step = {
@@ -213,6 +214,8 @@ def _steps(name: str, rows, counts: list[int]) -> list[dict]:
         }
         if output is not None:
             step["output_tokens"] = output
+        if counted is not None:
+            step["input_tokens"] = counted
         for label in needs:
             turn, _, item = str(label)[1:].partition(".")
             if turn.isdigit() and item.isdigit() and 1 <= int(turn) <= len(counts):

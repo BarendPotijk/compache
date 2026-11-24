@@ -55,6 +55,8 @@ LOOP_CALLS = 4
 FLOOR = 0.85
 # Fewer such calls than this say too little about which results can go.
 _LEAST_RELYING = 40
+# How far the provider's count of a text is taken to be from four bytes a token, at most.
+_MOST_OFF = 4.0
 _ROUNDS = (1, 2, 3, 5, 8, 12, 20, 30)
 _RATIOS = (0.5, 1.0, 1.5, 2.0, 3.0, None)
 _TOOL_PINGS = (0, 1, 3, 8, 11)
@@ -170,6 +172,13 @@ class Flow:
         if again or tokens > self.notice:
             self.live.append(len(self.shown) - 1)
 
+    def resize(self, i: int, tokens: int) -> None:
+        """What block `i`, one of the newest round, turned out to hold."""
+        self.size += tokens - self.shown[i]
+        self.shown[i] = self.whole[i] = tokens
+        if self.names[i] is not None:
+            self.sizes[self.names[i][0]] = tokens
+
     def gone(self, name) -> bool:
         """Whether a result is out of view."""
         return name in self.archived and name not in self.back
@@ -225,13 +234,13 @@ class Flow:
         went = []
         for i in live[: self.ripe]:
             name, again = self.names[i]
+            self.size -= self.shown[i] - (0 if again else self.notice)
             self.shown[i] = 0 if again else self.notice
             if again:
                 self.back.discard(name)
             else:
                 self.archived.add(name)
             went.append((name, again))
-        self.size -= self.freed
         self.live, self.ripe, self.freed = live[self.ripe :], 0, 0
         return went
 
@@ -255,7 +264,7 @@ class Flow:
 
 
 def _steps(run, spec):
-    """The calls of a run: start, end, results seen, reply tokens that join the history, output, needs."""
+    """The calls of a run: start, end, results seen, reply tokens that join the history, output, needs, input."""
     start, end = seconds(run.started_at), seconds(run.ended_at)
     total = len(run.retrievals)
     if run.steps:
@@ -268,6 +277,7 @@ def _steps(run, spec):
                 said,
                 said if step.output_tokens is None else step.output_tokens,
                 step.needs,
+                step.input_tokens,
             )
         return
     # Where the calls were only counted, the results are taken to have come one round at a time.
@@ -278,13 +288,20 @@ def _steps(run, spec):
         done = start + (end - start) * (k + 1) / count
         seen = total if count == 1 else round(total * k / (count - 1))
         last = k + 1 == count
-        yield at, done, seen, reply if last else 0, reply if last else 0, ()
+        said = reply if last else 0
+        yield at, done, seen, said, said, (), None
 
 
 def calls_of(thread, spec: ModelSpec, header_tokens: int = 0) -> list[Call]:
-    """A thread as the calls it was made of."""
+    """A thread as the calls it was made of.
+
+    Where the provider's count of a request is on record, what had joined since
+    the one before it is taken to hold what the count grew by. Elsewhere sizes
+    are off by as much as they were there.
+    """
     calls: list[Call] = []
     said = header_tokens
+    held = known = measured = 0
     for run in thread.runs:
         said += spec.part_tokens(run.input.text or "")
         sizes = [
@@ -293,10 +310,25 @@ def calls_of(thread, spec: ModelSpec, header_tokens: int = 0) -> list[Call]:
             if p.exposed_to_model
         ]
         steps, seen = list(_steps(run, spec)), 0
-        for k, (at, end, results, reply, output, needs) in enumerate(steps):
+        for k, (at, end, results, reply, output, needs, counted) in enumerate(steps):
             results = max(seen, min(results, len(sizes)))
             found, seen = tuple(sizes[seen:results]), results
             fresh = {name for name, _ in found}
+            ruled = said + sum(tokens for _, tokens in found)
+            off = known / measured if measured else 1.0
+            grown = counted - held if counted is not None else 0
+            if grown > 0 and found:
+                # The reply and what surrounds a result are counted too: all of it grows alike.
+                off = grown / ruled
+                known, measured = known + grown, measured + ruled
+            if found:
+                off = min(_MOST_OFF, max(1 / _MOST_OFF, off))
+                said = round(said * off)
+                found = tuple((name, round(tokens * off)) for name, tokens in found)
+            if grown > 0:
+                # What no size accounts for, such as instructions the log leaves out, was said.
+                said = max(0, grown - sum(tokens for _, tokens in found))
+            held += said + sum(tokens for _, tokens in found)
             calls.append(
                 Call(
                     at,
@@ -662,11 +694,17 @@ class AgentEngine:
         # Tokens of text the turn's replies have added so far.
         self._spoken = 0
         self._due: tuple = ()
+        # What has joined since the provider last counted: the block, and its tokens by our ruler.
+        self._fresh: list = []
+        # What tool results came to by the provider's count and by our ruler, and the ratio of the two.
+        self._counted = self._ruled = 0
+        self._off = 1.0
 
     def copy(self) -> AgentEngine:
         made = AgentEngine.__new__(AgentEngine)
         made.__dict__.update(self.__dict__)
         made.flow, made._known = self.flow.copy(), set(self._known)
+        made._fresh = list(self._fresh)
         return made
 
     def follows(self, other: AgentEngine) -> None:
@@ -689,7 +727,11 @@ class AgentEngine:
         for part in fresh:
             self._known.add(part.part_id)
             named = part.part_id if part.kind == "retrieval" else None
-            self.flow.add(self.spec.part_tokens(part.text), named)
+            self._joins(self.spec.part_tokens(part.text), named)
+
+    def _joins(self, ruled: int, name=None) -> None:
+        self._fresh.append((len(self.flow.shown), ruled))
+        self.flow.add(round(ruled * self._off), name)
 
     def _plan(self, request, at) -> AgentPlan:
         self._due, self._sent_at = (), at
@@ -715,7 +757,7 @@ class AgentEngine:
     def prepare(self, request, *, started_at, system_prompt, tools, **_) -> AgentPlan:
         if not self._known:
             header = f"{system_prompt or ''}{json.dumps(tools) if tools else ''}"
-            self.flow.add(self.spec.text_tokens(header))
+            self._joins(self.spec.text_tokens(header))
         self._spoken = 0
         self._arrived(request.parts)
         return self._plan(request, started_at)
@@ -734,10 +776,7 @@ class AgentEngine:
         reported = counters.get("input_tokens")
         cached = None
         if reported is not None:
-            # Tool calls, reasoning and the like, and what our ruler is off by.
-            hidden = reported - self.flow.size
-            if hidden:
-                self.flow.add(hidden)
+            self._measure(reported)
             read = counters.get("cached_input_tokens")
             written = counters.get("cache_write_input_tokens")
             cached = reported
@@ -751,6 +790,32 @@ class AgentEngine:
             if cached < self.spec.cache_min_tokens:
                 cached = 0
         self.flow.sent(self._sent_at, cached)
+
+    def _measure(self, reported: int) -> None:
+        """Let what has joined hold what the provider's count of the request grew by."""
+        flow, fresh = self.flow, [(i, r) for i, r in self._fresh if r]
+        self._fresh = []
+        hidden = reported - flow.size
+        held = sum(flow.shown[i] for i, _ in fresh)
+        if not held or held + hidden <= 0:
+            if hidden:
+                flow.add(hidden)
+            return
+        ruled = sum(r for _, r in fresh)
+        if any(flow.names[i] is not None for i, _ in fresh):
+            self._counted += held + hidden
+            self._ruled += ruled
+            off = self._counted / self._ruled
+            self._off = min(_MOST_OFF, max(1 / _MOST_OFF, off))
+            flow.notice = round(
+                self.spec.part_tokens("." * NOTICE_BYTES) * max(1.0, self._off)
+            )
+        left = held + hidden
+        for i, r in fresh[:-1]:
+            share = (held + hidden) * r // ruled
+            flow.resize(i, share)
+            left -= share
+        flow.resize(fresh[-1][0], left)
 
     def _wait(self, most, at) -> None:
         flow = self.flow
@@ -774,7 +839,8 @@ class AgentEngine:
         self._seen(counters)
         self._known.add(answer.part_id)
         # What was said in between its tool calls has joined already.
-        self.flow.add(max(0, self.spec.part_tokens(answer.text) - self._spoken))
+        said = self.spec.part_tokens(answer.text) - self._spoken
+        self.flow.add(round(max(0, said) * self._off))
         self._spoken = 0
         self._wait(self.recipe.user_pings, ended_at)
 
@@ -784,7 +850,8 @@ class AgentEngine:
 
     def reopened(self, name, tokens: int) -> None:
         """Something was fetched back: it stands at the end of the conversation from here on."""
-        self.flow.add(tokens, name, again=True)
+        self._fresh.append((len(self.flow.shown), tokens))
+        self.flow.add(round(tokens * self._off), name, again=True)
 
     def shows_again(self, name) -> bool:
         """Whether what was fetched back under `name` still stands where it was put."""

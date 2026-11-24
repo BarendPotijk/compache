@@ -1630,6 +1630,8 @@ class Live:
                 "ended_at": self._now(conversation),
                 "results": len(pending.seen),
                 "bytes": _size(said),
+                # What an archived part would have added is no part of the count.
+                "input_tokens": None if pending.left else counted.get("input"),
                 "output_tokens": counted.get("output"),
                 "needs": self._quotes(conversation).said(said),
             }

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
+import json
 import random
 import tempfile
 import unittest
@@ -11,6 +14,7 @@ from pathlib import Path
 import compache
 from compache import agent
 from compache.agent import AgentRecipe, Flow
+from compache.cli import main
 from compache.models import model_spec
 from compache.quotes import Quotes, spoken
 
@@ -284,6 +288,32 @@ class FitTests(unittest.TestCase):
         calls = agent._conversations(silent, SPEC, 0, [row])[0]
         self.assertEqual(calls[-1].needs, frozenset({"run-0:1:retrieval:1"}))
 
+    def test_sizes_are_what_the_provider_counted(self):
+        rows = runs(1, calls=6, quotes=0.0)
+        held = 1_000
+        for message in rows[0]["messages"]:
+            if message["role"] == "assistant":
+                # Twice as many tokens as four bytes a token would give.
+                message["usage"] = {"input_tokens": held, "output_tokens": 30}
+                held += 2 * 650 + 30
+        threads = compache.load_threads(rows, model=SPEC.model_id)
+        calls = agent.calls_of(threads[0], SPEC)
+        totals, total = [], 0
+        for call in calls:
+            total += call.said + sum(tokens for _, tokens in call.found)
+            totals.append(total)
+        counted = [s.input_tokens for s in threads[0].runs[0].steps]
+        for ours, theirs in zip(totals, counted):
+            self.assertLess(abs(ours - theirs), 5)
+        sizes = [tokens for call in calls for _, tokens in call.found]
+        self.assertGreater(min(sizes), 1_200)
+        # Without a count later on, sizes stay off by as much as they were.
+        for message in rows[0]["messages"][6:]:
+            message.pop("usage", None)
+        threads = compache.load_threads(rows, model=SPEC.model_id)
+        sizes = [t for c in agent.calls_of(threads[0], SPEC) for _, t in c.found]
+        self.assertGreater(min(sizes), 1_100)
+
     def test_one_recorded_call_is_not_enough(self):
         one = [{"thread_id": "t", "runs": [{"input": "q", "output": "a", "at": 1}]}]
         one[0]["runs"][0] = {"input": "q", "output": "a", "started_at": 1}
@@ -338,6 +368,77 @@ class PolicyTests(unittest.TestCase):
         none = agent.default_recipe(replace(SPEC, cache_ttl_seconds=0))
         self.assertEqual(none.ratio, 0.0)
         self.assertFalse(none.tool_pings)
+
+
+class CommandTests(unittest.TestCase):
+    """What the command line says of an agent's policy."""
+
+    def run_it(self, *words):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+            code = main([str(w) for w in words])
+        return code, out.getvalue()
+
+    def test_fit_replay_and_default(self):
+        with tempfile.TemporaryDirectory() as folder:
+            folder = Path(folder)
+            for name, seed in (("train", 1), ("test", 2)):
+                with open(folder / f"{name}.jsonl", "w", encoding="utf-8") as stream:
+                    for row in runs(8, seed=seed, quotes=0.5, tokens=2_000):
+                        stream.write(json.dumps(row) + "\n")
+            code, said = self.run_it(
+                "fit",
+                folder / "train.jsonl",
+                "--model",
+                "claude-haiku-5-5",
+                "-o",
+                folder / "policy.json",
+            )
+            self.assertEqual(code, 0, said)
+            self.assertIn("rely on an earlier result", said)
+            self.assertIn("rounds of tool results", said)
+            code, said = self.run_it(
+                "replay",
+                folder / "test.jsonl",
+                "--policy",
+                folder / "policy.json",
+                "-o",
+                folder / "report.json",
+            )
+            self.assertEqual(code, 0, said)
+            self.assertIn("per 1,000 calls", said)
+            report = json.loads((folder / "report.json").read_text())
+            self.assertGreater(report["saving"], 0)
+            # The calculator prices chats, and says so.
+            code, said = self.run_it(
+                "profile",
+                folder / "test.jsonl",
+                "--model",
+                "claude-haiku-5-5",
+                "--policy",
+                folder / "policy.json",
+            )
+            self.assertEqual(code, 1)
+            self.assertIn("call by call", said)
+            code, said = self.run_it(
+                "default",
+                "--agent",
+                "--model",
+                "claude-sonnet-5-5",
+                "-o",
+                folder / "default.json",
+            )
+            self.assertEqual(code, 0, said)
+            self.assertIn("public coding-agent runs", said)
+            self.assertTrue(compache.Policy.load(folder / "default.json").agentic)
+
+    def test_the_default_for_agents_has_no_workload(self):
+        policy = compache.default_policy("claude-sonnet-5-5", agent=True)
+        self.assertEqual(policy.max_pings, 3)
+        self.assertIsNone(policy.cache_lifetime)
+        self.assertIsNone(policy.summary["saving"])
+        with self.assertRaises(TypeError):
+            compache.default_policy("claude-sonnet-5-5", agent=True, threads=3)
 
 
 class SessionTests(unittest.TestCase):
@@ -417,7 +518,17 @@ class SessionTests(unittest.TestCase):
         turn = session.prepare("Fix it", at=0.0)
         usage = {"input_tokens": 9_000, "output_tokens": 50}
         session.replied(turn, "", [{}], at=4.0, usage=usage)
-        self.assertEqual(session._engine.flow.size, 9_050)
+        flow = session._engine.flow
+        self.assertEqual(flow.size, 9_050)
+        turn = session.extend(turn, ["x" * 4_000], at=10.0)
+        usage = {"input_tokens": 11_100, "output_tokens": 50}
+        session.replied(turn, "", [{}], at=14.0, usage=usage)
+        self.assertEqual(flow.size, 11_150)
+        self.assertEqual(flow.sizes["t:1:retrieval:1"], 2_050)
+        # What comes next is sized like what came before it.
+        session.extend(turn, ["x" * 4_000], at=20.0)
+        self.assertGreater(flow.sizes["t:1:retrieval:2"], 1_900)
+        self.assertEqual(flow.size, sum(flow.shown))
 
     def test_a_session_can_branch(self):
         session = self.policy().session("t")

@@ -557,6 +557,11 @@ def header_size(spec, system_prompt, tools) -> int:
 
 def _decision(policy) -> dict:
     """A fitted policy as the calculator takes it."""
+    if policy.agentic:
+        raise ContractError(
+            "the calculator prices one decision per user message, and this policy decides call by call: "
+            "price it with `compache replay`"
+        )
     recipe = policy.recipe
     return {
         "questions": recipe.input_runs if recipe else None,

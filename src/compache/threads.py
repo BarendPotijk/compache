@@ -63,7 +63,15 @@ _RUN_FIELDS = {
     "calls",
     "steps",
 }
-_STEP_FIELDS = {"started_at", "ended_at", "results", "bytes", "output_tokens", "needs"}
+_STEP_FIELDS = {
+    "started_at",
+    "ended_at",
+    "results",
+    "bytes",
+    "input_tokens",
+    "output_tokens",
+    "needs",
+}
 _GENERATION_FIELDS = {
     "observation_id",
     "started_at",
@@ -181,6 +189,8 @@ class Step:
     output_tokens: int | None = None
     # Earlier parts the reply relies on, where that is known.
     needs: tuple[str, ...] = ()
+    # What the provider counted the request at.
+    input_tokens: int | None = None
 
 
 @dataclass(frozen=True)
@@ -241,8 +251,8 @@ def _check_steps(run: dict, start, end, results: int) -> None:
         done = _time(step.get("ended_at"), "step.ended_at")
         if not at <= sent <= done <= end:
             raise ContractError("step timestamps outside the run or out of order")
-        for name in ("results", "bytes", "output_tokens"):
-            value = step.get(name, 0 if name == "output_tokens" else None)
+        for name in ("results", "bytes", "input_tokens", "output_tokens"):
+            value = step.get(name, 0 if name.endswith("_tokens") else None)
             if type(value) is not int or value < 0:
                 raise ContractError(f"step {name} must be a nonnegative integer")
         if not seen <= step["results"] <= results:
@@ -298,6 +308,7 @@ class Thread:
                             s["bytes"],
                             s.get("output_tokens"),
                             tuple(s.get("needs", ())),
+                            s.get("input_tokens"),
                         )
                         for s in r.get("steps", ())
                     ),
@@ -774,6 +785,7 @@ def _runs_from_messages(messages: Any, thread_id: str) -> list[dict]:
             if message.get("usage") is not None:
                 counted = canonical_usage(message["usage"])
                 if counted is not None:
+                    current["steps"][-1]["input_tokens"] = counted["input"]
                     current["steps"][-1]["output_tokens"] = counted["output"]
                 current["usages"].append(message["usage"])
             current["model"] = message.get("model") or current["model"]

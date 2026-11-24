@@ -161,6 +161,11 @@ def _parser() -> argparse.ArgumentParser:
         required=True,
         help=f"A known model ({', '.join(known_models())}) or a JSON file of model spec fields",
     )
+    sub.add_argument(
+        "--agent",
+        action="store_true",
+        help="The policy for an agent's loops of tool calls",
+    )
     sub.add_argument("-o", "--output", type=Path, default=Path("policy.json"))
     sub.add_argument("--json", action="store_true", help="Print JSON")
 
@@ -237,16 +242,20 @@ def _fit(args):
     )
     policy.save(args.output)
     summary = policy.summary
-    labelled = (
-        f" ({summary['labelled_turns']:,} labelled)"
-        if summary["labelled_turns"]
-        else ""
-    )
-    resent = history_resent(load_threads(args.threads), policy.spec)
+    if policy.agentic:
+        fitted = (
+            f"{summary['calls']:,} calls ({summary['relying_calls']:,} rely on an "
+            "earlier result)"
+        )
+        resent = None
+    else:
+        fitted = f"{summary['turns']:,} turns"
+        if summary["labelled_turns"]:
+            fitted += f" ({summary['labelled_turns']:,} labelled)"
+        resent = history_resent(load_threads(args.threads), policy.spec)
     text = "\n".join(
         [
-            f"Fitted on {summary['threads']:,} threads, {summary['turns']:,} turns{labelled} "
-            f"for {summary['model']}.",
+            f"Fitted on {summary['threads']:,} threads, {fitted} for {summary['model']}.",
             "",
             policy.describe(),
             *_trimmed(resent),
@@ -288,9 +297,11 @@ def _replay(args):
         args.labels,
         observed_until=args.observed_until,
     )
-    detail = report.pop("detail")
+    detail = report.pop("detail", None)
     if args.output:
         _write(args.output, {**report, "detail": detail})
+    if "cost_per_1000_calls" in report:
+        return report, _replayed_agent(report)
     lines = [f"{report['threads']:,} threads, {report['planned_turns']:,} turns."]
     costs = report["cost_per_1000_turns"]
     if report["saving"] is None:
@@ -317,6 +328,27 @@ def _replay(args):
         )
     lines.append(f"{report['pings']:,} keep-warm pings sent.")
     return report, "\n".join(lines)
+
+
+def _replayed_agent(report) -> str:
+    lines = [f"{report['threads']:,} threads, {report['calls']:,} calls."]
+    costs = report["cost_per_1000_calls"]
+    if report["saving"] is None:
+        lines.append(
+            f"{_money(costs, 'policy')} per 1,000 calls with the policy. Keeping everything does not fit the model."
+        )
+    else:
+        lines.append(
+            f"{_money(costs, 'policy')} per 1,000 calls with the policy against "
+            f"{_money(costs, 'keep_everything')} keeping everything: {report['saving']:.0%} less."
+        )
+    if report["coverage"] is not None:
+        lines.append(
+            f"{report['coverage']:.0%} of the {report['relying_calls']:,} calls that rely on an earlier "
+            "result find it in view."
+        )
+    lines.append(f"{report['pings']:,} keep-warm pings sent.")
+    return "\n".join(lines)
 
 
 def _trimmed(resent) -> list[str]:
@@ -601,11 +633,12 @@ def _pull(args):
 
 
 def _default(args):
-    policy = default_policy(args.model)
+    policy = default_policy(args.model, agent=args.agent)
     policy.save(args.output)
     summary = policy.summary
+    taught = "public coding-agent runs" if args.agent else "the default workload"
     lines = [
-        f"Fitted to the default workload, not to yours, for {summary['model']}.",
+        f"Fitted to {taught}, not to yours, for {summary['model']}.",
         "",
         policy.describe(),
         "",
