@@ -10,7 +10,7 @@ import sys
 from importlib import resources
 from pathlib import Path
 
-from . import __version__, stats
+from . import __version__, doctor, stats
 from .api import Policy, fit, replay
 from .defaults import default_policy
 from .errors import ContractError
@@ -246,6 +246,11 @@ def _parser() -> argparse.ArgumentParser:
         type=Path,
         help="Record folders. Left out, all that `compache wrap` keeps",
     )
+    sub.add_argument("--json", action="store_true", help="Print JSON")
+
+    text = "Check that compache works here and say what it can be used with"
+    sub = commands.add_parser("doctor", help=text, description=text)
+    sub.add_argument("--port", type=int, default=8787, help="A proxy to look for")
     sub.add_argument("--json", action="store_true", help="Print JSON")
 
     listing = commands.add_parser(
@@ -744,6 +749,7 @@ _COMMANDS = {
     "pull": _pull,
     "default": _default,
     "stats": _stats,
+    "doctor": doctor.main,
     "models": _models,
 }
 
