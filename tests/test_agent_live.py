@@ -563,6 +563,55 @@ class FetchTests(unittest.TestCase):
                     }
                     self.assertEqual(made, given)
 
+    def test_codex_gives_its_tools_among_what_is_said(self):
+        shape = Codex()
+        shape.said.append(
+            {
+                "type": "additional_tools",
+                "role": "developer",
+                "tools": [{"type": "custom", "name": "exec"}],
+            }
+        )
+        shape.body, body = lambda s: {**body(s), "tools": []}, shape.body
+        model = FakeModel(worker(6))
+        live = compache.Live(policy(rounds=2))
+        Agent(live, shape, model, stream=True).run("Read six files")
+        self.assertEqual([t["name"] for t in model.bodies[0]["tools"]], [REOPEN])
+        self.assertTrue(noticed(model.bodies[-1]["input"]))
+
+    def test_the_results_of_custom_tools_count_like_any(self):
+        shape = Codex()
+
+        def answer(results):
+            for call, text in results:
+                for item in shape.said:
+                    if item.get("call_id") == call:
+                        item["type"] = "custom_tool_call"
+                        item["input"] = item.pop("arguments")
+                parts = [
+                    {"type": "input_text", "text": "Script completed"},
+                    {"type": "input_text", "text": text},
+                ]
+                shape.said.append(
+                    {
+                        "type": "custom_tool_call_output",
+                        "call_id": call,
+                        "output": parts,
+                    }
+                )
+
+        shape.answer = answer
+        model = FakeModel(worker(6))
+        live = compache.Live(policy(rounds=2))
+        Agent(live, shape, model, stream=True).run("Read six files")
+        self.assertEqual(live.stats["turns"], 1)
+        sent = [
+            i["output"]
+            for i in model.bodies[-1]["input"]
+            if i.get("type") == "custom_tool_call_output"
+        ]
+        self.assertEqual([noticed(o) for o in sent], [True] * 4 + [False] * 2)
+
     def test_reasoning_that_led_to_a_fetch_stays_out_of_the_application_s_hands(self):
         script, _ = self.script(6, reasoning=True)
         model = FakeModel(script)

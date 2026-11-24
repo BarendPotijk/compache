@@ -1263,6 +1263,9 @@ class OpenAIResponses:
                 kind in ("function_call", "custom_tool_call") or last != "tool"
             ):
                 last = "call"
+            elif kind == "additional_tools":
+                # Codex gives its tools this way, ahead of everything that is said.
+                scan.tools += item.get("tools") or ()
             elif kind == "item_reference":
                 # Part of the history is at the provider, and only its name is here.
                 raise ValueError("the conversation is kept by the provider")
