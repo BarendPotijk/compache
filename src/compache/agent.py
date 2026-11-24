@@ -831,9 +831,11 @@ class AgentEngine:
         # What tool results came to by the provider's count and by our ruler, and the ratio of the two.
         self._counted = self._ruled = 0
         self._off = 1.0
-        # Where reasoning of its replies stands: the block, by message. And whether it is counted at all.
+        # Where reasoning of its replies stands: the block, by message. And whether the provider
+        # counts it, once that is known.
         self._thoughts: dict = {}
-        self._thinks = True
+        self._counts_thoughts: bool | None = None
+        self._just_cut = False
 
     def copy(self) -> AgentEngine:
         made = AgentEngine.__new__(AgentEngine)
@@ -871,6 +873,7 @@ class AgentEngine:
     def _plan(self, request, at) -> AgentPlan:
         self._due, self._sent_at = (), at
         went = self.flow.cut(at)
+        self._just_cut = bool(went)
         archived = frozenset(self.flow.archived)
         parts = tuple(
             replace(p, text=placeholder(self.thread_id, p))
@@ -932,7 +935,11 @@ class AgentEngine:
     def thought(self, place, tokens: int) -> None:
         """Reasoning of a reply's joined the conversation, in the message at that place."""
         name = ("thought", place)
-        if tokens > 0 and self._thinks and name not in self._known:
+        if (
+            tokens > 0
+            and self._counts_thoughts is not False
+            and name not in self._known
+        ):
             self._known.add(name)
             self._thoughts[place] = len(self.flow.shown)
             self.flow.add(tokens, name, again=True, held=True)
@@ -956,12 +963,15 @@ class AgentEngine:
         hidden = reported - flow.size
         new = [i for i in self._thoughts.values() if i in flow.held]
         thought = sum(flow.shown[i] for i in new)
-        if thought and hidden < -thought / 2:
-            # The provider does not count it, so it takes none of the room.
-            for i in new:
-                flow.forget(i)
-            self._thinks, self._thoughts = False, {}
-            hidden = reported - flow.size
+        if self._counts_thoughts is None and thought >= 64 and not self._just_cut:
+            # Seen once, on a request that nothing else changed.
+            self._counts_thoughts = hidden >= -thought / 2
+            if not self._counts_thoughts:
+                # The provider does not count it, so it takes none of the room.
+                for i in self._thoughts.values():
+                    flow.forget(i)
+                self._thoughts = {}
+                hidden = reported - flow.size
         held = sum(flow.shown[i] for i, _ in fresh)
         if not held or held + hidden <= 0:
             if hidden:

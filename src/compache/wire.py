@@ -94,8 +94,9 @@ class Reply:
     reasons: bool = False
 
 
-# How many characters of enclosed reasoning stand for a token of it.
-_ENCLOSED = 7
+def _enclosed(held: str, base: int, per_token: float) -> int:
+    """Tokens of reasoning that an enclosed text holds, at a guess. Claude and GPT, seen on 2026-11-24."""
+    return max(16, round((len(held) - base) / per_token))
 
 
 def get(body: Any, path: tuple) -> Any:
@@ -430,8 +431,9 @@ class OpenAIChat:
             ]
             calls = message.get("tool_calls") or message.get("function_call")
             if role == "assistant" and any(message.get(k) for k in _REASONING):
-                held = sum(len(json.dumps(message.get(k))) for k in _REASONING)
-                scan.thoughts[i] = held // _ENCLOSED
+                # A gateway may say the same in two of them.
+                held = max(len(json.dumps(message.get(k) or "")) for k in _REASONING)
+                scan.thoughts[i] = max(16, held // 6)
             if role == "assistant" and not calls and not any(text for _, text in found):
                 scan.slots.append(Slot("output", base, "", i, i, closes=True))
         scan.system = "\n\n".join(system)
@@ -852,9 +854,8 @@ class Anthropic:
                 called = called or kind.endswith("tool_use")
                 if mine == "output" and "thinking" in kind:
                     held = block.get("signature") or block.get("data") or ""
-                    size = max(
-                        len(held) // _ENCLOSED, len(block.get("thinking") or "") // 4
-                    )
+                    size = len(block.get("thinking") or "") // 4
+                    size = max(size, _enclosed(held, 960, 2.3))
                     scan.thoughts[i] = scan.thoughts.get(i, 0) + size
                 if kind == "text" and isinstance(block.get("text"), str):
                     scan.slots.append(Slot(mine, (*base, j, "text"), block["text"], i))
@@ -1372,8 +1373,8 @@ class OpenAIResponses:
             ):
                 last = "call"
             elif kind == "reasoning":
-                held = item.get("encrypted_content") or json.dumps(item.get("summary"))
-                scan.thoughts[i] = len(held) // _ENCLOSED
+                held = item.get("encrypted_content") or ""
+                scan.thoughts[i] = _enclosed(held, 1850, 10)
             elif kind == "additional_tools":
                 # Codex gives its tools this way, ahead of everything that is said.
                 scan.tools += item.get("tools") or ()
