@@ -780,8 +780,20 @@ class Live:
             self.stats["calls"] += 1
             return call.plain
 
-    def heard(self, thread: str, usage: Any, *, model: str | None = None) -> None:
-        """What one model call of a conversation shown to `view` was billed, as the provider counts it."""
+    def heard(
+        self,
+        thread: str,
+        usage: Any,
+        *,
+        model: str | None = None,
+        said: str | None = None,
+        calls=(),
+    ) -> None:
+        """What one model call of a conversation shown to `view` was billed, as the provider counts it.
+
+        `said` is the reply's text and `calls` the arguments of its tool calls,
+        where the host has them at hand.
+        """
         conversation = self._latest.get(thread)
         if conversation is None:
             return
@@ -794,9 +806,15 @@ class Live:
                 self._ledger(
                     conversation, "answer", wire.Reply(usage=usage, model=model)
                 )
+                made = [{"arguments": arguments} for arguments in calls]
+                self._step(conversation, pending, said, made)
                 if conversation.session is not None and pending.turn is not None:
                     conversation.session.replied(
-                        pending.turn, at=self._now(conversation), usage=usage
+                        pending.turn,
+                        said or "",
+                        list(calls),
+                        at=self._now(conversation),
+                        usage=usage,
                     )
             except Exception:
                 logger.warning("compache: a call was not recorded", exc_info=True)
@@ -1689,7 +1707,7 @@ class Live:
         """Keep the books on one call of a turn: when, how much it had been shown, what it quoted."""
         if self.recorder is None:
             return
-        said = spoken(text, [made.get("arguments") for made in calls])
+        said = spoken(text or "", [made.get("arguments") for made in calls])
         counted = canonical_usage(pending.last_usage) or {}
         pending.steps.append(
             {
@@ -1700,7 +1718,10 @@ class Live:
                 # A request with something out of view does not say how large the conversation is.
                 "input_tokens": None if pending.cut else counted.get("input"),
                 "output_tokens": counted.get("output"),
-                "needs": self._quotes(conversation).said(said),
+                # Where a host does not pass on what was said, what it relied on is not known.
+                "needs": None
+                if text is None
+                else self._quotes(conversation).said(said),
             }
         )
 

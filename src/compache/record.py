@@ -111,7 +111,7 @@ class Recorder:
                     step["results"],
                     step["bytes"],
                     step["output_tokens"],
-                    list(step["needs"]),
+                    None if step["needs"] is None else list(step["needs"]),
                     step["input_tokens"],
                 ]
                 for step in steps
@@ -222,13 +222,13 @@ def _steps(name: str, rows, counts: list[int], cut: bool) -> list[dict]:
             "ended_at": max(ended, started),
             "results": seen,
             "bytes": size,
-            "needs": None if cut else [],
+            "needs": None if cut or needs is None else [],
         }
         if output is not None:
             step["output_tokens"] = output
         if counted is not None:
             step["input_tokens"] = counted
-        for label in () if cut else needs:
+        for label in () if cut or needs is None else needs:
             turn, _, item = str(label)[1:].partition(".")
             if turn.isdigit() and item.isdigit() and 1 <= int(turn) <= len(counts):
                 if 1 <= int(item) <= counts[int(turn) - 1]:
