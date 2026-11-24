@@ -39,8 +39,9 @@ class FakeModel:
     """Replies from a script, and meters a prompt cache.
 
     `script(request)` returns a dict with `text`, and optionally `tool` as
-    (name, arguments) for a tool call, `refs` for the labels of a note, `cut`
-    for a reply the output limit ended, and `status` with `error` for a refusal. `request` has the `body`, its `texts`
+    (name, arguments) for a tool call or `tools` for several, `refs` for the labels of a note, `cut`
+    for a reply the output limit ended, `reasoning` for a reply of the Responses API that
+    reasons first, and `status` with `error` for a refusal. `request` has the `body`, its `texts`
     (every text of the conversation in order), the `last` text and `n`, the
     number of the call. Without a script every reply is "Answer <n>.".
     """
@@ -56,8 +57,13 @@ class FakeModel:
 
     # -- the cache -----------------------------------------------------------
 
-    def _meter(self, head, blocks, marked: int | None) -> dict:
-        """Read and written tokens for a request of `blocks` behind `head`, cached up to block `marked`."""
+    def _meter(self, head, blocks, marked: int | None, marks=None) -> dict:
+        """Read and written tokens for a request of `blocks` behind `head`, cached up to block `marked`.
+
+        With `marks`, the blocks that carry a cache mark, a provider's rules for
+        several of them: an entry is written at each, and looked for at most
+        twenty blocks back from each.
+        """
         now = self.clock()
         sums, running = [], hashlib.sha256(json.dumps(head, sort_keys=True).encode())
         size = tokens(head)
@@ -69,16 +75,25 @@ class FakeModel:
         total = size
         end = len(sums) if marked is None else marked + 1
         read = 0
+        looked = list(reversed(sums[:end]))
+        if marks is not None:
+            places = {i for m in marks for i in range(max(0, m - 19), m + 1)}
+            looked = [sums[i] for i in sorted(places, reverse=True)]
         with self._lock:
-            for key, upto in reversed(sums[:end]):
+            for key, upto in looked:
                 if self._cache.get(key, -1e18) + self.ttl > now:
                     read = upto
-                    self._cache[key] = now
                     break
+            for key, upto in sums:
+                # Reading an entry keeps alive what it is made of.
+                if upto <= read and self._cache.get(key, -1e18) + self.ttl > now:
+                    self._cache[key] = now
             written = 0
             if end and sums[end - 1][1] >= self.min_tokens:
                 written = sums[end - 1][1] - read
                 keys = sums[:end] if marked is None else sums[end - 1 : end]
+                if marks is not None:
+                    keys = [sums[m] for m in marks]
                 for key, _ in keys:
                     self._cache[key] = now
         return {"total": total, "read": read, "write": max(0, written)}
@@ -98,6 +113,9 @@ class FakeModel:
             else {"text": f"Answer {len(self.bodies)}."}
         )
         made.setdefault("text", "")
+        made["tools"] = made.get("tools") or (
+            [made["tool"]] if made.get("tool") else []
+        )
         if made.get("refs") is not None and NOTE_ASKED in request["last"]:
             made["text"] += f"\n<!-- refs: {made['refs']} -->"
         return made
@@ -155,14 +173,14 @@ class FakeModel:
         usage["total_tokens"] = usage["prompt_tokens"] + usage["completion_tokens"]
         message = {"role": "assistant", "content": made["text"] or None}
         finish = "length" if made.get("cut") else "stop"
-        if made.get("tool"):
-            name, arguments = made["tool"]
+        if made["tools"]:
             message["tool_calls"] = [
                 {
-                    "id": f"call_{len(self.bodies)}",
+                    "id": f"call_{len(self.bodies)}" + (f"_{k}" if k else ""),
                     "type": "function",
                     "function": {"name": name, "arguments": json.dumps(arguments)},
                 }
+                for k, (name, arguments) in enumerate(made["tools"])
             ]
             finish = "tool_calls"
         reply = {
@@ -195,17 +213,18 @@ class FakeModel:
         yield chunk({"role": "assistant", "content": ""})
         for piece in re.findall(r".{1,7}", made["text"], re.S):
             yield chunk({"content": piece})
-        for call in reply["choices"][0]["message"].get("tool_calls", ()):
+        calls = reply["choices"][0]["message"].get("tool_calls", ())
+        for at, call in enumerate(calls):
             arguments = call["function"]["arguments"]
             opening = {
                 **call,
-                "index": 0,
+                "index": at,
                 "function": {"name": call["function"]["name"], "arguments": ""},
             }
             yield chunk({"tool_calls": [opening]})
             for piece in re.findall(r".{1,9}", arguments, re.S):
                 yield chunk(
-                    {"tool_calls": [{"index": 0, "function": {"arguments": piece}}]}
+                    {"tool_calls": [{"index": at, "function": {"arguments": piece}}]}
                 )
         yield chunk({}, reply["choices"][0]["finish_reason"])
         yield chunk({}, reply["choices"][0]["finish_reason"], usage=reply["usage"])
@@ -217,7 +236,7 @@ class FakeModel:
         self.bodies.append(body)
         self.paths.append(path)
         self.headers.append(dict(headers or {}))
-        texts, blocks, marked = [], [], None
+        texts, blocks, marks = [], [], []
         for message in body["messages"]:
             content = message.get("content")
             if isinstance(content, str):
@@ -235,7 +254,7 @@ class FakeModel:
                     ]
                 )
                 if "cache_control" in block:
-                    marked = len(blocks) - 1
+                    marks.append(len(blocks) - 1)
         made = self._decide(body, texts)
         if made.get("status"):
             return made["status"], {
@@ -244,9 +263,9 @@ class FakeModel:
             }
         head = [body.get("tools"), body.get("system"), body.get("output_config")]
         if "cache_control" in body and blocks:
-            marked = len(blocks) - 1
-        meter = self._meter(head, blocks, marked)
-        if marked is None:
+            marks.append(len(blocks) - 1)
+        meter = self._meter(head, blocks, marks[-1] if marks else None, marks)
+        if not marks:
             meter["read"] = meter["write"] = 0
         usage = {
             "input_tokens": meter["total"] - meter["read"] - meter["write"],
@@ -256,12 +275,11 @@ class FakeModel:
         }
         content = [{"type": "text", "text": made["text"]}] if made["text"] else []
         stop = "max_tokens" if made.get("cut") else "end_turn"
-        if made.get("tool"):
-            name, arguments = made["tool"]
+        for k, (name, arguments) in enumerate(made["tools"]):
             content.append(
                 {
                     "type": "tool_use",
-                    "id": f"toolu_{len(self.bodies)}",
+                    "id": f"toolu_{len(self.bodies)}" + (f"_{k}" if k else ""),
                     "name": name,
                     "input": arguments,
                 }
@@ -363,6 +381,15 @@ class FakeModel:
         }
         usage["total_tokens"] = usage["input_tokens"] + usage["output_tokens"]
         n, output = len(self.bodies), []
+        if made.get("reasoning"):
+            output.append(
+                {
+                    "type": "reasoning",
+                    "id": f"rs_{n}",
+                    "summary": [{"type": "summary_text", "text": made["reasoning"]}],
+                    "encrypted_content": f"enclosed-{n}",
+                }
+            )
         if made["text"]:
             part = {"type": "output_text", "text": made["text"], "annotations": []}
             output.append(
@@ -374,13 +401,13 @@ class FakeModel:
                     "content": [part],
                 }
             )
-        if made.get("tool"):
-            name, arguments = made["tool"]
+        for k, (name, arguments) in enumerate(made["tools"]):
+            more = f"_{k}" if k else ""
             output.append(
                 {
                     "type": "function_call",
-                    "id": f"fc_{n}",
-                    "call_id": f"call_{n}",
+                    "id": f"fc_{n}{more}",
+                    "call_id": f"call_{n}{more}",
                     "name": name,
                     "arguments": json.dumps(arguments),
                     "status": "completed",
@@ -428,6 +455,13 @@ class FakeModel:
                     item_id=item["id"],
                     text=made["text"],
                 )
+            if item["type"] == "function_call":
+                event(
+                    "response.function_call_arguments.delta",
+                    output_index=index,
+                    item_id=item["id"],
+                    delta=item["arguments"],
+                )
             event("response.output_item.done", output_index=index, item=item)
         event("response.completed", response=reply)
         return 200, events
@@ -460,8 +494,7 @@ class FakeModel:
         ]
         meter = self._meter(head, body["contents"], None)
         parts = [{"text": made["text"]}] if made["text"] else []
-        if made.get("tool"):
-            name, arguments = made["tool"]
+        for name, arguments in made["tools"]:
             parts.append({"functionCall": {"name": name, "args": arguments}})
         usage = {
             "promptTokenCount": meter["total"],

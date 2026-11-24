@@ -202,7 +202,10 @@ class Flow:
         )
 
     def cut(self, at: float) -> list:
-        """Turn older results into notices, if that pays now. Returns their names, oldest first."""
+        """Turn older results into notices, if that pays now.
+
+        Returns what went, oldest first: each by its name and whether it had been fetched back.
+        """
         if self.recipe.rounds is None:
             return []
         limit, live = self.rounds - self.recipe.rounds, self.live
@@ -227,7 +230,7 @@ class Flow:
                 self.back.discard(name)
             else:
                 self.archived.add(name)
-            went.append(name)
+            went.append((name, again))
         self.size -= self.freed
         self.live, self.ripe, self.freed = live[self.ripe :], 0, 0
         return went
@@ -666,6 +669,17 @@ class AgentEngine:
         made.flow, made._known = self.flow.copy(), set(self._known)
         return made
 
+    def follows(self, other: AgentEngine) -> None:
+        """Take over how warm the cache is from a conversation that went on from the same start."""
+        mine, theirs = self.flow, other.flow
+        if (
+            mine.at is not None
+            and theirs.at is not None
+            and theirs.at > mine.at
+            and theirs.archived == mine.archived
+        ):
+            mine.sent(theirs.at, min(mine.size, theirs.cached))
+
     # -- a request -------------------------------------------------------------
 
     def _arrived(self, parts) -> None:
@@ -687,7 +701,13 @@ class AgentEngine:
             else p
             for p in request.parts
         )
-        decision = {"action": "cut" if went else "keep", "went": tuple(went)}
+        live = self.flow.live
+        decision = {
+            "action": "cut" if went else "keep",
+            # What went now, and what goes first with the next cut.
+            "went": tuple(went),
+            "holds": self.flow.names[live[0]] if live else None,
+        }
         return AgentPlan(
             request, AgentView(parts, archived, max(0, self.flow.size)), decision
         )
@@ -757,6 +777,10 @@ class AgentEngine:
         self.flow.add(max(0, self.spec.part_tokens(answer.text) - self._spoken))
         self._spoken = 0
         self._wait(self.recipe.user_pings, ended_at)
+
+    @property
+    def archived_ids(self) -> frozenset:
+        return frozenset(self.flow.archived)
 
     def reopened(self, name, tokens: int) -> None:
         """Something was fetched back: it stands at the end of the conversation from here on."""

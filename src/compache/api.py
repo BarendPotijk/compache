@@ -37,6 +37,8 @@ __all__ = ["Policy", "Session", "Turn", "fit", "replay"]
 
 _HORIZON_SECONDS = 86400
 _CHAT = "compache-workload-planner-v1"
+# Characters an agent reads back at once: the whole of most tool results.
+_AGENT_PAGE = 32_000
 
 
 def _rows(source) -> list:
@@ -651,6 +653,10 @@ class Session:
         made._engine, made._history = self._engine.copy(), list(self._history)
         return made
 
+    def follows(self, other: Session) -> None:
+        """Take over how warm the cache is from a conversation that went on from the same start."""
+        self._engine.follows(other._engine)
+
     def _request(self, run, parts):
         return Request(
             self.thread_id,
@@ -909,4 +915,12 @@ class Session:
         arguments = {"reference": reference}
         if offset:
             arguments["offset"] = offset
-        return _reopen(request, arguments, search=tuple(search))
+        if not self.policy.agentic:
+            return _reopen(request, arguments, search=tuple(search))
+        return _reopen(
+            request,
+            arguments,
+            search=tuple(search),
+            within=self._engine.archived_ids,
+            page=_AGENT_PAGE,
+        )

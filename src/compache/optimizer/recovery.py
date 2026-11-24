@@ -173,10 +173,14 @@ def reopen(
     *,
     archived_ids: Set[str] | None = None,
     search: tuple[str, ...] = ("retrieval",),
+    within: Set[str] = frozenset(),
+    page: int = _TEXT_PAGE,
 ) -> dict:
     """Resolve a model call against earlier exposed parts of this request.
 
     Pass the host's archived canonical part IDs to restrict recovery further.
+    `within` names parts of the run being answered that can be fetched too, as
+    an agent's long turn has, and `page` is how many characters one call reads.
     A handle or part ID addresses any eligible source kind. Free-text lookup
     searches original retrievals: for the phrase, then for most of its words.
     `search` names other kinds to search after them, for a conversation that
@@ -201,7 +205,7 @@ def reopen(
     parts = [
         p
         for p in request.parts
-        if p.run_index < request.run_index
+        if (p.run_index < request.run_index or p.part_id in within)
         and p.text is not None
         and (archived_ids is None or p.part_id in archived_ids)
     ]
@@ -217,16 +221,16 @@ def reopen(
         if start > len(source.text):
             raise ContractError("reopen offset exceeds source length")
         info = _metadata(request.thread_id, source)
-        page = expand(request, info["handle"], offset=start, limit=_TEXT_PAGE)
+        read = expand(request, info["handle"], offset=start, limit=page)
         return {
             "status": "ok",
             **info,
             "offset": start,
             "length": len(source.text),
-            "text": page["text"],
-            "next_offset": page["next_offset"],
+            "text": read["text"],
+            "next_offset": read["next_offset"],
             "next_reference": info["handle"]
-            if page["next_offset"] is not None
+            if read["next_offset"] is not None
             else None,
         }
 

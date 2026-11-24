@@ -658,6 +658,8 @@ def _runs_from_messages(messages: Any, thread_id: str) -> list[dict]:
     waiting: list[dict] = []
     exposed_ids: set[str] = set()
     quotes = Quotes()
+    # Whether the model has not answered yet to what its tools returned.
+    loops = False
 
     def close():
         nonlocal current
@@ -711,8 +713,13 @@ def _runs_from_messages(messages: Any, thread_id: str) -> list[dict]:
             if "part_id" in message:
                 part["part_id"] = _id(message["part_id"], "part_id")
             found.append(part)
+        answering = bool(results) or (
+            role in ("tool", "function") and bool(message.get("tool_call_id"))
+        )
+        loops = answering or (loops and role == "user")
         if role == "user" and text:
-            if current is not None and current["answers"]:
+            # What is said along with the results of tools is a remark in the same turn.
+            if current is not None and current["answers"] and not loops:
                 close()
             if current is None:
                 if at is None:
