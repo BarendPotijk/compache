@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """Issues of SWE-bench Lite as tasks: a project's own bug reports, graded by its own tests.
 
-    python swe.py <folder>      fetch the dataset and sympy, and keep the issues that run here
+    python swe.py <folder>      fetch the dataset and sympy, keep what runs here and make sessions of it
 
 sympy is pure Python with one dependency, so its issues need no container: a tree of files at
 the issue's commit, a Python with mpmath and pytest, and the tests of the fix. An issue is kept
 where those tests fail before the fix and pass after it on this machine.
+
+A session is several issues in one checkout, given one after the other as a user would. Its
+issues are those that can all be fixed at the same commit, checked with the project's own fixes.
 """
 
 from __future__ import annotations
@@ -32,6 +35,19 @@ tests. Reproduce the problem first, find the cause, fix it, and run the tests of
 <issue>
 {issue}
 </issue>"""
+NEXT = """Here is another issue of the same library. Resolve it in the same way.
+
+<issue>
+{issue}
+</issue>"""
+# The commits that sessions start from, by the issue they belong to, and how many issues one holds.
+BASES = (
+    "sympy__sympy-21612",
+    "sympy__sympy-20590",
+    "sympy__sympy-18835",
+    "sympy__sympy-15345",
+)
+SIZE, LEAST = 6, 5
 
 
 def _changed(patch: str) -> list[str]:
@@ -104,6 +120,108 @@ class Issue:
         }
 
 
+class Session:
+    """Several issues of one checkout as a task, one prompt each."""
+
+    def __init__(self, root: Path, name: str):
+        self.root, self.name = Path(root), name
+        self.plan = json.loads((self.root / "sessions.json").read_text())[name]
+        rows = {
+            r["instance_id"]: r
+            for r in json.loads((self.root / "lite.json").read_text())
+        }
+        self.rows = [rows[i["name"]] for i in self.plan["issues"]]
+
+    def make(self, tree: Path) -> None:
+        extract(self.root, {"base_commit": self.plan["base"]}, tree)
+
+    def prompts(self, parts: int) -> list[str]:
+        first, *rest = (r["problem_statement"] for r in self.rows)
+        return [PROMPT.format(issue=first), *(NEXT.format(issue=r) for r in rest)]
+
+    def grade(self, tree: Path) -> dict:
+        """How many of the issues are fixed, and whether anything else broke."""
+        files = sorted({f for i in self.plan["issues"] for f in i["tests"]})
+        for name in files:
+            subprocess.run(["git", "checkout", "-q", "HEAD", "--", name], cwd=tree)
+        for row in self.rows:
+            _apply(tree, row["test_patch"])
+        passed = _run(str(self.root / "venv/bin/python"), tree, files)
+        fixed = {
+            i["name"]: all(passed.get(t) for t in i["f2p"]) for i in self.plan["issues"]
+        }
+        broke = [t for t in self.plan["p2p"] if not passed.get(t)]
+        return {
+            "right": sum(fixed.values()),
+            "of": len(fixed),
+            "fixed": fixed,
+            "broke": broke[:5],
+            "broken": len(broke),
+        }
+
+
+def plan_sessions(root: Path) -> None:
+    """Find sets of issues that can be fixed at one commit, and that their own fixes do fix together."""
+    python = str(root / "venv/bin/python")
+    rows = {r["instance_id"]: r for r in fetch(root)}
+    kept = json.loads((root / "valid.json").read_text())
+    free, made = set(issues(root)), {}
+
+    def fits(base: str, names: list[str], tree: Path) -> dict:
+        """Which of some issues are broken at a commit and fixed once all their fixes are in."""
+        extract(root, rows[base], tree)
+        files = sorted({f for n in names for f in kept[n]["tests"]})
+        for n in names:
+            if not _apply(tree, rows[n]["test_patch"]):
+                return {}
+        before = _run(python, tree, files)
+        for n in names:
+            if not _apply(tree, rows[n]["patch"]):
+                return {}
+        after = _run(python, tree, files)
+        good = {
+            n: not any(map(before.get, kept[n]["f2p"]))
+            and all(map(after.get, kept[n]["f2p"]))
+            for n in names
+        }
+        return {"good": good, "passes": [t for t, ok in after.items() if ok]}
+
+    for base in BASES:
+        # One by one first, then together: fixes of two issues may be in each other's way.
+        candidates = sorted(free)
+        with ThreadPoolExecutor(4) as pool:
+            alone = list(
+                pool.map(
+                    lambda n: fits(base, [n], root / "trees" / f"{base}+{n}"),
+                    candidates,
+                )
+            )
+        able = [n for n, f in zip(candidates, alone) if f and f["good"][n]]
+        chosen: list[str] = []
+        for n in able:
+            if len(chosen) == SIZE:
+                break
+            tried = fits(base, [*chosen, n], root / "trees" / f"{base}++{n}")
+            if tried and all(tried["good"].values()):
+                chosen.append(n)
+        if len(chosen) < LEAST:
+            print(f"{base}: only {len(chosen)} issues fit together")
+            continue
+        last = fits(base, chosen, root / "trees" / f"{base}+++")
+        wanted = {t for n in chosen for t in kept[n]["f2p"]}
+        made[base] = {
+            "base": rows[base]["base_commit"],
+            "issues": [
+                {"name": n, "tests": kept[n]["tests"], "f2p": kept[n]["f2p"]}
+                for n in chosen
+            ],
+            "p2p": sorted(set(last["passes"]) - wanted),
+        }
+        free -= set(chosen)
+        print(f"{base}: {', '.join(n.rpartition('-')[2] for n in chosen)}")
+    (root / "sessions.json").write_text(json.dumps(made, indent=1))
+
+
 def fetch(root: Path) -> list[dict]:
     path = root / "lite.json"
     if not path.exists():
@@ -174,4 +292,7 @@ if __name__ == "__main__":
         subprocess.run(["git", *words], check=True)
     if not (args.folder / "venv").exists():
         sys.exit("make a Python 3.9 with mpmath 1.3 and pytest at <folder>/venv first")
-    validate(args.folder)
+    if not (args.folder / "valid.json").exists():
+        validate(args.folder)
+    if not (args.folder / "sessions.json").exists():
+        plan_sessions(args.folder)

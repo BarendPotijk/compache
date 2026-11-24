@@ -89,7 +89,10 @@ class SavingTests(unittest.TestCase):
         self.assertIn("more", "\n".join(stats.lines(found)))
 
     def test_what_was_left_alone_cost_what_it_cost(self):
-        rows = [row("b", 0, 10_000, 0, 0), row("b", 9, 12_000, 0, 0)]
+        rows = [
+            row("b", 0, 10_000, 0, 0, left_alone=True),
+            row("b", 9, 12_000, 0, 0, left_alone=True),
+        ]
         found = stats.savings(rows)
         self.assertEqual(found["spent"], found["without"])
         self.assertEqual(found["left_alone"], 1)

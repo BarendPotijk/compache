@@ -207,13 +207,11 @@ def _said(live: Live, calls: list[dict]) -> list[str]:
     if not found["without"]:
         return [f"{told} recorded. There is no price sheet for this model."]
     spent, without = found["spent"], found["without"]
-    if live.learner is not None and found["left_alone"] == found["conversations"]:
-        if live.stats["turns"] and found["calls"] > 4:
-            return [
-                f"{told}, ${spent:,.4f}. This session went out as written: one in ten does, "
-                "to learn what replies rely on."
-            ]
-        return [f"{told}, ${spent:,.4f}."]
+    if live.learner is not None and found["left_alone"] == 1 and spent == without:
+        return [
+            f"{told}, ${spent:,.4f}. This session went out as written: one in ten does, "
+            "to learn what replies rely on."
+        ]
     change = (
         f"{1 - spent / without:.0%} less"
         if without > spent
@@ -302,13 +300,19 @@ def main(args) -> int:
     elif args.watch:
         live = Live(record=kept)
     else:
-        learner = Learner(folder)
-        # What earlier sessions left on record may be enough for a policy of their own by now.
-        learner.refit()
-        live = Live(learn=learner)
+        live = Live(learn=Learner(folder))
         live.recorder = kept
     status = run(agent, words, live, port=args.port or 0, upstream=args.upstream)
     if not args.quiet:
         for line in _said(live, kept.calls):
             print(line, file=sys.stderr)
+    if live.learner is not None and kept.calls:
+        # Fitting takes a few seconds, and the user has the terminal back by then.
+        subprocess.Popen(
+            [sys.executable, "-m", __package__, "learn", str(folder)],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
     return status

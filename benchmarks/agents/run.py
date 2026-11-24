@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Coding agents on long tasks, with and without a tool between them and the model: cost and grade.
 
-    python run.py play --agent claude --swe swe --env .env
+    python run.py play --agent claude --swe swe --session --env .env
     python run.py play --agent codex --tasks 1 2 3 --parts 4 --env .env
     python run.py report
 
@@ -352,6 +352,8 @@ class Between:
             except ProcessLookupError:
                 pass
         if self.server is not None:
+            if self.live.pinger is not None:
+                self.live.pinger.stop()
             self.server.shutdown()
             self.server.server_close()
             found = stats.savings(self.folder / "compache")
@@ -427,7 +429,8 @@ class Repository:
 
 def task_of(args, name: str):
     if args.swe:
-        return swe.Issue(Path(args.swe), name)
+        kind = swe.Session if args.session else swe.Issue
+        return kind(Path(args.swe), name)
     return Repository(int(name), args.modules)
 
 
@@ -452,11 +455,11 @@ def play_one(args, arm: str, which: str, repeat: int, key: str, bill: Bill) -> d
     log = folder / "provider.jsonl"
     server = provider(key, bill, log)
     between = Between(arm, at(server), folder, args)
-    status, begun, said = None, time.time(), []
+    status, begun, said, pauses = None, time.time(), [], args.pause
     try:
         for k, prompt in enumerate(asked.prompts(args.parts)):
             if k:
-                time.sleep(args.pause)
+                time.sleep(pauses[(k - 1) % len(pauses)])
             words, env = command(args, between.base, prompt, k > 0, home)
             with open(folder / f"out-{k}.txt", "wb") as out:
                 running = subprocess.Popen(
@@ -492,7 +495,7 @@ def play_one(args, arm: str, which: str, repeat: int, key: str, bill: Bill) -> d
         "task": which,
         "repeat": repeat,
         "parts": args.parts,
-        "pause": args.pause if args.parts > 1 else 0,
+        "pause": args.pause if args.parts > 1 or args.session else [],
         "status": status,
         "seconds": round(time.time() - begun, 1),
         "cost": sum(r["cost"] for r in rows if r.get("cost")),
@@ -524,7 +527,14 @@ def play_one(args, arm: str, which: str, repeat: int, key: str, bill: Bill) -> d
 def play(args):
     Path(args.work).mkdir(parents=True, exist_ok=True)
     key, bill = secret(args), Bill(args.budget)
-    names = args.tasks or (swe.issues(Path(args.swe)) if args.swe else ["1"])
+    names = args.tasks or ["1"]
+    if args.swe and not args.tasks:
+        root = Path(args.swe)
+        names = (
+            list(json.loads((root / "sessions.json").read_text()))
+            if args.session
+            else swe.issues(root)
+        )
     jobs = [
         (arm, name, repeat)
         for repeat in range(args.repeats)
@@ -600,7 +610,16 @@ def main(argv=None):
     sub.add_argument("--repeats", type=int, default=1)
     sub.add_argument("--modules", type=int, default=14)
     sub.add_argument("--parts", type=int, default=1, help="Prompts a task is given in")
-    sub.add_argument("--pause", type=float, default=330, help="Seconds between two")
+    sub.add_argument(
+        "--session", action="store_true", help="Sessions of several issues"
+    )
+    sub.add_argument(
+        "--pause",
+        type=float,
+        nargs="+",
+        default=[60, 20, 420, 120, 780, 30, 330],
+        help="Seconds before each prompt after the first, over and over",
+    )
     sub.add_argument("--model")
     sub.add_argument("--env", help="A file of NAME=value lines with OPENROUTER_API_KEY")
     sub.add_argument(
@@ -609,7 +628,7 @@ def main(argv=None):
     sub.add_argument("--workers", type=int, default=2)
     sub.add_argument("--turns", type=int, default=150, help="Most turns of an agent")
     sub.add_argument(
-        "--limit", type=float, default=1500, help="Most seconds of a prompt"
+        "--limit", type=float, default=900, help="Most seconds of a prompt"
     )
     sub.add_argument("--sandbox", default="", help="Put ahead of what is under test")
     sub.add_argument("--path", default="", help="Where the agents are")

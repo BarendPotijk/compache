@@ -62,7 +62,8 @@ class Learner:
         (self.folder / "policies").mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         self._policies: dict[str, Policy | None] = {}
-        self._begun: dict[str, int] = {}
+        # How many conversations have begun, by key: those on record, then those of this process.
+        self._begun: dict[str, int] | None = None
         self._unknown: set[str] = set()
         self._state = self._read_state()
         self._since = 0
@@ -108,8 +109,29 @@ class Learner:
             return None
         return f"{model_id}.{'agent' if tools else 'chat'}", model_id
 
+    def _on_record(self) -> dict[str, int]:
+        """How many conversations the record holds, by key. Only their first turns are looked at."""
+        counts: Counter = Counter()
+        try:
+            with open(self.folder / "turns.jsonl", encoding="utf-8") as stream:
+                for line in stream:
+                    if '"turn":1,' not in line:
+                        continue
+                    row = json.loads(line)
+                    tools = (row.get("bytes") or {}).get("tools")
+                    found = self._key(row.get("model"), bool(tools))
+                    if found is not None:
+                        counts[found[0]] += 1
+        except (OSError, ValueError):
+            pass
+        return dict(counts)
+
     def policy(self, model, tools: bool) -> Policy | None:
-        """The policy for a conversation that begins now, or None to leave it as it is.
+        """The policy for a conversation that begins now, or None to leave it as it is."""
+        return self.choose(model, tools)[0]
+
+    def choose(self, model, tools: bool) -> tuple[Policy | None, bool]:
+        """The policy for a conversation that begins now, and whether it is left alone on purpose.
 
         `tools` says whether its requests offer the model any: an agent's do.
         A conversation without starts with no policy until labels teach one.
@@ -121,7 +143,7 @@ class Learner:
                 logger.info(
                     "compache: no price sheet for %s, so it is only recorded", model
                 )
-            return None
+            return None, False
         key, model_id = found
         with self._lock:
             if key not in self._policies:
@@ -131,12 +153,13 @@ class Learner:
                 self._policies[key] = policy
             policy = self._policies[key]
             if policy is None or not policy.agentic:
-                return policy
-            begun = self._begun.get(key, self._state.get(key, {}).get("threads", 0)) + 1
-            self._begun[key] = begun
+                return policy, False
+            if self._begun is None:
+                self._begun = self._on_record()
+            begun = self._begun[key] = self._begun.get(key, 0) + 1
         if begun % CONTROL_EVERY == 0:
-            return None
-        return policy.at_default_lifetime() if self.default_lifetime else policy
+            return None, True
+        return policy.at_default_lifetime() if self.default_lifetime else policy, False
 
     def fitted_on(self, model, tools: bool = True) -> dict | None:
         """On how much a model's policy was fitted and when, or None while it is the default."""
@@ -195,8 +218,6 @@ class Learner:
         calls = sum(run.get("calls") or 1 for row in rows for run in row["runs"])
         before = self._state.get(key, {}).get("calls", 0)
         if calls < FIRST_CALLS or calls < before * _GROWN:
-            with self._lock:
-                self._begun[key] = max(self._begun.get(key, 0), len(rows))
             return
         kept, held = [], 0
         for row in sorted(rows, key=lambda r: -seconds_of(r)):

@@ -297,6 +297,8 @@ class _Conversation:
     # The model it began with and the policy that gave it, where policies are learned.
     model: str | None = None
     policy: Any = None
+    # Whether it is one of those the learner leaves as they are.
+    left_alone: bool = False
     # What was fetched back and still stands in the conversation, in order.
     inserts: list = field(default_factory=list)
     # How it stood before its latest turn, for a request that branches off there.
@@ -873,7 +875,9 @@ class Live:
             # Chosen once. One that was left alone stays alone.
             if conversation.model is None:
                 conversation.model = scan.model or ""
-                conversation.policy = self.learner.policy(scan.model, bool(scan.tools))
+                conversation.policy, conversation.left_alone = self.learner.choose(
+                    scan.model, bool(scan.tools)
+                )
             policy = conversation.policy
         if policy is None:
             return None
@@ -1879,6 +1883,7 @@ class Live:
             archived=archived,
             left=left,
             lifetime=conversation.lifetime,
+            left_alone=conversation.left_alone,
         )
 
     # -- pings ---------------------------------------------------------------

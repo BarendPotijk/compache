@@ -66,7 +66,7 @@ def savings(source) -> dict:
     priced: set[str] = set()
     sheets: dict = {}
     held: dict = {}
-    treated: set = set()
+    alone: set = set()
     threads: set = set()
     for row in sorted(rows, key=lambda r: r["at"]):
         model = row.get("model") or "unknown"
@@ -86,6 +86,8 @@ def savings(source) -> dict:
         entry["cache_read_tokens"] += read
         entry["output_tokens"] += output
         threads.add(row["thread"])
+        if row.get("left_alone"):
+            alone.add(row["thread"])
         kind = row["kind"]
         if kind == "answer":
             entry["calls"] += 1
@@ -93,7 +95,6 @@ def savings(source) -> dict:
             if row.get("sent_bytes"):
                 # Its tokens by what the provider counted for the text that did go out.
                 left = round(row["left_bytes"] * size / row["sent_bytes"])
-                treated.add(row["thread"])
             whole = max(0, size + left)
             before = held.get(row["thread"])
             first = before[2] if before is not None else whole
@@ -121,7 +122,7 @@ def savings(source) -> dict:
     return {
         "calls": sum(e["calls"] for e in models.values()),
         "conversations": len(threads),
-        "left_alone": len(threads - treated),
+        "left_alone": len(alone),
         "since": min((r["at"] for r in rows), default=None),
         "until": max((r["at"] for r in rows), default=None),
         "spent": spent,
@@ -182,7 +183,7 @@ def lines(found: dict) -> list[str]:
         said.append(
             f"  {model}: {_count(entry['calls'], 'call')}, no price sheet, so only recorded"
         )
-    if found["left_alone"] and found["left_alone"] < found["conversations"]:
+    if found["left_alone"]:
         said.append(
             f"{_count(found['left_alone'], 'conversation')} went out as written, "
             "to learn from what replies rely on when everything is in view."

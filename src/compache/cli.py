@@ -248,6 +248,11 @@ def _parser() -> argparse.ArgumentParser:
     )
     sub.add_argument("--json", action="store_true", help="Print JSON")
 
+    text = "Fit again what a record has grown enough for"
+    sub = commands.add_parser("learn", help=text, description=text)
+    sub.add_argument("folder", type=Path, help="A folder that is learned in")
+    sub.add_argument("--json", action="store_true", help="Print JSON")
+
     text = "Check that compache works here and say what it can be used with"
     sub = commands.add_parser("doctor", help=text, description=text)
     sub.add_argument("--port", type=int, default=8787, help="A proxy to look for")
@@ -724,6 +729,18 @@ def _stats(args):
     return found, "\n".join(text[:-1])
 
 
+def _learn(args):
+    learner = Learner(args.folder)
+    before = dict(learner._state)
+    learner.refit(wait=True)
+    new = {k: v for k, v in learner._state.items() if before.get(k) != v}
+    lines = [
+        f"Fitted {key} on {entry['calls']:,} calls: {entry['saving']:.0%} less than keeping everything."
+        for key, entry in new.items()
+    ]
+    return new, "\n".join(lines) or "Nothing has grown enough for a new fit."
+
+
 def _models(args):
     models = _sheet()["models"]
     lines = [f"Prices per million tokens, checked {_sheet()['checked']}."]
@@ -749,6 +766,7 @@ _COMMANDS = {
     "pull": _pull,
     "default": _default,
     "stats": _stats,
+    "learn": _learn,
     "doctor": doctor.main,
     "models": _models,
 }

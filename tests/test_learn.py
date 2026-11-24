@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import tempfile
 import unittest
@@ -9,6 +11,7 @@ from pathlib import Path
 
 import compache
 from compache import learn
+from compache.cli import main
 from compache.learn import Learner
 from compache.record import load
 from fakes import FakeModel, noticed
@@ -68,6 +71,20 @@ class LearnerTests(unittest.TestCase):
             given = [learner.policy(MODEL, True) is None for _ in range(30)]
             self.assertEqual(sum(given), 3)
             self.assertFalse(given[0], "never the first")
+
+    def test_the_count_goes_on_in_the_next_process(self):
+        clock = Clock()
+        with tempfile.TemporaryDirectory() as folder:
+            alone = []
+            for k in range(20):
+                # One process per conversation, as `compache wrap` makes them.
+                clock.at += 4_000
+                learner = Learner(folder, clock=clock, background=False)
+                live = compache.Live(learn=learner, clock=clock)
+                model = FakeModel(worker(2), clock=lambda: clock.at)
+                Agent(live, Haiku(), model, clock=clock).run(f"Task {k}")
+                alone.append("reopen" not in json.dumps(model.bodies))
+            self.assertEqual([k for k, a in enumerate(alone) if a], [9, 19])
 
     def test_what_is_left_alone_is_recorded_whole(self):
         clock = Clock()
@@ -129,6 +146,25 @@ class LearnerTests(unittest.TestCase):
             self.assertEqual(again.policy(MODEL, True).cache_lifetime, 3600)
             again.default_lifetime = True
             self.assertIsNone(again.policy(MODEL, True).cache_lifetime)
+
+    def test_the_command_that_fits_again(self):
+        clock = Clock()
+        with tempfile.TemporaryDirectory() as folder:
+            live = compache.Live(
+                learn=Learner(folder, clock=clock, background=True), clock=clock
+            )
+            live.learner.refit = lambda **_: None
+            for k in range(12):
+                clock.at += 4_000
+                model = FakeModel(quoting(), clock=lambda: clock.at)
+                Agent(live, Haiku(), model, clock=clock).run(f"Task {k}")
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                self.assertEqual(main(["learn", folder]), 0)
+            self.assertIn(f"Fitted {MODEL}.agent on 300 calls", out.getvalue())
+            with contextlib.redirect_stdout(out):
+                self.assertEqual(main(["learn", folder]), 0)
+            self.assertIn("Nothing has grown enough", out.getvalue())
 
     def test_a_broken_policy_file_does_not_stop_anything(self):
         with tempfile.TemporaryDirectory() as folder:
