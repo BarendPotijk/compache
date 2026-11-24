@@ -18,6 +18,8 @@ Defaults as documented at revision [`c49b553`](https://github.com/openclaw/openc
 | An OpenAI API key | OpenAI's own compaction endpoint at 75% of the window |
 | Both | A five-minute cache and no keep-warm requests |
 
+![Cost per 1,000 turns on Claude Sonnet 5.5 at three thread lengths: OpenClaw's defaults against compache](assets/openclaw-cost.svg)
+
 `node scripts/openclaw_comparison.mjs` prices both sides with the calculator's model for seven model presets and three thread lengths. Neither tool is executed. For OpenAI the calculator prices OpenClaw's client-side summary, because the compaction endpoint's output cannot be priced from documentation.
 
 | Models | 8-turn threads | 30-turn threads | 80-turn threads |

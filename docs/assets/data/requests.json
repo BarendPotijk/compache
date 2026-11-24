@@ -1,0 +1,215 @@
+{
+ "thread_id": "tts-performance-management-m1",
+ "model": "Claude Sonnet 5.5",
+ "cache_seconds": 300,
+ "turns": [
+  {
+   "turn": 1,
+   "sent": 2703,
+   "full": 2688,
+   "archived": 0,
+   "cache": "first",
+   "pings_before": 0
+  },
+  {
+   "turn": 2,
+   "sent": 6874,
+   "full": 6859,
+   "archived": 0,
+   "cache": "warm",
+   "pings_before": 0
+  },
+  {
+   "turn": 3,
+   "sent": 10052,
+   "full": 10037,
+   "archived": 0,
+   "cache": "warm",
+   "pings_before": 0
+  },
+  {
+   "turn": 4,
+   "sent": 13651,
+   "full": 13636,
+   "archived": 0,
+   "cache": "warm",
+   "pings_before": 0
+  },
+  {
+   "turn": 5,
+   "sent": 17396,
+   "full": 17381,
+   "archived": 0,
+   "cache": "warm",
+   "pings_before": 0
+  },
+  {
+   "turn": 6,
+   "sent": 19887,
+   "full": 19872,
+   "archived": 0,
+   "cache": "warm",
+   "pings_before": 0
+  },
+  {
+   "turn": 7,
+   "sent": 7694,
+   "full": 23387,
+   "archived": 32,
+   "cache": "cold",
+   "pings_before": 0
+  },
+  {
+   "turn": 8,
+   "sent": 11505,
+   "full": 27198,
+   "archived": 32,
+   "cache": "warm",
+   "pings_before": 1
+  },
+  {
+   "turn": 9,
+   "sent": 15056,
+   "full": 30749,
+   "archived": 32,
+   "cache": "warm",
+   "pings_before": 0
+  },
+  {
+   "turn": 10,
+   "sent": 18629,
+   "full": 34322,
+   "archived": 32,
+   "cache": "warm",
+   "pings_before": 0
+  },
+  {
+   "turn": 11,
+   "sent": 22450,
+   "full": 38143,
+   "archived": 32,
+   "cache": "warm",
+   "pings_before": 1
+  },
+  {
+   "turn": 12,
+   "sent": 10493,
+   "full": 41773,
+   "archived": 69,
+   "cache": "cold",
+   "pings_before": 0
+  },
+  {
+   "turn": 13,
+   "sent": 10422,
+   "full": 45298,
+   "archived": 77,
+   "cache": "cold",
+   "pings_before": 0
+  },
+  {
+   "turn": 14,
+   "sent": 10549,
+   "full": 48878,
+   "archived": 85,
+   "cache": "cold",
+   "pings_before": 0
+  },
+  {
+   "turn": 15,
+   "sent": 11274,
+   "full": 52888,
+   "archived": 93,
+   "cache": "cold",
+   "pings_before": 0
+  },
+  {
+   "turn": 16,
+   "sent": 11282,
+   "full": 56185,
+   "archived": 101,
+   "cache": "cold",
+   "pings_before": 0
+  },
+  {
+   "turn": 17,
+   "sent": 10868,
+   "full": 59544,
+   "archived": 109,
+   "cache": "cold",
+   "pings_before": 0
+  },
+  {
+   "turn": 18,
+   "sent": 14271,
+   "full": 62947,
+   "archived": 109,
+   "cache": "warm",
+   "pings_before": 0
+  },
+  {
+   "turn": 19,
+   "sent": 17169,
+   "full": 65845,
+   "archived": 109,
+   "cache": "warm",
+   "pings_before": 0
+  },
+  {
+   "turn": 20,
+   "sent": 20589,
+   "full": 69265,
+   "archived": 109,
+   "cache": "warm",
+   "pings_before": 0
+  },
+  {
+   "turn": 21,
+   "sent": 23659,
+   "full": 72335,
+   "archived": 109,
+   "cache": "warm",
+   "pings_before": 0
+  },
+  {
+   "turn": 22,
+   "sent": 12492,
+   "full": 76426,
+   "archived": 148,
+   "cache": "cold",
+   "pings_before": 0
+  },
+  {
+   "turn": 23,
+   "sent": 15821,
+   "full": 79755,
+   "archived": 148,
+   "cache": "warm",
+   "pings_before": 1
+  },
+  {
+   "turn": 24,
+   "sent": 19264,
+   "full": 83198,
+   "archived": 148,
+   "cache": "warm",
+   "pings_before": 1
+  },
+  {
+   "turn": 25,
+   "sent": 22058,
+   "full": 85992,
+   "archived": 148,
+   "cache": "warm",
+   "pings_before": 0
+  },
+  {
+   "turn": 26,
+   "sent": 25351,
+   "full": 89285,
+   "archived": 148,
+   "cache": "warm",
+   "pings_before": 0
+  }
+ ]
+}
