@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="880" height="489" viewBox="0 0 880 489" role="img" aria-labelledby="t d">
 <title id="t">Cost per 1,000 turns of document chats: other tools against compache</title>
-<desc id="d">DocChat&#x27;s held-out chats on Claude Sonnet 5.5. Users back after 30 seconds: Whole history, default cache $34, Headroom, target ratio 0.5 $24, Kompressor $29, Whole history, cache kept warm $28, compache $19. Users back after 4 minutes: Whole history, default cache $143, Headroom, target ratio 0.5 $99, Kompressor $38, Whole history, cache kept warm $37, compache $24. Users back after 30 minutes: Whole history, default cache $286, Headroom, target ratio 0.5 $197, Kompressor $151, Whole history, cache kept warm $108, compache $43.</desc>
+<desc id="d">DocChat&#x27;s held-out chats on Claude Sonnet 5.5. Users back after 30 seconds: Whole history, default cache $34, Headroom, target ratio 0.5 $24, Kompressor $29, Whole history, cache kept warm $28, compache $19. Users back after 4 minutes: Whole history, default cache $143, Headroom, target ratio 0.5 $99, Kompressor $38, Whole history, cache kept warm $37, compache $24. Users back after 30 minutes: Whole history, default cache $286, Headroom, target ratio 0.5 $197, Kompressor $151, Whole history, cache kept warm $108, compache $32.</desc>
 <style>
 text{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;font-size:12px;fill:#0b0b0b}
 .surface{fill:#fcfcfb;stroke:rgba(11,11,11,.1)}
@@ -83,7 +83,7 @@ text{fill:#f0efec}.surface{fill:#1a1a19;stroke:rgba(255,255,255,.1)}.t2{fill:#c3
 <text x="536.0" y="428.5" class="t2">$108</text>
 <text x="582.0" y="428.5" class="t2">−62%</text>
 <text x="376.0" y="449.5" class="b" text-anchor="end">compache</text>
-<path class="c" d="M388,438 h52.0 a4,4 0 0 1 4,4 v6 a4,4 0 0 1 -4,4 h-52.0 z"/>
-<text x="452.0" y="449.5" class="b">$43</text>
-<text x="498.0" y="449.5" class="t2">−85%</text>
+<path class="c" d="M388,438 h37.7 a4,4 0 0 1 4,4 v6 a4,4 0 0 1 -4,4 h-37.7 z"/>
+<text x="437.7" y="449.5" class="b">$32</text>
+<text x="483.7" y="449.5" class="t2">−89%</text>
 </svg>

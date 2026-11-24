@@ -8,6 +8,7 @@ a dict or JSON file of `ModelSpec` fields.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from functools import lru_cache
 from importlib import resources
 from pathlib import Path
@@ -15,7 +16,7 @@ from pathlib import Path
 from .errors import ContractError
 from .optimizer.contracts import ModelSpec
 
-__all__ = ["known_models", "model_spec", "pricing"]
+__all__ = ["cache_lifetimes", "known_models", "model_spec", "pricing"]
 
 # A keep-warm ping and a fetch-back request each ask the model for a few tokens.
 PING_OUTPUT_TOKENS = 16
@@ -110,6 +111,27 @@ def model_spec(model) -> ModelSpec:
             "Pass a JSON file of model spec fields for any other model."
         )
     raise ContractError("model: expected a model name, a spec, or a path to one")
+
+
+def cache_lifetimes(model) -> tuple[ModelSpec, ...]:
+    """A known model under each other cache lifetime its provider can be asked for.
+
+    Empty for a model given as a spec: its lifetime is the caller's to state.
+    """
+    if not isinstance(model, str) or model.endswith(".json"):
+        return ()
+    found = _lookup(model.strip())
+    if found is None:
+        return ()
+    spec = _from_sheet(*found)
+    return tuple(
+        replace(
+            spec,
+            cache_ttl_seconds=lifetime["seconds"],
+            write_multiplier=lifetime["write_multiplier"],
+        )
+        for lifetime in found[1].get("cache_lifetimes", ())
+    )
 
 
 def pricing(model) -> dict | None:

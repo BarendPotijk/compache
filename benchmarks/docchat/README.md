@@ -50,15 +50,15 @@ Each column is a turn and each row a kind of part. Most turns need nothing earli
 
 ## Result with Claude Sonnet 5.5
 
-`compache fit` chose the same cut for all three return patterns: keep the questions of the last 49 turns and the answers of the last 59, and keep retrieved text for one turn. Only the pings differ.
+`compache fit` chose the same cut for all three return patterns: keep the questions of the last 49 turns and the answers of the last 59, and keep retrieved text for one turn. The pings and the cache lifetime differ.
 
-| Users back after | Pings | Keep everything | Fitted policy | Saving |
-|---|---|---|---|---|
-| 30 seconds | None | $34 | $19 | 43% |
-| 4 minutes | Up to 3 | $143 | $24 | 83% |
-| 30 minutes | Up to 3 | $286 | $43 | 85% |
+| Users back after | Pings | Cache entries | Keep everything | Caching alone, at its best | Fitted policy | Saving |
+|---|---|---|---|---|---|---|
+| 30 seconds | None | Five minutes | $34 | $28 | $19 | 43% |
+| 4 minutes | Up to 3 | Five minutes | $143 | $37 | $24 | 83% |
+| 30 minutes | Up to 3 | One hour | $286 | $108 | $32 | 89% |
 
-Cost per 1,000 turns on the 15 held-out threads (625 turns), at list prices and a five-minute cache, including the cost of fetching back what the cut archived. A cut waits for a return that finds the cache cold. Where users are back in 30 seconds the policy keeps 57% of the history tokens, and 92% of the 181 held-out turns that need history still have enough of it in view. Where they take 30 minutes it keeps 15%, and 76%. It was the cheapest of the 21 policies the fit priced in two of the three cases and within 3% in the third: the [policy map](../../README.md#why-learn-it-from-your-data) shows all of them.
+Cost per 1,000 turns on the 15 held-out threads (625 turns), at list prices, including the cost of fetching back what the cut archived. The saving is against keeping everything with the default five-minute cache. Caching alone is the cheapest of ten lifetime and ping settings, picked on these same threads. A cut waits for a return that finds the cache cold. Where users are back in 30 seconds the policy keeps 57% of the history tokens, and 92% of the 181 held-out turns that need history still have enough of it in view. Where they take 30 minutes it keeps 27%, and 88%. It was the cheapest of the 42 policies the fit priced in two of the three cases and within 3% in the third: the [policy map](../../README.md#why-learn-it-from-your-data) shows them.
 
 Then Sonnet 5.5 answered 30 held-out turns twice, and Sonnet 5.5 graded each answer against the turn's key facts.
 

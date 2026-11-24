@@ -13,6 +13,12 @@
       "context_tokens": 1000000,
       "max_input_tokens": 1000000,
       "cache_ttl_seconds": 300,
+      "cache_lifetimes": [
+        {
+          "seconds": 3600,
+          "write_multiplier": 2.0
+        }
+      ],
       "cache_min_tokens": 512,
       "cache_block_tokens": 1,
       "long_input_threshold": null,
@@ -31,6 +37,12 @@
       "context_tokens": 1000000,
       "max_input_tokens": 1000000,
       "cache_ttl_seconds": 300,
+      "cache_lifetimes": [
+        {
+          "seconds": 3600,
+          "write_multiplier": 2.0
+        }
+      ],
       "cache_min_tokens": 512,
       "cache_block_tokens": 1,
       "long_input_threshold": null,
@@ -49,6 +61,12 @@
       "context_tokens": 1000000,
       "max_input_tokens": 1000000,
       "cache_ttl_seconds": 300,
+      "cache_lifetimes": [
+        {
+          "seconds": 3600,
+          "write_multiplier": 2.0
+        }
+      ],
       "cache_min_tokens": 512,
       "cache_block_tokens": 1,
       "long_input_threshold": 100000,
@@ -67,6 +85,12 @@
       "context_tokens": 1000000,
       "max_input_tokens": 1000000,
       "cache_ttl_seconds": 300,
+      "cache_lifetimes": [
+        {
+          "seconds": 3600,
+          "write_multiplier": 2.0
+        }
+      ],
       "cache_min_tokens": 512,
       "cache_block_tokens": 1,
       "long_input_threshold": null,

@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from .errors import ContractError
-from .models import model_spec, pricing
+from .models import cache_lifetimes, model_spec, pricing
 from .optimizer.cache_breaks import CacheBreakChecker, CacheScope
 from .optimizer.contracts import ModelSpec, seconds
 from .optimizer.parts import Request, Source
@@ -30,6 +30,7 @@ from .threads import (
     read_jsonl,
     recorded,
 )
+from .wire import TTLS, cache_mark
 
 __all__ = ["Policy", "Session", "Turn", "fit", "replay"]
 
@@ -95,23 +96,33 @@ def fit(
     observed_until=None,
     **options,
 ) -> Policy:
-    """Fit what to keep in view and how many keep-warm pings to send.
+    """Fit what to keep in view, how many keep-warm pings to send and how long the cache is to live.
 
     `threads` and `labels` are paths to JSONL files (or folders of them), or
     lists of dicts. `model` names a known model or gives a model spec. Left
     out, it is the model the threads record, as are the system prompt, the
-    tools and when the record was read. Without labels only the pings are
+    tools and when the record was read. Without labels only the caching is
     fitted and the whole history stays in view. Where the threads record
     several model calls in a turn, those are priced.
 
     Every candidate is replayed against the provider's cache rules at the
     threads' own timestamps, each thread priced by a model of returns fitted on
     the others, and the cheapest wins after paying for what it would fetch back.
+    Where a known model can be asked for another cache lifetime, as Claude can
+    for an hour, every candidate is priced under that too.
     `observed_until` is when the record was cut, for a record that ends while
     conversations were still going. `options` go to the solver.
     """
     labels = _labels(labels, threads)
     threads, spec, found, model = _threads(threads, model)
+    lifetimes = options.pop("lifetimes", None)
+    if lifetimes is None:
+        lifetimes = cache_lifetimes(model)
+    for other in lifetimes:
+        if other.cache_ttl_seconds not in TTLS:
+            raise ContractError(
+                f"no request can ask for cache entries of {other.cache_ttl_seconds:g} seconds"
+            )
     if system_prompt is None:
         system_prompt = found["system_prompt"] or ""
     tools = list(found["tools"] or ()) if tools is None else list(tools)
@@ -127,6 +138,7 @@ def fit(
         ),
         system_prompt=system_prompt,
         default_tools=tools,
+        lifetimes=lifetimes,
         **{"calls_per_run": _calls(threads), **options},
     )
     scored = artifact["recipes"]
@@ -254,6 +266,12 @@ def replay(policy, threads, labels=None, *, observed_until=None, **options) -> d
     }
 
 
+def _duration(seconds):
+    """A cache lifetime as a word before a noun: one-hour, 12-hour."""
+    hours = seconds / 3600
+    return "one-hour" if hours == 1 else f"{hours:g}-hour"
+
+
 def _window(count, noun):
     if count is None:
         return f"all {noun}"
@@ -290,6 +308,28 @@ class Policy:
     @property
     def spec(self) -> ModelSpec:
         return ModelSpec.from_dict(self.artifact["model_spec"])
+
+    @property
+    def cache_lifetime(self) -> float | None:
+        """How long the provider is asked to keep what it caches, in seconds. None for its default."""
+        standard = self.artifact.get("standard_spec")
+        if standard is None or standard["cache_ttl_seconds"] == (
+            self.spec.cache_ttl_seconds
+        ):
+            return None
+        return self.spec.cache_ttl_seconds
+
+    @property
+    def cache_control(self) -> dict:
+        """The cache mark for a Claude request you assemble yourself."""
+        return cache_mark(self.cache_lifetime)
+
+    def at_default_lifetime(self) -> Policy:
+        """The same cut and pings, planned under the provider's default cache lifetime."""
+        if self.cache_lifetime is None:
+            return self
+        artifact = {k: v for k, v in self.artifact.items() if k != "standard_spec"}
+        return Policy({**artifact, "model_spec": self.artifact["standard_spec"]})
 
     @property
     def recipe(self) -> RetentionRecipe | None:
@@ -334,6 +374,10 @@ class Policy:
             "policy": chosen.get("expected_cost"),
             "keep_everything": keep,
         }
+        alone = (solved.get("caching_alone") or {}).get("expected_cost")
+        if alone is not None:
+            # Everything kept, at the cheapest pings and lifetime: what caching can do by itself.
+            costs["caching_alone"] = alone
         fitted = self.artifact.get("fitted") or {}
         return {
             "model": self.spec.model_id,
@@ -359,6 +403,7 @@ class Policy:
                 ),
             },
             "max_pings": self.max_pings,
+            "cache_lifetime_seconds": self.cache_lifetime,
             "coverage": chosen.get("coverage"),
             "saving": solved.get("saving_fraction"),
             "cost_per_1000_turns": None
@@ -374,7 +419,7 @@ class Policy:
             lines.append(
                 "Keep the whole history in view."
                 if summary["labelled_turns"]
-                else "Keep the whole history in view: without labels only the pings are fitted."
+                else "Keep the whole history in view: without labels only the caching is fitted."
             )
         else:
             lines.append(
@@ -394,6 +439,10 @@ class Policy:
                 lines.append(
                     f"Parts of at most {recipe.keep_under_tokens} tokens always stay."
                 )
+        if summary["cache_lifetime_seconds"]:
+            lines.append(
+                f"Ask for {_duration(summary['cache_lifetime_seconds'])} cache entries."
+            )
         pings = summary["max_pings"]
         lines.append(
             f"Send up to {pings} keep-warm ping{'' if pings == 1 else 's'} while a user is away."
@@ -412,6 +461,11 @@ class Policy:
                     f"${costs['policy']:,.2f} per 1,000 turns against "
                     f"${costs['keep_everything']:,.2f} keeping everything: {saving:.0%} less."
                 )
+                alone = costs.get("caching_alone")
+                if recipe is not None and alone and alone < costs["keep_everything"]:
+                    lines.append(
+                        f"Caching alone, at its best, would cost ${alone:,.2f}."
+                    )
             else:
                 lines.append(f"{saving:.0%} cheaper than keeping everything.")
         return "\n".join(lines)

@@ -279,11 +279,16 @@ def policy_map(data):
         ),
     ]
     legend = [
-        ("line ns", "No keep-warm pings"),
-        ("line cs", f"Up to {most} keep-warm pings"),
+        ("line ns", "Default cache, no pings"),
+        ("line cs", f"Up to {most} pings"),
         ("dot c", "What compache picked"),
-        ("dot n", "Send everything, no pings"),
+        ("dot n", "Send everything"),
     ]
+    lives = {r["cache_ttl_seconds"] for _, clock in clocks for r in clock["candidates"]}
+    if len(lives) > 1:
+        hours = max(lives) / 3600
+        named = "One-hour" if hours == 1 else f"{hours:g}-hour"
+        legend.insert(2, ("line os", f"{named} cache, up to {most} pings"))
     at = 24
     for kind, label in legend:
         if kind.startswith("line"):
@@ -307,11 +312,13 @@ def policy_map(data):
 
         rows = clock["candidates"]
         fitted = next(r for r in rows if r["fitted"])
+        standard = min(r["cache_ttl_seconds"] for r in rows)
         default = next(r for r in rows if r["recipe"] is None and r["max_pings"] == 0)
         ratio = default["dollars_per_1000_turns"] / fitted["dollars_per_1000_turns"]
         summary.append(
             f"Users back after {away(clock['median_idle_seconds'])}: fitted {dollars(fitted['dollars_per_1000_turns'])}, "
-            f"keep everything without pings {dollars(default['dollars_per_1000_turns'])}."
+            f"keep everything with the default cache and no pings {dollars(default['dollars_per_1000_turns'])}, "
+            f"with the cheapest cache setting {dollars(min(r['dollars_per_1000_turns'] for r in rows if r['recipe'] is None))}."
         )
         body.append(
             text(
@@ -333,9 +340,17 @@ def policy_map(data):
         for share in (0, 0.5, 1):
             anchor = "start" if share == 0 else "end" if share == 1 else "middle"
             body.append(text(x(share), top + plot + 17, f"{share:.0%}", "tm", anchor))
-        for pings, cls in ((0, "ns"), (most, "cs")):
+        longest = max(r["cache_ttl_seconds"] for r in rows)
+        kinds = [(0, standard, "ns"), (most, standard, "cs")]
+        if longest > standard:
+            kinds.append((most, longest, "os"))
+        for pings, lifetime, cls in kinds:
             line = sorted(
-                (r for r in rows if r["max_pings"] == pings),
+                (
+                    r
+                    for r in rows
+                    if r["max_pings"] == pings and r["cache_ttl_seconds"] == lifetime
+                ),
                 key=lambda r: r["tokens_kept"],
             )
             points = [
@@ -346,11 +361,19 @@ def policy_map(data):
                 + " L".join(f"{px:.1f},{py:.1f}" for px, py in points)
                 + '"/>'
             )
-            fill = "n" if cls == "ns" else "c"
+            fill = {"ns": "n", "cs": "c", "os": "o"}[cls]
             body += [
                 f'<circle class="{fill}" cx="{px:.1f}" cy="{py:.1f}" r="2.5"/>'
                 for px, py in points
             ]
+            if cls == "os":
+                whole = line[-1]["dollars_per_1000_turns"]
+                px, py = points[-1]
+                # Beside the label of sending everything, or under it where the two are close.
+                near = abs(py - y(default["dollars_per_1000_turns"])) < 26
+                body.append(
+                    text(px - 2, py + (16 if near else -8), dollars(whole), "tm", "end")
+                )
         dx, dy = x(default["tokens_kept"]), y(default["dollars_per_1000_turns"])
         body.append(f'<circle class="n ring" cx="{dx:.1f}" cy="{dy:.1f}" r="5.5"/>')
         body.append(
@@ -376,8 +399,10 @@ def policy_map(data):
         width,
         height,
         "The longer users are away, the more sending everything costs",
-        "Cost per 1,000 messages against the share of the history kept, without and with keep-warm pings, "
-        "for three return patterns. " + " ".join(summary),
+        "Cost per 1,000 messages against the share of the history kept, for three return patterns and these settings: "
+        + ", ".join(label for kind, label in legend if kind.startswith("line"))
+        + ". "
+        + " ".join(summary),
         body,
     )
 
@@ -781,6 +806,56 @@ def compare(data):
     )
 
 
+def tools(data):
+    """Two panels, one bar per tool in each: what the provider billed, and how many answers were right."""
+    arms, base = data["arms"], data["arms"][0]
+    bar, pitch, top = 16, 27, 106
+    width, height = 880, top + len(arms) * pitch + 12
+    panels = [
+        (262, 232, "cost", "Bill per 1,000 turns"),
+        (656, 150, "correct", f"Right answers, out of {base['graded']}"),
+    ]
+    title = "Live: the same conversations through each tool"
+    body = [
+        text(24, 30, title, "big"),
+        text(
+            24,
+            49,
+            f"{data['conversations']} held-out DocChat conversations, {base['turns']} turns on {data['model']}, "
+            "at the users' own pace. Billed by the provider.",
+            "t2",
+        ),
+    ]
+    for x0, full, key, name in panels:
+        longest = max(arm[key] for arm in arms)
+        body += [
+            text(x0, top - 18, name, "h"),
+            f'<line class="axis" x1="{x0}" x2="{x0}" y1="{top - 6}" y2="{top + len(arms) * pitch - 5}"/>',
+        ]
+        for j, arm in enumerate(arms):
+            ours, with_ours = arm["name"] == "compache", "compache" in arm["name"]
+            yy, length = top + j * pitch, max(6, arm[key] / longest * full)
+            label = f"${arm[key]:.2f}" if key == "cost" else str(arm[key])
+            body += [
+                f'<path class="{"c" if with_ours else "n"}" d="M{x0},{yy} h{length - 4:.1f} a4,4 0 0 1 4,4 '
+                f'v{bar - 8} a4,4 0 0 1 -4,4 h-{length - 4:.1f} z"/>',
+                text(x0 + length + 8, yy + bar - 4, label, "b" if ours else "t2"),
+            ]
+            if key != "cost":
+                continue
+            body.append(
+                text(x0 - 12, yy + bar - 4, arm["name"], "b" if ours else "t2", "end")
+            )
+            if j:
+                change = f"{arm[key] / base[key] - 1:+.0%}".replace("-", "\u2212")
+                body.append(text(x0 + length + 54, yy + bar - 4, change, "t2"))
+    said = [
+        f"{arm['name']} ${arm['cost']:.2f}, {arm['correct']} of {arm['graded']} answers right"
+        for arm in arms
+    ]
+    return svg(width, height, title, ". ".join(said) + ".", body)
+
+
 # -- how it works -----------------------------------------------------------
 
 
@@ -852,6 +927,7 @@ FIGURES = {
     "preview": ("preview.svg", "openclaw.json", preview),
     "live": ("live-cost.svg", "live.json", live),
     "compare": ("compare-cost.svg", "compare.json", compare),
+    "tools": ("compare-live.svg", "compare-live.json", tools),
     "workflow": ("workflow.svg", None, workflow),
 }
 

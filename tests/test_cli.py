@@ -192,7 +192,7 @@ class CommandTests(unittest.TestCase):
         status, out, _ = run("models")
         self.assertEqual(status, 0)
         self.assertIn("claude-sonnet-5-5", out)
-        self.assertIn("input $2, cache read $0.1, output $10, cache 5 min", out)
+        self.assertIn("input $2, cache read $0.1, output $10, cache 5 min or 1 h", out)
         status, out, _ = run("models", "--json")
         self.assertIn("gpt-6-luna", json.loads(out))
 

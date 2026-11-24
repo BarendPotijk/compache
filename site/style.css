@@ -194,7 +194,7 @@ details.more { margin-top: 8px; } details.more > summary { font-size: 12px; font
 #windowsChart .hit { cursor: ew-resize; }
 .g-edge { stroke: var(--compache); stroke-width: 2; pointer-events: none; }
 .knob { fill: var(--compache); stroke: var(--surface); stroke-width: 2; cursor: ew-resize; }
-.stepper label { display: inline-flex; align-items: center; gap: 10px; } .stepper input[type=number] { width: 72px; margin: 0; }
+.stepper { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 22px; } .stepper .check { font-size: 12px; color: var(--ink-2); } .stepper label { display: inline-flex; align-items: center; gap: 10px; } .stepper input[type=number] { width: 72px; margin: 0; }
 .table-title.gap { margin-top: 22px; }
 .line.thin { stroke-width: 1.25; }
 .chart.tall { height: 300px; }

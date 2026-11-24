@@ -1,6 +1,7 @@
 """Chronological held-out accounting for the workload planner and a raw no-ping reference."""
 
 from collections import Counter, defaultdict
+from copy import copy
 from dataclasses import dataclass
 from heapq import heappop, heappush
 from itertools import accumulate, count
@@ -9,7 +10,7 @@ from compache.errors import ContractError
 from compache.labels import label_index
 
 from .cache_breaks import CacheBreakChecker, CacheScope
-from .contracts import digest, number, seconds
+from .contracts import ModelSpec, digest, number, seconds
 from .distribution import (
     _input_buckets,
     repeat_input_usage,
@@ -584,10 +585,15 @@ def replay_workload(
         modeled_ping_output_tokens=modeled_ping_output_tokens,
         **options,
     )
+    control = policy
+    if artifact.get("standard_spec"):
+        # Keeping everything is what the application does on its own: at the provider's default lifetime.
+        control = copy(policy)
+        control.spec = ModelSpec.from_dict(artifact["standard_spec"])
     baseline = _run_arm(
         threads,
         indexed,
-        policy,
+        control,
         candidate=False,
         calls_per_run=counts,
         modeled_ping_output_tokens=modeled_ping_output_tokens,

@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="880" height="424" viewBox="0 0 880 424" role="img" aria-labelledby="t d">
 <title id="t">The longer users are away, the more sending everything costs</title>
-<desc id="d">Cost per 1,000 messages against the share of the history kept, without and with keep-warm pings, for three return patterns. Users back after 30 seconds: fitted $19, keep everything without pings $34. Users back after 4 minutes: fitted $24, keep everything without pings $143. Users back after 30 minutes: fitted $43, keep everything without pings $286.</desc>
+<desc id="d">Cost per 1,000 messages against the share of the history kept, for three return patterns and these settings: Default cache, no pings, Up to 3 pings, One-hour cache, up to 3 pings. Users back after 30 seconds: fitted $19, keep everything with the default cache and no pings $34, with the cheapest cache setting $28. Users back after 4 minutes: fitted $24, keep everything with the default cache and no pings $143, with the cheapest cache setting $37. Users back after 30 minutes: fitted $32, keep everything with the default cache and no pings $286, with the cheapest cache setting $111.</desc>
 <style>
 text{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;font-size:12px;fill:#0b0b0b}
 .surface{fill:#fcfcfb;stroke:rgba(11,11,11,.1)}
@@ -20,13 +20,15 @@ text{fill:#f0efec}.surface{fill:#1a1a19;stroke:rgba(255,255,255,.1)}.t2{fill:#c3
 <text x="24.0" y="30.0" class="big">The longer your users are away, the more sending everything costs</text>
 <text x="24.0" y="49.0" class="t2">Cost per 1,000 messages of every setting compache tried. Same chats, Claude Sonnet 5.5 with prompt caching on.</text>
 <line class="line ns" x1="24" x2="42" y1="70" y2="70"/>
-<text x="48.0" y="74.0" class="t2">No keep-warm pings</text>
-<line class="line cs" x1="185.2" x2="203.2" y1="70" y2="70"/>
-<text x="209.2" y="74.0" class="t2">Up to 3 keep-warm pings</text>
-<circle class="c ring" cx="383.4" cy="70" r="5.5"/>
-<text x="394.4" y="74.0" class="t2">What compache picked</text>
-<circle class="n ring" cx="549.4" cy="70" r="5.5"/>
-<text x="560.4" y="74.0" class="t2">Send everything, no pings</text>
+<text x="48.0" y="74.0" class="t2">Default cache, no pings</text>
+<line class="line cs" x1="217.20000000000002" x2="235.20000000000002" y1="70" y2="70"/>
+<text x="241.2" y="74.0" class="t2">Up to 3 pings</text>
+<line class="line os" x1="346.40000000000003" x2="364.40000000000003" y1="70" y2="70"/>
+<text x="370.4" y="74.0" class="t2">One-hour cache, up to 3 pings</text>
+<circle class="c ring" cx="583.0" cy="70" r="5.5"/>
+<text x="594.0" y="74.0" class="t2">What compache picked</text>
+<circle class="n ring" cx="749.0" cy="70" r="5.5"/>
+<text x="760.0" y="74.0" class="t2">Send everything</text>
 <text x="52.0" y="110.0" class="h">Users back after 30 seconds</text>
 <text x="52.0" y="126.0" class="tm">sending everything costs 1.8× as much</text>
 <line class="axis" x1="52.0" x2="302.7" y1="376.0" y2="376.0"/>
@@ -40,26 +42,35 @@ text{fill:#f0efec}.surface{fill:#1a1a19;stroke:rgba(255,255,255,.1)}.t2{fill:#c3
 <text x="52.0" y="393.0" class="tm">0%</text>
 <text x="177.3" y="393.0" class="tm" text-anchor="middle">50%</text>
 <text x="302.7" y="393.0" class="tm" text-anchor="end">100%</text>
-<path class="line ns" d="M89.0,360.7 L112.1,360.3 L123.7,359.5 L140.8,358.4 L186.8,355.3 L280.2,350.2 L302.7,349.1"/>
-<circle class="n" cx="89.0" cy="360.7" r="2.5"/>
-<circle class="n" cx="112.1" cy="360.3" r="2.5"/>
-<circle class="n" cx="123.7" cy="359.5" r="2.5"/>
-<circle class="n" cx="140.8" cy="358.4" r="2.5"/>
-<circle class="n" cx="186.8" cy="355.3" r="2.5"/>
-<circle class="n" cx="280.2" cy="350.2" r="2.5"/>
+<path class="line ns" d="M195.0,360.7 L198.2,360.3 L206.5,359.6 L218.8,358.4 L249.2,355.4 L297.2,350.2 L302.7,349.1"/>
+<circle class="n" cx="195.0" cy="360.7" r="2.5"/>
+<circle class="n" cx="198.2" cy="360.3" r="2.5"/>
+<circle class="n" cx="206.5" cy="359.6" r="2.5"/>
+<circle class="n" cx="218.8" cy="358.4" r="2.5"/>
+<circle class="n" cx="249.2" cy="355.4" r="2.5"/>
+<circle class="n" cx="297.2" cy="350.2" r="2.5"/>
 <circle class="n" cx="302.7" cy="349.1" r="2.5"/>
-<path class="line cs" d="M89.0,361.1 L112.1,360.3 L123.7,359.6 L140.8,358.5 L186.8,355.7 L280.2,350.8 L302.7,350.5"/>
-<circle class="c" cx="89.0" cy="361.1" r="2.5"/>
-<circle class="c" cx="112.1" cy="360.3" r="2.5"/>
-<circle class="c" cx="123.7" cy="359.6" r="2.5"/>
-<circle class="c" cx="140.8" cy="358.5" r="2.5"/>
-<circle class="c" cx="186.8" cy="355.7" r="2.5"/>
-<circle class="c" cx="280.2" cy="350.8" r="2.5"/>
+<path class="line cs" d="M183.0,361.1 L200.2,360.4 L208.2,359.6 L220.4,358.5 L249.9,355.8 L297.2,350.8 L302.7,350.5"/>
+<circle class="c" cx="183.0" cy="361.1" r="2.5"/>
+<circle class="c" cx="200.2" cy="360.4" r="2.5"/>
+<circle class="c" cx="208.2" cy="359.6" r="2.5"/>
+<circle class="c" cx="220.4" cy="358.5" r="2.5"/>
+<circle class="c" cx="249.9" cy="355.8" r="2.5"/>
+<circle class="c" cx="297.2" cy="350.8" r="2.5"/>
 <circle class="c" cx="302.7" cy="350.5" r="2.5"/>
+<path class="line os" d="M302.7,354.3 L302.7,354.3 L302.7,354.3 L302.7,354.3 L302.7,354.3 L302.7,354.3 L302.7,354.3"/>
+<circle class="o" cx="302.7" cy="354.3" r="2.5"/>
+<circle class="o" cx="302.7" cy="354.3" r="2.5"/>
+<circle class="o" cx="302.7" cy="354.3" r="2.5"/>
+<circle class="o" cx="302.7" cy="354.3" r="2.5"/>
+<circle class="o" cx="302.7" cy="354.3" r="2.5"/>
+<circle class="o" cx="302.7" cy="354.3" r="2.5"/>
+<circle class="o" cx="302.7" cy="354.3" r="2.5"/>
+<text x="300.7" y="370.3" class="tm" text-anchor="end">$28</text>
 <circle class="n ring" cx="302.7" cy="349.1" r="5.5"/>
 <text x="293.7" y="341.1" class="t2" text-anchor="end">$34</text>
-<circle class="c ring" cx="89.0" cy="360.7" r="6.5"/>
-<text x="78.0" y="364.7" class="b" text-anchor="end">$19</text>
+<circle class="c ring" cx="195.0" cy="360.7" r="6.5"/>
+<text x="184.0" y="364.7" class="b" text-anchor="end">$19</text>
 <text x="330.7" y="110.0" class="h">Users back after 4 minutes</text>
 <text x="330.7" y="126.0" class="tm">sending everything costs 5.9× as much</text>
 <line class="axis" x1="330.7" x2="581.3" y1="376.0" y2="376.0"/>
@@ -69,28 +80,37 @@ text{fill:#f0efec}.surface{fill:#1a1a19;stroke:rgba(255,255,255,.1)}.t2{fill:#c3
 <text x="330.7" y="393.0" class="tm">0%</text>
 <text x="456.0" y="393.0" class="tm" text-anchor="middle">50%</text>
 <text x="581.3" y="393.0" class="tm" text-anchor="end">100%</text>
-<path class="line ns" d="M367.7,353.9 L390.7,344.5 L402.3,339.5 L419.4,332.2 L465.4,312.5 L558.9,272.4 L581.3,263.3"/>
-<circle class="n" cx="367.7" cy="353.9" r="2.5"/>
-<circle class="n" cx="390.7" cy="344.5" r="2.5"/>
-<circle class="n" cx="402.3" cy="339.5" r="2.5"/>
-<circle class="n" cx="419.4" cy="332.2" r="2.5"/>
-<circle class="n" cx="465.4" cy="312.5" r="2.5"/>
-<circle class="n" cx="558.9" cy="272.4" r="2.5"/>
+<path class="line ns" d="M377.7,353.9 L398.8,344.5 L410.0,339.5 L426.3,332.2 L470.8,312.5 L561.1,272.4 L581.3,263.3"/>
+<circle class="n" cx="377.7" cy="353.9" r="2.5"/>
+<circle class="n" cx="398.8" cy="344.5" r="2.5"/>
+<circle class="n" cx="410.0" cy="339.5" r="2.5"/>
+<circle class="n" cx="426.3" cy="332.2" r="2.5"/>
+<circle class="n" cx="470.8" cy="312.5" r="2.5"/>
+<circle class="n" cx="561.1" cy="272.4" r="2.5"/>
 <circle class="n" cx="581.3" cy="263.3" r="2.5"/>
-<path class="line cs" d="M367.7,357.0 L390.7,351.7 L402.3,348.7 L419.4,344.1 L465.4,331.8 L558.9,307.1 L581.3,303.0"/>
-<circle class="c" cx="367.7" cy="357.0" r="2.5"/>
-<circle class="c" cx="390.7" cy="351.7" r="2.5"/>
-<circle class="c" cx="402.3" cy="348.7" r="2.5"/>
-<circle class="c" cx="419.4" cy="344.1" r="2.5"/>
-<circle class="c" cx="465.4" cy="331.8" r="2.5"/>
-<circle class="c" cx="558.9" cy="307.1" r="2.5"/>
+<path class="line cs" d="M386.1,357.0 L406.4,351.7 L416.6,348.7 L432.1,344.1 L475.3,331.8 L562.3,307.1 L581.3,303.0"/>
+<circle class="c" cx="386.1" cy="357.0" r="2.5"/>
+<circle class="c" cx="406.4" cy="351.7" r="2.5"/>
+<circle class="c" cx="416.6" cy="348.7" r="2.5"/>
+<circle class="c" cx="432.1" cy="344.1" r="2.5"/>
+<circle class="c" cx="475.3" cy="331.8" r="2.5"/>
+<circle class="c" cx="562.3" cy="307.1" r="2.5"/>
 <circle class="c" cx="581.3" cy="303.0" r="2.5"/>
+<path class="line os" d="M499.9,355.5 L505.6,355.1 L512.3,354.4 L522.4,353.3 L544.9,350.8 L578.4,346.3 L581.3,346.8"/>
+<circle class="o" cx="499.9" cy="355.5" r="2.5"/>
+<circle class="o" cx="505.6" cy="355.1" r="2.5"/>
+<circle class="o" cx="512.3" cy="354.4" r="2.5"/>
+<circle class="o" cx="522.4" cy="353.3" r="2.5"/>
+<circle class="o" cx="544.9" cy="350.8" r="2.5"/>
+<circle class="o" cx="578.4" cy="346.3" r="2.5"/>
+<circle class="o" cx="581.3" cy="346.8" r="2.5"/>
+<text x="579.3" y="338.8" class="tm" text-anchor="end">$37</text>
 <circle class="n ring" cx="581.3" cy="263.3" r="5.5"/>
 <text x="572.3" y="255.3" class="t2" text-anchor="end">$143</text>
-<circle class="c ring" cx="367.7" cy="357.0" r="6.5"/>
-<text x="356.7" y="361.0" class="b" text-anchor="end">$24</text>
+<circle class="c ring" cx="386.1" cy="357.0" r="6.5"/>
+<text x="375.1" y="361.0" class="b" text-anchor="end">$24</text>
 <text x="609.3" y="110.0" class="h">Users back after 30 minutes</text>
-<text x="609.3" y="126.0" class="tm">sending everything costs 6.6× as much</text>
+<text x="609.3" y="126.0" class="tm">sending everything costs 8.9× as much</text>
 <line class="axis" x1="609.3" x2="860.0" y1="376.0" y2="376.0"/>
 <line class="grid" x1="609.3" x2="860.0" y1="297.3" y2="297.3"/>
 <line class="grid" x1="609.3" x2="860.0" y1="218.7" y2="218.7"/>
@@ -98,25 +118,34 @@ text{fill:#f0efec}.surface{fill:#1a1a19;stroke:rgba(255,255,255,.1)}.t2{fill:#c3
 <text x="609.3" y="393.0" class="tm">0%</text>
 <text x="734.7" y="393.0" class="tm" text-anchor="middle">50%</text>
 <text x="860.0" y="393.0" class="tm" text-anchor="end">100%</text>
-<path class="line ns" d="M646.3,341.2 L669.4,320.6 L681.0,310.3 L698.1,295.1 L744.1,253.7 L837.6,170.6 L860.0,150.9"/>
-<circle class="n" cx="646.3" cy="341.2" r="2.5"/>
-<circle class="n" cx="669.4" cy="320.6" r="2.5"/>
-<circle class="n" cx="681.0" cy="310.3" r="2.5"/>
-<circle class="n" cx="698.1" cy="295.1" r="2.5"/>
-<circle class="n" cx="744.1" cy="253.7" r="2.5"/>
-<circle class="n" cx="837.6" cy="170.6" r="2.5"/>
+<path class="line ns" d="M646.7,341.2 L669.8,320.6 L681.3,310.3 L698.4,295.1 L744.3,253.7 L837.7,170.7 L860.0,150.9"/>
+<circle class="n" cx="646.7" cy="341.2" r="2.5"/>
+<circle class="n" cx="669.8" cy="320.6" r="2.5"/>
+<circle class="n" cx="681.3" cy="310.3" r="2.5"/>
+<circle class="n" cx="698.4" cy="295.1" r="2.5"/>
+<circle class="n" cx="744.3" cy="253.7" r="2.5"/>
+<circle class="n" cx="837.7" cy="170.7" r="2.5"/>
 <circle class="n" cx="860.0" cy="150.9" r="2.5"/>
-<path class="line cs" d="M646.3,342.1 L669.4,323.5 L681.0,314.1 L698.1,300.0 L744.1,262.0 L837.6,184.7 L860.0,165.6"/>
-<circle class="c" cx="646.3" cy="342.1" r="2.5"/>
-<circle class="c" cx="669.4" cy="323.5" r="2.5"/>
-<circle class="c" cx="681.0" cy="314.1" r="2.5"/>
-<circle class="c" cx="698.1" cy="300.0" r="2.5"/>
-<circle class="c" cx="744.1" cy="262.0" r="2.5"/>
-<circle class="c" cx="837.6" cy="184.7" r="2.5"/>
+<path class="line cs" d="M648.1,342.1 L670.9,323.5 L682.3,314.1 L699.2,300.1 L745.0,262.0 L837.9,184.7 L860.0,165.6"/>
+<circle class="c" cx="648.1" cy="342.1" r="2.5"/>
+<circle class="c" cx="670.9" cy="323.5" r="2.5"/>
+<circle class="c" cx="682.3" cy="314.1" r="2.5"/>
+<circle class="c" cx="699.2" cy="300.1" r="2.5"/>
+<circle class="c" cx="745.0" cy="262.0" r="2.5"/>
+<circle class="c" cx="837.9" cy="184.7" r="2.5"/>
 <circle class="c" cx="860.0" cy="165.6" r="2.5"/>
+<path class="line os" d="M676.9,350.7 L694.9,344.7 L705.2,341.4 L720.3,336.4 L761.4,325.1 L843.3,295.5 L860.0,288.4"/>
+<circle class="o" cx="676.9" cy="350.7" r="2.5"/>
+<circle class="o" cx="694.9" cy="344.7" r="2.5"/>
+<circle class="o" cx="705.2" cy="341.4" r="2.5"/>
+<circle class="o" cx="720.3" cy="336.4" r="2.5"/>
+<circle class="o" cx="761.4" cy="325.1" r="2.5"/>
+<circle class="o" cx="843.3" cy="295.5" r="2.5"/>
+<circle class="o" cx="860.0" cy="288.4" r="2.5"/>
+<text x="858.0" y="280.4" class="tm" text-anchor="end">$111</text>
 <circle class="n ring" cx="860.0" cy="150.9" r="5.5"/>
 <text x="851.0" y="142.9" class="t2" text-anchor="end">$286</text>
-<circle class="c ring" cx="646.3" cy="342.1" r="6.5"/>
-<text x="635.3" y="346.1" class="b" text-anchor="end">$43</text>
+<circle class="c ring" cx="676.9" cy="350.7" r="6.5"/>
+<text x="665.9" y="354.7" class="b" text-anchor="end">$32</text>
 <text x="456.0" y="412.0" class="t2" text-anchor="middle">Share of the history kept</text>
 </svg>

@@ -111,6 +111,8 @@ _SHOWN = (
 )
 _HANDLE = re.compile(r"ctx:[0-9a-f]{24}")
 _REFUSED = (400, 422)
+# What Claude's cache marks ask for where they name no lifetime.
+_FIVE_MINUTES = 300
 _ROUNDS = 3
 # A note is one line. The room is for a model that reasons before it writes: on Claude Haiku
 # 5.5 that took a median of some 500 tokens, and more than 1,000 for one note in twelve.
@@ -199,6 +201,13 @@ class _Conversation:
     chain: str
     record_id: str = ""
     session: Any = None
+    # The cache lifetime its requests ask for, where the policy was fitted for another than the default.
+    lifetime: float | None = None
+    # Whether it is planned under a cache that lives five minutes.
+    five_minutes: bool = False
+    # Whether it can only be planned under the default, and whether its session still has to be made anew for that.
+    default_lifetime: bool = False
+    stale: bool = False
     turns: int = 0
     pending: _Pending | None = None
     lock: Any = field(default_factory=threading.RLock)
@@ -439,7 +448,7 @@ class Live:
                 if earlier is not None and not earlier.reopens:
                     found.sent_whole = earlier.at
                 if self.policy is not None:
-                    found.session = self.policy.session(name)
+                    self._start(found, name)
                 if thread:
                     # A named conversation is found again from its first call. An unnamed one only
                     # once it has an answer, since any two may open with the same words.
@@ -615,6 +624,45 @@ class Live:
         except Exception:
             logger.warning("compache: a turn was not recorded", exc_info=True)
 
+    # -- the cache lifetime --------------------------------------------------
+
+    def _start(self, conversation, name) -> Any:
+        """Apply the policy to a conversation from here on. Returns the policy."""
+        policy = self.policy
+        if conversation.default_lifetime:
+            policy = policy.at_default_lifetime()
+        conversation.session = policy.session(name)
+        conversation.lifetime = policy.cache_lifetime
+        conversation.five_minutes = policy.spec.cache_ttl_seconds == _FIVE_MINUTES
+        return policy
+
+    @staticmethod
+    def _asking(conversation, body):
+        """A request made here, asking for the cache lifetime the conversation is planned under."""
+        if conversation.session is None:
+            return body
+        if conversation.lifetime is not None:
+            return wire.with_lifetime(body, conversation.lifetime)
+        return wire.with_default_lifetime(body) if conversation.five_minutes else body
+
+    @staticmethod
+    def _plan_default(conversation) -> None:
+        """Plan a conversation under the provider's default lifetime, from its next turn on."""
+        conversation.default_lifetime = conversation.stale = True
+        conversation.lifetime = None
+
+    def _lifetime_refused(self, conversation) -> None:
+        """The provider takes a request only under its default lifetime: so is everything planned from now on."""
+        logger.warning(
+            "compache: cache entries of %g seconds are refused, "
+            "planning on the provider's default from now on",
+            conversation.lifetime,
+        )
+        self._plan_default(conversation)
+        policy = self.policy
+        if policy is not None:
+            self.policy = policy.at_default_lifetime()
+
     def _exchange(self, path, body, send, thread, at=None, asks=True) -> Result:
         self.stats["calls"] += 1
         dialect = wire.dialect_for(path)
@@ -637,8 +685,20 @@ class Live:
             try:
                 conversation.when = at[0] if at is not None else None
                 try:
+                    if conversation.lifetime is not None and not wire.has_cache_mark(
+                        dialect.with_cache_mark(body)
+                    ):
+                        # Nothing in this request could ask for it.
+                        self._plan_default(conversation)
                     call = self._prepare(
-                        conversation, chains, dialect, body, scan, turns, send, asks
+                        conversation,
+                        chains,
+                        dialect,
+                        body,
+                        scan,
+                        turns,
+                        send,
+                        asks,
                     )
                 except Exception:
                     logger.warning(
@@ -695,7 +755,7 @@ class Live:
             self._stand_down(conversation, number, now)
             plain = body
         marked = (
-            dialect.with_cache_mark(plain)
+            self._asking(conversation, dialect.with_cache_mark(plain))
             if conversation.session is not None
             else plain
         )
@@ -721,12 +781,13 @@ class Live:
         """Send the request, fall back to plainer forms of it if it is refused, and read the reply."""
         conversation, pending = call.conversation, call.conversation.pending
         result = call.send(call.outgoing)
+        result = self._under_default(call, result)
         if result.status in _REFUSED and call.outgoing is not call.marked:
             # Refused with the note in it: send it without.
             self._note_refused(call)
             self.stats["retried"] += 1
             call.outgoing, call.asked, call.carrier = call.marked, False, None
-            result = call.send(call.outgoing)
+            result = self._under_default(call, call.send(call.outgoing))
         if result.status in _REFUSED and call.outgoing is not call.body:
             # Refused with the policy applied: send what the application wrote.
             self.stats["retried"] += 1
@@ -743,12 +804,33 @@ class Live:
             return replace(result, events=self._stream(call, result))
         return self._settle(call, result)
 
+    def _under_default(self, call: _Call, result: Result) -> Result:
+        """What became of a request. One that was refused goes out again under the default lifetime.
+
+        Only that tells whether the lifetime was why: what a provider says about it differs.
+        """
+        conversation = call.conversation
+        if result.status not in _REFUSED or conversation.lifetime is None:
+            return result
+        self.stats["retried"] += 1
+        marked = wire.without_lifetime(call.marked)
+        noted = call.outgoing is not call.marked
+        outgoing = wire.without_lifetime(call.outgoing) if noted else marked
+        again = call.send(outgoing)
+        if again.status in _REFUSED:
+            return result
+        if again.status < 400:
+            call.marked, call.outgoing = marked, outgoing
+            self._lifetime_refused(conversation)
+        return again
+
     def _catch_up(self, conversation, chains, turns, now, scan) -> None:
         """Bring a conversation's state up to the turns a request shows as answered."""
         done = len(turns) - 1
-        if conversation.turns == done:
-            return
         pending = conversation.pending
+        renew = conversation.stale and pending is None
+        if conversation.turns == done and not renew:
+            return
         if pending is not None and pending.index == done == conversation.turns + 1:
             # Answered without the answer passing here: take it from the request.
             last = turns[done - 1]
@@ -760,13 +842,13 @@ class Live:
             self._finish(conversation, chains[done], last, now)
             return
         # A conversation met in the middle: walk the policy through what was said.
-        conversation.pending, conversation.turns = None, 0
+        conversation.pending, conversation.turns, conversation.stale = None, 0, False
         if self.policy is not None:
-            conversation.session = self.policy.session(conversation.thread_id)
+            policy = self._start(conversation, conversation.thread_id)
             # When it was said is not known, and a process that meets a conversation in the middle
             # has usually just been started: the provider's cache is taken to have expired. It has
             # not where this process sent the conversation itself, before a turn was asked again.
-            before = now - self.policy.spec.cache_ttl_seconds - 60
+            before = now - policy.spec.cache_ttl_seconds - 60
             if conversation.sent_whole is not None:
                 before = max(before, min(conversation.sent_whole, now - 1e-3))
             for k, segment in enumerate(turns[:done]):
@@ -787,7 +869,8 @@ class Live:
         """Stop applying the policy to a conversation. It is still recorded."""
         if conversation.session is not None:
             self.stats["stood_down"] += 1
-        conversation.session = None
+        conversation.session = conversation.lifetime = None
+        conversation.stale = False
         if conversation.pending is None or conversation.pending.index != number:
             conversation.pending = _Pending(number, now)
         conversation.pending.turn = None
@@ -958,8 +1041,9 @@ class Live:
                 rounds += 1
                 if rounds > _ROUNDS:
                     break
-                sent = dialect.after_tools(
-                    sent, data, self._reopen(conversation, reply.calls)
+                answers = self._reopen(conversation, reply.calls)
+                sent = self._asking(
+                    conversation, dialect.after_tools(sent, data, answers)
                 )
                 again = call.send(sent)
                 if again.status >= 400 or again.json is None:
@@ -1045,7 +1129,10 @@ class Live:
                         again, kind = self._as_written(call), "retry"
                     else:
                         answers = self._reopen(conversation, editor.ours)
-                        sent = dialect.after_tools(sent, editor.said, answers)
+                        sent = self._asking(
+                            conversation,
+                            dialect.after_tools(sent, editor.said, answers),
+                        )
                         again, kind = call.send(sent), "reopen"
                 closers.append(again.close)
                 if again.status >= 400 or again.events is None:
@@ -1133,7 +1220,11 @@ class Live:
             self._now(conversation),
         )
         # A ping is built from the last request, which is kept only while one is planned.
-        planned = conversation.session is not None and conversation.session.next_ping_at
+        planned = (
+            conversation.session is not None
+            and not conversation.stale
+            and conversation.session.next_ping_at
+        )
         conversation.last = (
             (call.dialect, call.plain, text, call.send) if planned else None
         )
@@ -1160,7 +1251,7 @@ class Live:
             )
             if body is None:
                 return
-            reply = self._whole(dialect, call.send(body))
+            reply = self._whole(dialect, call.send(self._asking(conversation, body)))
             if reply is None:
                 self._note_refused(call)
                 return
@@ -1225,7 +1316,7 @@ class Live:
                     "compache: a turn was not taken by the policy", exc_info=True
                 )
                 self.stats["stood_down"] += 1
-                conversation.session = None
+                conversation.session = conversation.lifetime = None
         self._write_turn(conversation, pending, segment, pending.ended_at)
         self.stats["turns"] += 1
         conversation.turns, conversation.pending = pending.index, None
@@ -1338,7 +1429,10 @@ class Live:
         if body is None:
             conversation.pings_off = True
             return 0
-        reply, usage = self._whole(dialect, send(body)), None
+        reply, usage = (
+            self._whole(dialect, send(self._asking(conversation, body))),
+            None,
+        )
         if reply is not None:
             usage = reply.usage
             self._ledger(conversation, "ping", reply)

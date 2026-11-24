@@ -40,9 +40,9 @@ The policy has the package's form and decides the way it does: before each reque
 
 | DocChat, saving against sending everything | 30 seconds | 4 minutes | 30 minutes |
 |---|---|---|---|
-| Calculator, on the training threads' profile, mean of six seeds | 32% | 84% | 87% |
-| Package replay, held-out threads | 43% | 83% | 85% |
-| Package, training threads | 32% | 84% | 85% |
+| Calculator, on the training threads' profile, mean of six seeds | 32% | 84% | 90% |
+| Package replay, held-out threads | 43% | 83% | 89% |
+| Package, training threads | 32% | 84% | 90% |
 
 Treat its figure as an estimate and `compache fit` with `compache replay` as the number for your threads.
 
@@ -52,7 +52,7 @@ Treat its figure as an estimate and `compache fit` with `compache replay` as the
 |---|---|
 | Workload | Seeded threads drawn from the inputs. Lognormal with the given median and 95th percentile, or drawn bin by bin |
 | Prices | List prices and cache rules of seven models, checked on 2026-11-20. The same sheet as the package: `src/compache/models.json` |
-| compache | Windows for questions, answers and retrieved text, and 0, 1 or 3 pings. The cheapest of up to 21 candidates on one set of threads that keeps the chosen share in view, priced on a second set |
+| compache | Windows for questions, answers and retrieved text, 0, 1 or 3 pings, and on Claude the five-minute or the one-hour cache. The cheapest of up to 42 candidates on one set of threads that keeps the chosen share in view, priced on a second set |
 | Comparisons | One vocabulary of rules: cache lifetime, turns kept, retrieved text dropped, shrunk or cleared, summaries, pings. [Where each tool's come from](comparisons.md) |
 | Fetching back | A part compache archived costs one extra call for the turn that needs it. A comparison pays when its tool would fetch again, and otherwise the text is missing |
 | The range | The 5th to 95th percentile of the saving when the sampled threads are drawn again |
@@ -61,7 +61,6 @@ Treat its figure as an estimate and `compache fit` with `compache replay` as the
 
 - No model is called. Answer quality is not measured, and every side is assumed to know which earlier parts a turn needs.
 - A policy that keeps retrieved text matching the question, or cited sources, is priced without that.
-- compache uses the standard cache lifetime. The long one is priced for the comparisons only.
 
 ## Run it locally
 

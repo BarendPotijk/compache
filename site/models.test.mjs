@@ -32,6 +32,8 @@ test('the calculator presets and the package price sheet agree on every number',
     ttlSeconds:p.ttlMinutes*60,cacheMin:p.cacheMinTokens,cacheBlock:p.cacheBlockTokens,longThreshold:p.model.longThreshold,longInput:p.model.longInputMultiplier,longOutput:p.model.longOutputMultiplier},
    {name:m.name,url:m.source,input:m.input_price,cacheRead:m.cache_read_price,output:m.output_price,write:m.cache_write_multiplier,context:m.context_tokens,maxInput:m.max_input_tokens,
     ttlSeconds:m.cache_ttl_seconds,cacheMin:m.cache_min_tokens,cacheBlock:m.cache_block_tokens,longThreshold:m.long_input_threshold??0,longInput:m.long_input_factor,longOutput:m.long_output_factor},id);
+  // The longer cache that a policy can ask for. OpenAI's is there to compare with, the package does not ask for it.
+  if(p.anthropic)assert.deepEqual(m.cache_lifetimes,[{seconds:p.longTtlMinutes*60,write_multiplier:p.longWriteMultiplier}],id);else assert.equal(m.cache_lifetimes,undefined,id);
   // What depends on the provider: the comparisons it has.
   assert.equal(p.anthropic,m.provider==='anthropic',id);
  }

@@ -119,7 +119,7 @@ class ChatApp:
 
 
 def fitted(model="claude-sonnet-5-5"):
-    """A policy that keeps retrieved text for one turn."""
+    """A policy that keeps retrieved text for one turn, under a cache that lives five minutes."""
     threads, labels = [], []
     for i in range(5):
         runs = []
@@ -138,7 +138,12 @@ def fitted(model="claude-sonnet-5-5"):
             labels.append({"thread_id": f"t{i}", "run": n, "needs": needs})
         threads.append({"thread_id": f"t{i}", "runs": runs})
     return compache.fit(
-        threads, labels, model=model, system_prompt=SYSTEM, share_headers=False
+        threads,
+        labels,
+        model=model,
+        system_prompt=SYSTEM,
+        share_headers=False,
+        lifetimes=(),
     )
 
 
@@ -224,7 +229,7 @@ class ObserveTests(unittest.TestCase):
                     live.drain()
                     clock.at += 3600
             self.assertEqual((live.stats["asked"], live.stats["noted"]), (28, 28))
-            policy = compache.fit(tmp)
+            policy = compache.fit(tmp, lifetimes=())
             summary = policy.summary
             self.assertEqual(
                 (summary["threads"], summary["turns"], summary["labelled_turns"]),
@@ -1048,6 +1053,7 @@ class PingTests(unittest.TestCase):
             model="claude-sonnet-5-5",
             system_prompt=SYSTEM,
             share_headers=False,
+            lifetimes=(),
         )
         self.assertGreater(policy.max_pings, 0)
         for kind in (ChatApp, ClaudeApp):
@@ -1097,6 +1103,287 @@ class PingTests(unittest.TestCase):
         for quiet in (Live(), Live(fitted())):
             start_pings(quiet)
             self.assertIsNone(quiet.pinger)
+
+
+class LifetimeTests(unittest.TestCase):
+    """A policy fitted for another cache lifetime than the provider's default asks for it."""
+
+    @staticmethod
+    def fit(gap):
+        threads, labels = [], []
+        for i in range(5):
+            runs = []
+            for n in range(1, 10):
+                at = 1_780_000_000 + n * gap
+                runs.append(
+                    {
+                        "started_at": at,
+                        "ended_at": at + 6,
+                        "input": "What does the next section say?",
+                        "retrievals": [passage(n)],
+                        "output": "It says the supplier carries the cost.",
+                    }
+                )
+                needs = [[f"t{i}:{n - 1}:retrieval:1"]] if n > 1 else []
+                labels.append({"thread_id": f"t{i}", "run": n, "needs": needs})
+            threads.append({"thread_id": f"t{i}", "runs": runs})
+        return compache.fit(
+            threads,
+            labels,
+            model="claude-sonnet-5-5",
+            system_prompt=SYSTEM,
+            share_headers=False,
+        )
+
+    @classmethod
+    def setUpClass(cls):
+        cls.policy = cls.fit(1500)
+        cls.started = 0
+
+    def live(self, **options):
+        type(self).started += 1
+        self.clock = Clock(1_810_000_000.0 + self.started * 1e7)
+        self.model = FakeModel(claude_looping, clock=self.clock, ttl=3600)
+        fresh = compache.Policy(json.loads(json.dumps(self.policy.artifact)))
+        return Live(fresh, clock=self.clock, **options)
+
+    def marks(self, body):
+        """Every cache mark in a request, wherever it is."""
+        found = []
+
+        def walk(value):
+            if isinstance(value, dict):
+                if "cache_control" in value:
+                    found.append(value["cache_control"])
+                for inner in value.values():
+                    walk(inner)
+            elif isinstance(value, list):
+                for inner in value:
+                    walk(inner)
+
+        walk(body)
+        return found
+
+    def test_requests_ask_for_it(self):
+        self.assertEqual(self.policy.cache_lifetime, 3600)
+        app = ClaudeApp(self.live(), self.model, thread="lasting")
+        for n in range(1, 5):
+            app.turn(f"Question {n}?", passage(n))
+            self.clock.at += 1500
+        hour = {"type": "ephemeral", "ttl": "1h"}
+        for body in self.model.bodies:
+            self.assertEqual(self.marks(body), [hour])
+        # Users are back after 25 minutes and read what the turn before left.
+        usage = app.seen[-2]["usage"]
+        self.assertGreater(usage["cache_read_input_tokens"], 300)
+
+    def test_the_application_s_own_marks_ask_for_it_too(self):
+        # An entry that lives longer may not follow one that lives shorter, so all marks agree.
+        live = self.live()
+        sent = []
+
+        def send(payload):
+            sent.append(payload)
+            return self.model.send("/v1/messages")(payload)
+
+        body = {
+            "model": "claude-sonnet-5-5",
+            "max_tokens": 64,
+            "system": [
+                {"type": "text", "text": SYSTEM, "cache_control": {"type": "ephemeral"}}
+            ],
+            "messages": [{"role": "user", "content": "Question 1?"}],
+        }
+        before = json.dumps(body)
+        live.exchange("/v1/messages", body, send, thread="own")
+        self.assertEqual(json.dumps(body), before)
+        self.assertEqual(self.marks(sent[0]), [{"type": "ephemeral", "ttl": "1h"}])
+
+    def test_a_provider_that_refuses_it_is_asked_for_its_default(self):
+        def refusing(request):
+            if '"ttl"' in json.dumps(request["body"]):
+                return {"status": 400, "error": "not supported here"}
+            return claude_looping(request)
+
+        # One that keeps retrieved text for a turn, under one-hour entries.
+        cut = fitted().artifact
+        lasting = compache.Policy(
+            {
+                **cut,
+                "model_spec": self.policy.artifact["model_spec"],
+                "standard_spec": cut["model_spec"],
+            }
+        )
+        live = self.live()
+        live.policy, self.model.script = lasting, refusing
+        app = ClaudeApp(live, self.model, thread="refused")
+        with self.assertLogs("compache.live", "WARNING") as said:
+            self.assertEqual(app.turn("Question 1?", passage(1)), "Answer 1.")
+        self.assertIn("3600 seconds are refused", said.output[0])
+        # The same request again, under the default. The policy goes on, and nothing is pinged on
+        # the lifetime that was refused.
+        self.assertEqual(
+            [self.marks(b) for b in self.model.bodies[:2]],
+            [[{"type": "ephemeral", "ttl": "1h"}], [{"type": "ephemeral"}]],
+        )
+        self.assertIsNone(live.next_ping_at())
+        # From the next turn on it is planned on the default, as is every other conversation.
+        before = len(self.model.bodies)
+        for n in range(2, 5):
+            self.clock.at += 400
+            app.turn(f"Question {n}?", passage(n))
+        self.assertNotIn('"ttl"', json.dumps(self.model.bodies[before:]))
+        archived = json.dumps(self.model.bodies[-1]).count("Archived to save space")
+        self.assertGreater(archived, 0)
+        self.assertIsNone(live.policy.cache_lifetime)
+        self.assertEqual(live.policy.recipe, lasting.recipe)
+        other = ClaudeApp(live, self.model, thread="other")
+        other.turn("Question 1?", passage(1))
+        stats = {k: live.stats[k] for k in ("retried", "policy_refused", "stood_down")}
+        self.assertEqual(stats, {"retried": 1, "policy_refused": 0, "stood_down": 0})
+
+    def test_a_refusal_for_another_reason_changes_no_lifetime(self):
+        live = self.live()
+        sent = []
+
+        def send(payload):
+            sent.append(payload)
+            if "cache_control" in json.dumps(payload):
+                # What was refused is said back, the lifetime in it.
+                return Result(422, raw=json.dumps({"input": payload}).encode())
+            return self.model.send("/v1/messages")(payload)
+
+        body = {
+            "model": "claude-sonnet-5-5",
+            "max_tokens": 64,
+            "messages": [{"role": "user", "content": "Question 1?"}],
+        }
+        reply = live.exchange("/v1/messages", body, send, thread="refused")
+        self.assertEqual((reply.status, len(sent)), (200, 3))
+        self.assertIs(sent[-1], body)
+        self.assertEqual(live.stats["policy_refused"], 1)
+        self.assertEqual(live.policy.cache_lifetime, 3600)
+
+    def test_an_error_that_is_no_answer_changes_no_lifetime(self):
+        live = self.live()
+        statuses = iter((400, 529))
+
+        def send(payload):
+            return Result(next(statuses), json={"error": {"message": "busy"}})
+
+        body = {
+            "model": "claude-sonnet-5-5",
+            "max_tokens": 64,
+            "messages": [{"role": "user", "content": "Question 1?"}],
+        }
+        # What the second try says goes to the application, which tries again or not.
+        reply = live.exchange("/v1/messages", body, send, thread="busy")
+        self.assertEqual(reply.status, 529)
+        self.assertEqual(live.policy.cache_lifetime, 3600)
+        self.assertEqual(live.stats["stood_down"], 0)
+
+    def test_a_note_and_a_lifetime_may_both_be_refused(self):
+        def refusing(request):
+            said = json.dumps(request["body"])
+            if '"ttl"' in said or NOTE_ASKED in said:
+                return {"status": 400, "error": "not supported here"}
+            return {"text": "Answer 2."}
+
+        body = {
+            "model": "claude-sonnet-5-5",
+            "max_tokens": 64,
+            "messages": [
+                {"role": "user", "content": "Question 1?"},
+                {"role": "assistant", "content": "Answer 1."},
+                {"role": "user", "content": "Question 2?"},
+            ],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            live = self.live(record=tmp, sample=1.0, notes="inline")
+            self.model.script = refusing
+            send = self.model.send("/v1/messages")
+            reply = live.exchange("/v1/messages", body, send, thread="both")
+        self.assertEqual(reply.status, 200)
+        # Lifetime and note, then each without the other, then neither: still the policy's request.
+        tried = [json.dumps(b) for b in self.model.bodies]
+        self.assertEqual(
+            [('"ttl"' in said, NOTE_ASKED in said) for said in tried],
+            [(True, True), (False, True), (True, False), (False, False)],
+        )
+        self.assertIsNone(live.policy.cache_lifetime)
+        self.assertEqual(live.stats["policy_refused"], 0)
+
+    def test_where_a_request_cannot_ask_for_it_the_default_is_planned(self):
+        # Nothing marks a request of the Responses API, so nothing in it can ask for a lifetime.
+        live = self.live()
+        self.model.script = None
+        body = {"model": "claude-sonnet-5-5", "input": "Question 1?"}
+        send = self.model.send("/v1/responses")
+        live.exchange("/v1/responses", body, send, thread="unmarked")
+        conversation = live._latest["unmarked"]
+        self.assertIsNone(conversation.session.policy.cache_lifetime)
+        self.assertEqual(conversation.session.policy.recipe, self.policy.recipe)
+        # The next conversation may be able to.
+        self.model.script = claude_looping
+        self.assertEqual(live.policy.cache_lifetime, 3600)
+        ClaudeApp(live, self.model, thread="marked").turn("Question 1?", passage(1))
+        self.assertEqual(live._latest["marked"].session.policy.cache_lifetime, 3600)
+
+    def test_a_policy_for_the_default_caches_the_conversation_for_it(self):
+        # An application that asks for an hour by itself, on what its users share and on the conversation.
+        hour = {"type": "ephemeral", "ttl": "1h"}
+        body = {
+            "model": "claude-sonnet-5-5",
+            "max_tokens": 64,
+            "system": [{"type": "text", "text": SYSTEM, "cache_control": hour}],
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "Question 1?", "cache_control": hour}
+                    ],
+                }
+            ],
+        }
+        for policy, asked in (
+            (self.policy, [hour, hour]),
+            (self.policy.at_default_lifetime(), [hour, {"type": "ephemeral"}]),
+        ):
+            live = self.live()
+            live.policy = policy
+            live.exchange(
+                "/v1/messages", body, self.model.send("/v1/messages"), thread="own"
+            )
+            self.assertEqual(self.marks(self.model.bodies[0]), asked)
+
+    def test_pings_ask_for_it(self):
+        # Users back after 70 minutes, just past the hour: one ping before it is over keeps the cache.
+        late = self.fit(4200)
+        self.assertEqual((late.cache_lifetime, late.max_pings), (3600, 1))
+        live = self.live()
+        live.policy = late
+        app = ClaudeApp(live, self.model, thread="pinged")
+        for n in range(1, 4):
+            app.turn(f"Question {n}?", passage(n))
+            due = live.next_ping_at()
+            # Due shortly before the hour is over, not before the five minutes are.
+            self.assertGreater(due, self.clock.at + 3000)
+            self.assertLess(due, self.clock.at + 3600)
+            self.clock.at = due
+            self.assertEqual(live.tick(), 1)
+            ping = self.model.bodies[-1]
+            self.assertEqual(ping["max_tokens"], 1)
+            self.assertEqual(self.marks(ping), [{"type": "ephemeral", "ttl": "1h"}])
+            self.clock.at += 700
+        # The first call of a turn reads what the ping before it left.
+        self.assertGreater(app.seen[-2]["usage"]["cache_read_input_tokens"], 300)
+
+    def test_without_a_policy_nothing_asks_for_anything(self):
+        clock = Clock(1_820_000_000.0)
+        model = FakeModel(claude_looping, clock=clock)
+        app = ClaudeApp(Live(clock=clock), model, thread="plain")
+        app.turn("Question 1?", passage(1))
+        self.assertEqual([self.marks(b) for b in model.bodies], [[], []])
 
 
 class ApartTests(unittest.TestCase):

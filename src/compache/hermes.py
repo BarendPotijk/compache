@@ -30,6 +30,7 @@ import logging
 import os
 from typing import Any
 
+from . import wire
 from .live import Live, _REOPEN_TOOL
 
 __all__ = ["make", "register"]
@@ -47,6 +48,36 @@ def _from_environment() -> Live:
     )
 
 
+def _same_lifetime(live: Live) -> None:
+    """Say so where Hermes' cache marks ask for another lifetime than the policy counts on.
+
+    Hermes marks the requests, so what it asks for is its own setting.
+    """
+    spec = live.policy.spec if live.policy is not None else None
+    if spec is None or "claude" not in spec.model_id:
+        return
+    wanted = wire.TTLS.get(spec.cache_ttl_seconds)
+    if wanted is None:
+        return
+    try:
+        from hermes_cli.config import load_config_readonly
+
+        asked = (load_config_readonly().get("prompt_caching") or {}).get(
+            "cache_ttl", "auto"
+        )
+    except Exception:
+        return
+    # Its default, "auto", moves to an hour after a conversation's first pause.
+    if str(asked) != wanted:
+        logger.warning(
+            "compache: the policy counts on %s cache entries and Hermes asks for %s. "
+            "Set prompt_caching.cache_ttl to %s in config.yaml",
+            wanted,
+            asked,
+            wanted,
+        )
+
+
 def make(live: Live | None = None):
     """The engine, for Hermes' own `ctx.register_context_engine`.
 
@@ -55,7 +86,7 @@ def make(live: Live | None = None):
     from agent.context_engine import ContextEngine
 
     # Every engine Hermes makes, one per agent, shares one policy and one record.
-    shared = {"live": live}
+    shared: dict[str, Any] = {"live": live, "checked": False}
 
     class Compache(ContextEngine):
         """Chooses what a request holds by a fitted policy. `compress` stays Hermes' own."""
@@ -72,6 +103,9 @@ def make(live: Live | None = None):
             super().__init__()
             if shared["live"] is None:
                 shared["live"] = _from_environment()
+            if not shared["checked"]:
+                shared["checked"] = True
+                _same_lifetime(shared["live"])
             self.live = shared["live"]
             self.session = "session"
             self.model = ""

@@ -22,7 +22,7 @@ compache is **compaction + cache**, decided together:
 ![A 26-message chat: the whole history grows to 89k tokens, compache sends at most 25k. It trims on every message where the cache had expired, and pings keep the cache warm through other breaks](docs/assets/requests.svg)
 
 - **Trims at the right moment.** When the cache has expired, the history has to be paid for in full anyway. That is when compache trims it.
-- **Keeps the cache warm.** While a user is away for a short break, a tiny request (a ping) keeps the cache alive, if that costs less than losing it.
+- **Keeps the cache warm.** While a user is away for a short break, a tiny request (a ping) keeps the cache alive, if that costs less than losing it. Where your users stay away longer, it asks Claude for its one-hour cache instead.
 - **Keeps the rest in reach.** Trimmed text leaves a short notice. When the model needs it, it can fetch it back before your app sees the reply.
 
 ## Get started
@@ -57,7 +57,7 @@ client = compache.wrap(Anthropic(), "policy.json")
 That is all. There are no thresholds to tune.
 
 <details>
-<summary><b>Try it now</b>, on four sample chats in two seconds, without an API key</summary>
+<summary><b>Try it now</b>, on four sample chats in a few seconds, without an API key</summary>
 
 ```sh
 compache demo -o policy.json
@@ -70,6 +70,7 @@ Keep questions from the last 4 turns, answers from the last 9 turns and retrieve
 Send up to 1 keep-warm ping while a user is away.
 82% of what the labelled turns need from earlier turns stays in view. The rest is fetched back, and that call is in the cost.
 $16.10 per 1,000 turns against $50.25 keeping everything: 68% less.
+Caching alone, at its best, would cost $18.66.
 
 Wrote policy.json
 ```
@@ -108,13 +109,13 @@ Because every chatbot needs a different answer. Three workloads, three settings,
 
 | Chatbot | What compache learned | Cost |
 |:--|:--|:-:|
-| **Chat with documents** ([DocChat](benchmarks/docchat/README.md)) | Questions and answers matter for long. Retrieved text is rarely needed after one message, so it goes | **43%&nbsp;to&nbsp;85%&nbsp;less** |
+| **Chat with documents** ([DocChat](benchmarks/docchat/README.md)) | Questions and answers matter for long. Retrieved text is rarely needed after one message, so it goes | **43%&nbsp;to&nbsp;89%&nbsp;less** |
 | **Long personal chats** ([BEAM](benchmarks/beam/README.md)) | What the user said matters. Earlier replies of the assistant can go | **57%&nbsp;to&nbsp;91%&nbsp;less** |
 | **Data analysis** ([LongDS](benchmarks/README.md)) | Almost every step builds on earlier ones. Keep nearly everything, and time the pings | **0%&nbsp;to&nbsp;32%&nbsp;less** |
 
-On DocChat that is against Claude's 5-minute cache, and against its 1-hour cache [30% to 72%](#results). How long users stay away matters as much. The same document chats, with three kinds of users:
+On DocChat that is against Claude's 5-minute cache, and against its 1-hour cache [30% to 79%](#results). How long users stay away matters as much. The same document chats, with three kinds of users:
 
-![The same chats with users who return after 30 seconds, 4 minutes and 30 minutes: sending everything costs 1.8, 5.9 and 6.6 times what compache's setting costs](docs/assets/policy-map.svg)
+![The same chats with users who return after 30 seconds, 4 minutes and 30 minutes: sending everything costs 1.8, 5.9 and 8.9 times what compache's setting costs](docs/assets/policy-map.svg)
 
 A fixed rule such as "keep the last 20 messages" or "summarize at 75% of the window" is one setting for all of these.
 
@@ -123,13 +124,14 @@ A fixed rule such as "keep the last 20 messages" or "summarize at 75% of the win
 | | Measured on | Cost |
 |:--|:--|:-:|
 | **Claude Haiku 5.5**, against the 5-minute cache | Live calls, billed, four integrations | **42%&nbsp;to&nbsp;49%&nbsp;less** |
+| **Claude Haiku 5.5**, against the 1-hour cache | Live calls, billed, short chats | **18%&nbsp;less** |
 | **GPT-6 Luna**, against the 30-minute cache | Live calls, billed, one integration | **2%&nbsp;to&nbsp;5%&nbsp;less** |
-| **Claude Sonnet 5.5**, against the 5-minute cache | DocChat, modeled cost | **43%&nbsp;to&nbsp;85%&nbsp;less** |
-| **Claude Sonnet 5.5**, against the 1-hour cache | DocChat, modeled cost | **30%&nbsp;to&nbsp;72%&nbsp;less** |
+| **Claude Sonnet 5.5**, against the 5-minute cache | DocChat, modeled cost | **43%&nbsp;to&nbsp;89%&nbsp;less** |
+| **Claude Sonnet 5.5**, against the 1-hour cache | DocChat, modeled cost | **30%&nbsp;to&nbsp;79%&nbsp;less** |
 
-**It pays off most** in long chats with a lot of retrieved or tool text, where users pause longer than the cache lasts. **It pays off least** in short chats and where the cache outlasts the breaks: on GPT-6 Luna these users were always back in time, so there was little to save. If your app already uses Claude's 1-hour cache, the 1-hour row is yours: its writes cost more and its entries last longer, so there is less left to save. The live runs were not repeated with it. [The long cache](docs/comparisons.md#the-long-cache)
+**It pays off most** in long chats with a lot of retrieved or tool text, where users pause longer than the cache lasts. **It pays off least** in short chats and where the cache outlasts the breaks: on GPT-6 Luna these users were always back in time, so there was little to save. If your app already uses Claude's 1-hour cache, the 1-hour row is yours: its writes cost more and its entries last longer, so there is less left to save, most of all in short chats. [The long cache](docs/comparisons.md#the-long-cache)
 
-**Answers hold up.** In all three measurements, the number of right answers with and without compache differs by no more than chance. On GPT-6 Luna it was slightly lower, on too few messages to call. [Live runs](benchmarks/live/README.md) · [All benchmarks](benchmarks/README.md)
+**Answers hold up.** In every measurement, the number of right answers with and without compache differs by no more than chance. On GPT-6 Luna it was slightly lower, on too few messages to call. [Live runs](benchmarks/live/README.md) · [All benchmarks](benchmarks/README.md)
 
 **What would you save?** Put your numbers in the [cost calculator](https://barendpotijk.github.io/compache/), or drop a chat log or a `policy.json` on it: it is read in your browser and sent nowhere. It compares with your own rules, other tools' defaults or what you pay now.
 
@@ -140,7 +142,7 @@ A fixed rule such as "keep the last 20 messages" or "summarize at 75% of the win
 | Prompt caching, the 1-hour cache included | What to do when the cache is about to expire, and what to drop once it has |
 | Keep the last N messages, or summarize at a threshold | N learned per kind of text, cuts timed to the cache, and trimmed text the model can fetch back |
 | OpenClaw or provider compaction at fixed thresholds | A setting fitted to your traffic. Modeled on Claude Sonnet 5.5, [48% to 54% cheaper than OpenClaw's defaults](docs/comparisons.md#openclaw) |
-| A cache tool such as caching.ai, or one-hour cache entries | Sending less. Modeled on document chats, [30% to 60% cheaper](docs/comparisons.md) than the cheapest cache setting alone |
-| Headroom or OptScale Kompressor | The other half: they shrink single tool results, compache decides which parts stay and when the cache is kept warm. [They combine](docs/comparisons.md) |
+| A cache tool such as caching.ai, or one-hour cache entries | Sending less. Modeled on document chats, [30% to 70% cheaper](docs/comparisons.md) than the cheapest cache setting alone |
+| Headroom or OptScale Kompressor | They shrink single tool results, compache decides which parts stay and when the cache is kept warm. Live on document chats, [36% and 26% cheaper](docs/comparisons.md#live) with the answers of the whole history |
 
 [Guide](docs/guide.md) · [Integrations](docs/integrations.md) · [How it works](docs/how-it-works.md) · [Other tools compared](docs/comparisons.md) · [Calculator](https://barendpotijk.github.io/compache/) · [Issues](https://github.com/BarendPotijk/compache/issues) · [Apache-2.0](LICENCE.md)

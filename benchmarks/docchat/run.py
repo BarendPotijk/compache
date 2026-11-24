@@ -23,7 +23,7 @@ from pathlib import Path
 import compache
 import docchat
 from compache.errors import ContractError
-from compache.models import model_spec
+from compache.models import cache_lifetimes, model_spec
 from compache.optimizer.parts import Request, placeholder
 from compache.optimizer.recovery import REOPEN_INSTRUCTIONS, reopen
 from compache.optimizer.retention import RetentionRecipe, render_recipe
@@ -102,6 +102,7 @@ def cost(args):
         turns = held["turns"]
         # The whole history on the provider's long cache: the same replay under that cache's rules.
         other = copy.deepcopy(policy.artifact)
+        other.pop("standard_spec", None)
         other["model_spec"].update(
             cache_ttl_seconds=args.long_cache_seconds,
             write_multiplier=args.long_cache_write,
@@ -127,6 +128,7 @@ def cost(args):
                 "policy": {
                     "recipe": policy.artifact["solve"]["chosen"]["recipe"],
                     "max_pings": policy.max_pings,
+                    "cache_ttl_seconds": policy.spec.cache_ttl_seconds,
                 },
                 "test": {
                     "threads": held["threads"],
@@ -163,17 +165,26 @@ def grid(args):
             **HEADER,
         )
         chosen, rows = policy.artifact["solve"]["chosen"], []
+        standard = model_spec(args.prices)
+        specs = {
+            s.cache_ttl_seconds: s.to_dict()
+            for s in (standard, *cache_lifetimes(args.prices))
+        }
         for candidate in policy.artifact["solve"]["candidates"]:
             recipe, pings = candidate["recipe"], candidate["max_pings"]
-            variant = compache.Policy(
-                policy.artifact
-                | {
-                    "recipes": [{"recipe": recipe, "eligible": True}] if recipe else [],
-                    "planner_options": {"max_pings": pings},
-                }
-            )
+            lifetime = candidate["cache_ttl_seconds"]
             held = compache.replay(
-                variant,
+                compache.Policy(
+                    policy.artifact
+                    | {
+                        "model_spec": specs[lifetime],
+                        "standard_spec": standard.to_dict(),
+                        "recipes": [{"recipe": recipe, "eligible": True}]
+                        if recipe
+                        else [],
+                        "planner_options": {"max_pings": pings},
+                    }
+                ),
                 test,
                 sum(test_labels, []),
                 observed_until=END,
@@ -183,8 +194,10 @@ def grid(args):
                 {
                     "recipe": recipe,
                     "max_pings": pings,
+                    "cache_ttl_seconds": lifetime,
                     "fitted": recipe == chosen["recipe"]
-                    and pings == chosen["max_pings"],
+                    and pings == chosen["max_pings"]
+                    and lifetime == chosen["cache_ttl_seconds"],
                     "tokens_kept": held["tokens_kept"],
                     "in_view": held["coverage"] if recipe else 1.0,
                     "dollars_per_1000_turns": held["cost_per_1000_turns"]["policy"],

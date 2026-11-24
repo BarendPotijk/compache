@@ -43,7 +43,7 @@ export function migrateScenario(version, scenario) {
 // A link names each setting it changes (`v=7&model=haiku&start=documents&gapMedianMinutes=30`), from the defaults or from
 // a starting point. What belongs together is dotted (`app.keepTurns=6`, `policy.questions=4`), a drawn distribution lists
 // its weights (`gapDrawn=0,2,1`), and `all` is a window without an end.
-const GROUPS = {model: DEFAULTS.model, app: RULES, policy: {questions: null, answers: null, retrieved: null, maxPings: 0, keepUnder: 0}};
+const GROUPS = {model: DEFAULTS.model, app: RULES, policy: {questions: null, answers: null, retrieved: null, maxPings: 0, keepUnder: 0, long: false}};
 // Settings that are the median and the 95th percentile of one distribution.
 const SPREADS = [['gapMedianMinutes', 'gapP95Minutes'], ['tokenMedian', 'tokenP95'], ['plannedTurns', 'plannedTurnsP95'], ...['input', 'retrieval', 'output'].map(kind => [`${kind}DependencyTurnsBack`, `${kind}DependencyTurnsBackP95`])];
 const spell = value => value === null ? 'all' : String(value);

@@ -1,6 +1,6 @@
 # How it works
 
-compache answers two questions from your recorded threads: what must stay in the request, and when a keep-warm ping pays. It answers them together, because each changes what the other is worth. A cut rewrites the cached prefix, and a ping costs in proportion to the prefix it keeps warm.
+compache answers three questions from your recorded threads: what must stay in the request, when a keep-warm ping pays and how long the cache should live. It answers them together, because each changes what the others are worth. A cut rewrites the cached prefix, a ping costs in proportion to the prefix it keeps warm, and a longer lifetime saves pings but makes every write dearer.
 
 ![Record threads, fit a policy, apply it on every request](assets/workflow.svg)
 
@@ -21,7 +21,7 @@ A cut is three windows: how many turns of questions, of answers and of retrieved
 - Windows follow 1, 2, 5, 10 and so on, plus the look-backs that cover 80% to 100% of the labelled needs of each kind.
 - Every cut is scored without a replay: an applied cut archives a part once it leaves its window, so how much of what turns needed is still in view follows from how far back that evidence lies.
 - Where every turn is labelled and none needs an earlier turn, a cut is admitted on that evidence. One turn whose need is unknown rules it out.
-- The cuts worth pricing are those on the frontier: each keeps at least one point more in view than every smaller one, down to 80%. Up to six of them, plus keeping everything, are each paired with 0, 1 and 3 pings.
+- The cuts worth pricing are those on the frontier: each keeps at least one point more in view than every smaller one, down to 80%. Up to six of them, plus keeping everything, are each paired with 0, 1 and 3 pings, and with each cache lifetime the model can be asked for. Claude keeps an entry for five minutes, or for an hour at 2× the input price for a write instead of 1.25×.
 
 ## The price of a candidate
 
@@ -30,9 +30,9 @@ Token counts cannot rank policies, because what a cut or a ping is worth depends
 - Each candidate runs through the runtime session against the provider's cache rules: lifetime, smallest cacheable prefix, write and read prices and any long-request surcharge. Requests and pings fall at the threads' own timestamps.
 - A thread is priced with a model of returns fitted on the other threads, in three folds. The same threads say how much of a live cache entry is read: the cached tokens of each return inside the lifetime, as a share of the request before it. Every request and ping of every candidate is priced at that share.
 - A cut pays for what it loses. Every labelled need that is missing from the request as sent costs one more request, which reads the cached view, writes the reopened parts and emits a tool call. That rate carries from the labelled turns to all turns.
-- The cheapest candidate wins. Ties go to more in view, then to fewer pings.
+- The cheapest candidate wins. Ties go to more in view, then to the shorter lifetime, then to fewer pings.
 
-The winner is the cheapest policy the fit priced on your threads, and keeping everything with and without pings is always among those. `compache replay` prices it on threads it has not seen.
+The winner is the cheapest policy the fit priced on your threads. Keeping everything, with and without pings and under each lifetime, is always among those, so the fit also says what caching alone would cost at its best. `compache replay` prices it on threads it has not seen.
 
 ## At runtime
 

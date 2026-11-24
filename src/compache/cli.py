@@ -619,9 +619,13 @@ def _models(args):
     models = _sheet()["models"]
     lines = [f"Prices per million tokens, checked {_sheet()['checked']}."]
     for model_id, entry in models.items():
+        seconds = [entry["cache_ttl_seconds"]] + [
+            other["seconds"] for other in entry.get("cache_lifetimes", ())
+        ]
+        lasting = [f"{s // 60} min" if s < 3600 else f"{s / 3600:g} h" for s in seconds]
         lines.append(
             f"{model_id:<20} input ${entry['input_price']:g}, cache read ${entry['cache_read_price']:g}, "
-            f"output ${entry['output_price']:g}, cache {entry['cache_ttl_seconds'] // 60} min"
+            f"output ${entry['output_price']:g}, cache {' or '.join(lasting)}"
         )
     return models, "\n".join(lines)
 

@@ -564,6 +564,7 @@ def _decision(policy) -> dict:
         "retrieved": recipe.retrieval_runs if recipe else None,
         "keepUnder": recipe.keep_under_tokens if recipe else 0,
         "maxPings": policy.max_pings,
+        "long": policy.cache_lifetime is not None,
     }
 
 

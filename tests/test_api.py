@@ -5,12 +5,14 @@ import tempfile
 import threading
 import time
 import unittest
+from dataclasses import replace
 from datetime import datetime, timedelta
 from pathlib import Path
 from unittest import mock
 from urllib.parse import parse_qs, urlsplit
 
 import compache
+from compache.errors import ContractError
 from compache.models import model_spec, pricing
 from compache.optimizer.contracts import ModelSpec
 from compache.threads import Thread, write_threads
@@ -85,10 +87,121 @@ class FitTests(unittest.TestCase):
             self.assertEqual(again.summary, summary)
             self.assertEqual(again.recipe, policy.recipe)
 
+    def test_the_cache_lifetime_is_fitted_where_a_model_has_several(self):
+        sample = threads(gap=1500)
+        policy = compache.fit(
+            sample,
+            labels(sample),
+            model="claude-sonnet-5-5",
+            system_prompt="Answer from the supplied notes.",
+            folds=2,
+            share_headers=False,
+        )
+        self.assertEqual(policy.cache_lifetime, 3600)
+        self.assertEqual(policy.summary["cache_lifetime_seconds"], 3600)
+        self.assertEqual(policy.cache_control, {"type": "ephemeral", "ttl": "1h"})
+        self.assertIn("Ask for one-hour cache entries.", policy.describe())
+        self.assertIn("Caching alone, at its best, would cost $", policy.describe())
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "policy.json"
+            policy.save(path)
+            self.assertEqual(compache.Policy.load(path).cache_lifetime, 3600)
+        # Users back in seconds, or a model with one lifetime: the provider's default, asked for nothing.
+        quick = threads(gap=40)
+        for other in (
+            compache.fit(quick, labels(quick), model="claude-sonnet-5-5", folds=2),
+            compache.fit(sample, labels(sample), model="gpt-6-luna", folds=2),
+            compache.fit(sample, labels(sample), model=SPEC, folds=2),
+        ):
+            self.assertIsNone(other.cache_lifetime)
+            self.assertEqual(other.cache_control, {"type": "ephemeral"})
+            self.assertNotIn("cache entries", other.describe())
+
+    def test_the_lifetime_is_fitted_for_what_conversations_share_too(self):
+        # Users who come once, 20 minutes apart. Behind a long system prompt they read each other's cache.
+        start = 1_780_000_000
+        sample = [
+            {
+                "thread_id": f"t{i}",
+                "runs": [
+                    {
+                        "started_at": start + i * 1200 + n * 60,
+                        "ended_at": start + i * 1200 + n * 60 + 5,
+                        "input": "Where is it?",
+                        "output": "On the second floor.",
+                    }
+                    for n in range(2)
+                ],
+            }
+            for i in range(8)
+        ]
+        shared = "Rules of the house. " * 4000
+        for share, lifetime in ((True, 3600), (False, None)):
+            policy = compache.fit(
+                sample,
+                model="claude-sonnet-5-5",
+                system_prompt=shared,
+                share_headers=share,
+                folds=2,
+            )
+            self.assertEqual(policy.cache_lifetime, lifetime)
+
+    def test_a_lifetime_is_one_that_a_request_can_ask_for(self):
+        sample = threads(gap=1500)
+        spec = model_spec("claude-sonnet-5-5")
+        with self.assertRaisesRegex(ContractError, "7200 seconds"):
+            compache.fit(
+                sample,
+                labels(sample),
+                model="claude-sonnet-5-5",
+                folds=2,
+                lifetimes=[replace(spec, cache_ttl_seconds=7200, write_multiplier=2.5)],
+            )
+        policy = compache.fit(
+            sample, labels(sample), model="claude-sonnet-5-5", folds=2
+        )
+        default = policy.at_default_lifetime()
+        self.assertEqual((policy.cache_lifetime, default.cache_lifetime), (3600, None))
+        self.assertEqual(default.spec, spec)
+        self.assertEqual(
+            (default.recipe, default.max_pings), (policy.recipe, policy.max_pings)
+        )
+        self.assertIs(default.at_default_lifetime(), default)
+        # A policy that says what it would do anyway asks for nothing.
+        same = compache.Policy({**default.artifact, "standard_spec": spec.to_dict()})
+        self.assertIsNone(same.cache_lifetime)
+        self.assertEqual(same.cache_control, {"type": "ephemeral"})
+
+    def test_a_replay_prices_keeping_everything_as_an_application_does_by_itself(self):
+        def fit(**options):
+            return compache.fit(
+                train,
+                labels(train),
+                model="claude-sonnet-5-5",
+                folds=2,
+                share_headers=False,
+                **options,
+            )
+
+        train, unseen = threads(gap=1500), threads(gap=1400, count=3)
+        for i, t in enumerate(unseen):
+            unseen[i] = Thread.from_dict(
+                json.loads(json.dumps(t.to_dict()).replace(t.thread_id, f"u{i}"))
+            )
+        lasting, standard = fit(), fit(lifetimes=())
+        self.assertEqual(
+            (lasting.cache_lifetime, standard.cache_lifetime), (3600, None)
+        )
+        one, two = (
+            compache.replay(p, unseen, share_headers=False) for p in (lasting, standard)
+        )
+        self.assertEqual(one["keep_everything_cost"], two["keep_everything_cost"])
+        self.assertLess(one["replayed_cost"], two["replayed_cost"])
+
     def test_without_labels_only_the_pings_are_fitted(self):
         policy = compache.fit(threads(), model="claude-sonnet-5-5", folds=2)
         self.assertIsNone(policy.recipe)
-        self.assertIn("without labels only the pings are fitted", policy.describe())
+        self.assertIn("without labels only the caching is fitted", policy.describe())
         costs = policy.summary["cost_per_1000_turns"]
         self.assertEqual(costs["unit"], "USD")
         self.assertLess(costs["policy"], costs["keep_everything"])
