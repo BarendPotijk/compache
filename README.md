@@ -108,7 +108,7 @@ An agent sends every tool result again with every call. compache keeps the newes
 | Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code, Copilot CLI, Aider, Goose, Crush, Kilo, pi and other agents on the command line | `compache wrap <agent>` |
 | OpenAI, Anthropic and Google GenAI SDKs, sync, async and streaming | `compache.wrap(client, "policy.json")` |
 | LangChain and LangGraph, any chat model | `compache.langchain.middleware(...)` |
-| OpenAI Agents SDK, Pydantic AI, LlamaIndex, Agno, AutoGen, Strands, Haystack, Langfuse's OpenAI drop-in | The wrapped client, [one line each](docs/integrations.md#python-frameworks) |
+| OpenAI Agents SDK, Claude Agent SDK, Google ADK, Pydantic AI, LlamaIndex, Microsoft Agent Framework, Semantic Kernel, Agno, AutoGen, Strands, Haystack, Langfuse's OpenAI drop-in | [One line each](docs/integrations.md#python-frameworks) |
 | LiteLLM | `compache.litellm.install(...)`, or a callback in your LiteLLM proxy |
 | Hermes | `context.engine: compache` |
 | Anything with a base URL: the Vercel AI SDK, OpenClaw and other agent harnesses | `compache proxy --policy policy.json` |

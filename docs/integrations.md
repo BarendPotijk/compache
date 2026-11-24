@@ -8,7 +8,7 @@ compache goes in at two places: where your model calls leave, and where your tra
 |---|---|
 | Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code, Copilot CLI, Aider, Goose, Crush, Kilo, pi, or any other agent on the command line | `compache wrap claude`, see [Agents](agents.md) |
 | OpenAI SDK (Chat Completions, Responses), Anthropic SDK, Google GenAI SDK, sync or async | `client = compache.wrap(client, "policy.json")` |
-| A Python framework on one of these SDKs: OpenAI Agents SDK, Pydantic AI, LlamaIndex, Agno, AutoGen, Strands, Haystack, Instructor, Langfuse's OpenAI drop-in | The wrapped client, or an HTTP client: [one line each](#python-frameworks) |
+| A Python framework on one of these SDKs: OpenAI Agents SDK, Claude Agent SDK, Google ADK, Pydantic AI, LlamaIndex, Microsoft Agent Framework, Semantic Kernel, Agno, AutoGen, Strands, Haystack, Instructor, Langfuse's OpenAI drop-in | The wrapped client, an HTTP client or the proxy: [one line each](#python-frameworks) |
 | LangChain and LangGraph, any chat model | `create_agent(..., middleware=[compache.langchain.middleware(live)])` |
 | LiteLLM, and what is built on it | `compache.litellm.install(live)`, or a [callback](#litellm) that records in your LiteLLM proxy |
 | Hermes Agent | Its [context engine](#hermes): `context.engine: compache` |
@@ -46,8 +46,12 @@ with compache.thread("conversation-17"):
 | Framework | One line |
 |---|---|
 | OpenAI Agents SDK | `set_default_openai_client(compache.wrap(AsyncOpenAI(), "policy.json"))` |
+| Claude Agent SDK | `ClaudeAgentOptions(env={"ANTHROPIC_BASE_URL": "http://127.0.0.1:8787", "ENABLE_TOOL_SEARCH": "true"})`, with `compache proxy` running |
+| Google ADK | `LlmAgent(model=Gemini(model=..., base_url="http://127.0.0.1:8787"))`, with `compache proxy` running |
 | Pydantic AI | `OpenAIProvider(openai_client=compache.wrap(AsyncOpenAI(), "policy.json"))`, and `AnthropicProvider(anthropic_client=...)` the same way |
 | LlamaIndex | `OpenAI(model=..., http_client=compache.http_client(live), async_http_client=compache.async_http_client(live))` |
+| Microsoft Agent Framework | `OpenAIChatClient(async_client=compache.wrap(AsyncOpenAI(), "policy.json"), model=...)`, and `default_options={"store": False}` on the agent: otherwise OpenAI keeps the history and there is nothing to trim |
+| Semantic Kernel | `OpenAIChatCompletion(ai_model_id=..., async_client=compache.wrap(AsyncOpenAI(), "policy.json"))` |
 | Agno | `OpenAIChat(id=..., client=compache.wrap(OpenAI(), "policy.json"))` |
 | AutoGen | `OpenAIChatCompletionClient(model=..., http_client=compache.async_http_client(live))` |
 | Strands | `OpenAIModel(client=compache.wrap(AsyncOpenAI(), "policy.json"), model_id=...)`, in one event loop |
@@ -151,6 +155,7 @@ In order: `compache.thread(...)` around the call, the header `x-compache-thread`
 | The four APIs through the OpenAI, Anthropic and Google GenAI SDKs, sync and async, whole and streamed, a LangChain agent, and LiteLLM | The SDKs themselves, on every test run, against a local stand-in for the provider |
 | The proxy | Standard-library callers and both SDKs, against the same stand-in |
 | OpenAI Agents SDK 0.26, Pydantic AI 2.73, LlamaIndex (OpenAI 0.9), Agno 3.2, AutoGen 0.7, Strands 1.66, Haystack 3.5, Langfuse 5.2, Instructor 1.17 | A conversation of four turns with a search tool on 2026-11-24, against the stand-in: earlier results were archived from the third turn on. Instructor's has no tool results, so it was recorded only |
+| Claude Agent SDK 0.2, Google ADK 2.15, Microsoft Agent Framework 1.26, Semantic Kernel 1.36 | An agent in a loop of searches on 2026-11-25, against the stand-in: older results were archived |
 | Vercel AI SDK 7.0 | Anthropic, Chat Completions and Responses through the proxy, whole and streamed, with the proxy restarted in the middle |
 | LiteLLM 1.110 | In process on every test run. Its proxy with the callback, and its Anthropic path through `compache proxy`, by hand |
 | Hermes 0.23.3 | The released agent with a local model. The engine, installed with Hermes' own installer: a conversation trimmed once its cache had expired, and a passage fetched back. The proxy, with the settings above |

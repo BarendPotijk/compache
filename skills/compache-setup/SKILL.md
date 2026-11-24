@@ -17,7 +17,7 @@ Look for SDK clients (`OpenAI(`, `Anthropic(`, `genai.Client(`, their async form
 |---|---|
 | A client of the OpenAI, Anthropic or Google GenAI SDK | `client = compache.wrap(client, learn="compache-record")` where it is made |
 | A LangChain or LangGraph agent | `middleware=[compache.langchain.middleware(compache.Live(learn="compache-record"))]` in `create_agent`, and a checkpointer with a `thread_id` |
-| OpenAI Agents SDK, Pydantic AI, LlamaIndex, Agno, AutoGen, Strands, Haystack, Instructor | Hand the framework the wrapped client. One line each in `docs/integrations.md` |
+| OpenAI Agents SDK, Claude Agent SDK, Google ADK, Pydantic AI, LlamaIndex, Microsoft Agent Framework, Semantic Kernel, Agno, AutoGen, Strands, Haystack, Instructor | Hand the framework the wrapped client, or point it at the proxy. One line each in `docs/integrations.md` |
 | LiteLLM in process | `compache.litellm.install(compache.Live(learn="compache-record"))` |
 | A LiteLLM proxy or another gateway | `compache proxy --learn compache-record --upstream <the gateway>` in front of it |
 | Anything else with a base URL, in any language | `compache proxy --learn compache-record`, and the base URL set to `http://127.0.0.1:8787/v1` (Anthropic: without `/v1`) |
