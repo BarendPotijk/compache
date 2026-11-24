@@ -30,6 +30,7 @@ import logging
 import os
 from typing import Any
 
+from . import wire
 from .live import Live, _REOPEN_TOOL
 
 __all__ = ["make", "register"]
@@ -52,8 +53,7 @@ def _same_lifetime(live: Live) -> None:
 
     Hermes marks the requests, so what it asks for is its own setting.
     """
-    counted = {300: "5m", 3600: "1h"}
-    if live.policy is None or live.policy.spec.cache_ttl_seconds not in counted:
+    if live.policy is None or live.policy.spec.cache_ttl_seconds not in wire.TTLS:
         return
     try:
         from hermes_cli.config import load_config_readonly
@@ -63,7 +63,7 @@ def _same_lifetime(live: Live) -> None:
         )
     except Exception:
         return
-    wanted = counted[live.policy.spec.cache_ttl_seconds]
+    wanted = wire.TTLS[live.policy.spec.cache_ttl_seconds]
     if str(asked) != wanted:
         logger.warning(
             "compache: the policy counts on %s cache entries and Hermes asks for %s. "

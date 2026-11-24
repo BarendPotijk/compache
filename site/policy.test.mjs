@@ -160,6 +160,9 @@ test('the long cache is fitted where a model has one to ask for', () => {
   // The package cannot ask OpenAI for its longer one on every API, so no policy here does either.
   const luna = fitted('luna', {gapMedianMinutes: 60, gapP95Minutes: 300});
   assert.ok(luna.fit.candidates.every(x => !x.policy.long)); assert.equal(longAvailable(luna.c), false);
+  const pinned = long => simulate(applyPreset({...STARTS[0].scenario, threads: 10, policy: {questions: 2, answers: 2, retrieved: 1, maxPings: 1, long}}, 'luna'));
+  assert.equal(pinned(true).policy.long, false); assert.equal(pinned(true).compache.totals.cost, pinned(false).compache.totals.cost);
+  assert.equal(describePolicy({questions: null, answers: null, retrieved: null, maxPings: 0, keepUnder: 0, long: true}, 120)[1], 'Ask for 2-hour cache entries.');
   // Keeping everything under it is the comparison with the long cache.
   const everything = slow.fit.candidates.find(x => x.everything && x.policy.long && !x.policy.maxPings);
   const rules = runArm(generateWorkload(slow.c), slow.c, {kind: 'rules', rules: {cache: 'long'}}, {collectLedger: false});

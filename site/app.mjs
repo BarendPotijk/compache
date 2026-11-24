@@ -239,7 +239,7 @@ function renderLead(r) {
   $('savingFacts').innerHTML = facts.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${v}</dd></div>`).join('');
   document.querySelectorAll('[data-against]').forEach(el => { el.textContent = r.baseline.name; });
   // Every side, cheapest first, Compache among them.
-  const list = [{id: 'compache', name: 'Compache', per1000: ours, missing: r.compache.dependencyCoverage === null ? null : 1 - r.compache.dependencyCoverage, note: describePolicy(r.policy).join(' '), complete: r.compache.complete}, ...r.sides];
+  const list = [{id: 'compache', name: 'Compache', per1000: ours, missing: r.compache.dependencyCoverage === null ? null : 1 - r.compache.dependencyCoverage, note: describePolicy(r.policy, r.config.longTtlMinutes).join(' '), complete: r.compache.complete}, ...r.sides];
   const most = Math.max(...list.map(b => b.per1000 ?? 0)) || 1; list.sort((a, b) => (a.per1000 ?? Infinity) - (b.per1000 ?? Infinity));
   $('sides').innerHTML = `<div class="side head"><span></span><span></span><span>cost</span><span title="What turns need and this side no longer has.">missing</span></div>` + list.map(b => {
     const us = b.id === 'compache', picked = b.id === r.selected.id, missing = b.missing === null ? '' : b.missing < .005 ? '0%' : pct(b.missing, 0);
@@ -250,7 +250,7 @@ function renderLead(r) {
 function renderPolicy(r) {
   const p = r.policy, c = r.config, file = mode === 'file' && filePolicy;
   for (const b of $('policyTabs').children) { b.setAttribute('aria-selected', b.dataset.mode === mode); if (b.dataset.mode === 'file') b.hidden = !filePolicy; }
-  $('policyText').textContent = describePolicy(p).join(' ');
+  $('policyText').textContent = describePolicy(p, c.longTtlMinutes).join(' ');
   $('policyNote').textContent = file ? `${filePolicy.model}${filePolicy.threads ? ` · fitted on ${plural(filePolicy.threads, 'thread')}, ${plural(filePolicy.turns, 'turn')}` : ''}${filePolicy.cost !== null ? ` · there ${dollars(filePolicy.cost)} against ${dollars(filePolicy.everything)} keeping everything` : ''}${filePolicy.coverage !== null ? ` · ${pct(filePolicy.coverage, 0)} of labelled needs in view` : ''}. ${filePolicy.notes.join(' ')}${filePolicy.workload ? '' : ' The file does not say what its workload was: it is priced on the one set here.'}` : mode === 'own' ? 'Drag a window, or set the pings. It is priced like any other policy.' : `The cheapest of ${r.fit.candidates.length} on ${num(r.fit.threads)} threads, priced on ${num(r.workload.threads.length)} others.`;
   if (document.activeElement !== $('ownPings')) $('ownPings').value = p.maxPings;
   $('ownLongRow').hidden = !longAvailable(c); $('ownLong').checked = p.long;

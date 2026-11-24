@@ -46,16 +46,6 @@ def _frontier(rows, limit):
     return kept
 
 
-def _worth_pricing(threads, spec, other, pings):
-    """Whether any return could find the longer lifetime alive, up to `pings` pings long, and the shorter one gone."""
-    sent = [[seconds(r.generation.started_at) for r in t.runs] for t in threads]
-    return any(
-        spec.cache_ttl_seconds <= after - before < other.cache_ttl_seconds * (1 + pings)
-        for times in sent
-        for before, after in zip(times, times[1:])
-    )
-
-
 def solve_workload(
     threads,
     labels,
@@ -99,8 +89,8 @@ def solve_workload(
 
     `lifetimes` are the same model under other cache lifetimes its provider can
     be asked for, each with its price of a write. Every candidate is priced
-    under those that could pay on these threads. A policy that won under one of
-    them carries it in `model_spec` and the provider's default in `standard_spec`.
+    under each. A policy that won under one of them carries it in `model_spec`
+    and the provider's default in `standard_spec`.
 
     `calls_per_run` maps run IDs to the model calls that turn made. A call after
     the first re-sends the turn's request and reads it from the cache, in the
@@ -128,6 +118,9 @@ def solve_workload(
             raise ContractError(
                 "a lifetime changes how long the cache lives and what a write costs, nothing else"
             )
+    specs = {s.cache_ttl_seconds: s for s in (spec, *lifetimes)}
+    if len(specs) <= len(lifetimes):
+        raise ContractError("every lifetime has to be another one than the default's")
     number(folds, "folds", 2, integer=True)
     number(max_cuts, "max_cuts", 2, integer=True)
     ping_counts = sorted(set(ping_counts))
@@ -204,11 +197,11 @@ def solve_workload(
             t.thread_id: i % min(folds, len(threads)) for i, t in enumerate(ranked)
         }
     # The provider's default lifetime comes first, and first of all keeping everything under it.
-    specs = [spec] + [
-        o for o in lifetimes if _worth_pricing(threads, spec, o, ping_counts[-1])
-    ]
     candidates = [
-        (asked, row, n) for asked in specs for row in (None, *cuts) for n in ping_counts
+        (asked, row, n)
+        for asked in specs.values()
+        for row in (None, *cuts)
+        for n in ping_counts
     ]
     demand = fit_distribution(
         threads,
@@ -331,7 +324,7 @@ def solve_workload(
         )
 
     chosen = cheapest(usable)
-    asked = next(s for s in specs if s.cache_ttl_seconds == chosen["cache_ttl_seconds"])
+    asked = specs[chosen["cache_ttl_seconds"]]
     keep = report[ping_counts.index(0)] if 0 in ping_counts else None
     # What caching alone can reach: everything kept, at the cheapest pings and lifetime.
     kept_whole = [r for r in usable if r["recipe"] is None]

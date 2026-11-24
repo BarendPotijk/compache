@@ -21,7 +21,7 @@ A cut is three windows: how many turns of questions, of answers and of retrieved
 - Windows follow 1, 2, 5, 10 and so on, plus the look-backs that cover 80% to 100% of the labelled needs of each kind.
 - Every cut is scored without a replay: an applied cut archives a part once it leaves its window, so how much of what turns needed is still in view follows from how far back that evidence lies.
 - Where every turn is labelled and none needs an earlier turn, a cut is admitted on that evidence. One turn whose need is unknown rules it out.
-- The cuts worth pricing are those on the frontier: each keeps at least one point more in view than every smaller one, down to 80%. Up to six of them, plus keeping everything, are each paired with 0, 1 and 3 pings, and with each cache lifetime the model can be asked for. Claude keeps an entry for five minutes, or for an hour at 2× the input price for a write instead of 1.25×. The longer one is left out where it could help none of your returns.
+- The cuts worth pricing are those on the frontier: each keeps at least one point more in view than every smaller one, down to 80%. Up to six of them, plus keeping everything, are each paired with 0, 1 and 3 pings, and with each cache lifetime the model can be asked for. Claude keeps an entry for five minutes, or for an hour at 2× the input price for a write instead of 1.25×.
 
 ## The price of a candidate
 

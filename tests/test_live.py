@@ -1214,10 +1214,36 @@ class LifetimeTests(unittest.TestCase):
             "max_tokens": 64,
             "messages": [{"role": "user", "content": "Question 1?"}],
         }
-        reply = live.exchange("/v1/messages", body, send, thread="refused")
+        with self.assertLogs("compache.live", "WARNING") as said:
+            reply = live.exchange("/v1/messages", body, send, thread="refused")
         self.assertEqual(reply.status, 200)
         self.assertIs(sent[-1], body)
         self.assertEqual(live.stats["policy_refused"], 1)
+        self.assertIn("cache lifetime of the policy was refused", said.output[0])
+        # Later conversations are planned under the provider's default, so the policy goes on.
+        self.assertIsNone(live.policy.cache_lifetime)
+        self.assertEqual(live.policy.recipe, self.policy.recipe)
+        reply = live.exchange("/v1/messages", dict(body), send, thread="later")
+        self.assertEqual(reply.status, 200)
+        self.assertEqual(self.marks(sent[-1]), [{"type": "ephemeral"}])
+        self.assertEqual(live.stats["policy_refused"], 1)
+
+    def test_a_refusal_for_another_reason_changes_no_lifetime(self):
+        live = self.live()
+
+        def send(payload):
+            if "cache_control" in json.dumps(payload):
+                return Result(400, raw=b'{"error": {"message": "too long"}}')
+            return self.model.send("/v1/messages")(payload)
+
+        body = {
+            "model": "claude-sonnet-5-5",
+            "max_tokens": 64,
+            "messages": [{"role": "user", "content": "Question 1?"}],
+        }
+        live.exchange("/v1/messages", body, send, thread="refused")
+        self.assertEqual(live.stats["policy_refused"], 1)
+        self.assertEqual(live.policy.cache_lifetime, 3600)
 
     def test_pings_ask_for_it(self):
         # Users back after 70 minutes, just past the hour: one ping before it is over keeps the cache.

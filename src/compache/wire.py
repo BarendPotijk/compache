@@ -24,6 +24,7 @@ __all__ = [
     "Reply",
     "Scan",
     "Slot",
+    "TTLS",
     "TextStream",
     "cache_mark",
     "dialect_for",
@@ -32,10 +33,8 @@ __all__ = [
 ]
 
 _CACHE = {"type": "ephemeral"}
-# How a lifetime other than the provider's default is spelled in a cache mark, by its seconds.
-_TTLS = {3600: "1h"}
-# What an application fills in itself, where a key may be called anything.
-_FREE = ("input", "input_schema", "parameters", "arguments")
+# How a cache mark spells the lifetimes a provider can be asked for, by their seconds.
+TTLS = {300: "5m", 3600: "1h"}
 
 
 @dataclass(frozen=True)
@@ -122,41 +121,58 @@ def cache_mark(lifetime: float | None = None) -> dict:
     """A cache mark that asks for a lifetime in seconds, or for the provider's default."""
     if lifetime is None:
         return dict(_CACHE)
-    if lifetime not in _TTLS:
+    if lifetime not in TTLS:
         raise ValueError(f"no cache mark asks for {lifetime:g} seconds")
-    return {**_CACHE, "ttl": _TTLS[lifetime]}
+    return {**_CACHE, "ttl": TTLS[lifetime]}
 
 
-def with_lifetime(value: Any, lifetime: float | None) -> Any:
+def _with_marks(body: Any, change) -> Any:
+    """A request with `change` applied to every cache mark in it. The same object where none changed.
+
+    Marks are looked for where one can stand: on the request, its instructions, tools and messages,
+    and the pieces of those. What an application or a model wrote itself, such as a tool's schema
+    or a call's arguments, may use the same word and is left alone.
+    """
+
+    def within(value, keys):
+        if isinstance(value, list):
+            made = [within(inner, ("content", "output", "function")) for inner in value]
+            return made if any(a is not b for a, b in zip(made, value)) else value
+        if not isinstance(value, dict):
+            return value
+        changed = {}
+        mark = value.get("cache_control")
+        if isinstance(mark, dict) and mark.get("type") == _CACHE["type"]:
+            asked = change(mark)
+            if asked != mark:
+                changed["cache_control"] = asked
+        for key in keys:
+            inner = value.get(key)
+            if isinstance(inner, (dict, list)):
+                made = within(inner, ("content", "output", "function"))
+                if made is not inner:
+                    changed[key] = made
+        return {**value, **changed} if changed else value
+
+    return within(body, ("system", "tools", "messages", "input"))
+
+
+def with_lifetime(body: Any, lifetime: float | None) -> Any:
     """A request with every cache mark in it asking for this lifetime. What has none comes back as it is.
 
     All of them change: an entry with a longer lifetime may not follow one with
     a shorter, so one mark alone would be refused.
     """
     if lifetime is None:
-        return value
-    if isinstance(value, dict):
-        changed = {}
-        for key, inner in value.items():
-            if key == "cache_control" and isinstance(inner, dict):
-                asked = {**inner, **cache_mark(lifetime)}
-                if asked != inner:
-                    changed[key] = asked
-            elif key not in _FREE:
-                made = with_lifetime(inner, lifetime)
-                if made is not inner:
-                    changed[key] = made
-        return {**value, **changed} if changed else value
-    if isinstance(value, list):
-        made = [with_lifetime(inner, lifetime) for inner in value]
-        return made if any(a is not b for a, b in zip(made, value)) else value
-    return value
+        return body
+    asked = cache_mark(lifetime)
+    return _with_marks(body, lambda mark: {**mark, **asked})
 
 
-def _has_cache_mark(value: Any) -> bool:
-    if isinstance(value, dict):
-        return "cache_control" in value or any(map(_has_cache_mark, value.values()))
-    return isinstance(value, list) and any(map(_has_cache_mark, value))
+def _has_cache_mark(body: Any) -> bool:
+    found: list = []
+    _with_marks(body, lambda mark: found.append(mark) or mark)
+    return bool(found)
 
 
 def _cost(usage: Any) -> float | None:

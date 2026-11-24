@@ -72,15 +72,10 @@ class WorkloadSolveTests(unittest.TestCase):
         self.assertEqual(chosen, {40: 300, 1500: 3600, 7000: 3600, 20_000: 300})
         pings = {g: a["solve"]["chosen"]["max_pings"] for g, a in solved.items()}
         self.assertEqual(pings, {40: 0, 1500: 0, 7000: 1, 20_000: 0})
-        # A lifetime that could help no return is not priced at all.
-        priced = {
-            gap: sorted({c["cache_ttl_seconds"] for c in a["solve"]["candidates"]})
-            for gap, a in solved.items()
-        }
-        self.assertEqual(
-            priced,
-            {40: [300], 1500: [300, 3600], 7000: [300, 3600], 20_000: [300]},
-        )
+        # Every candidate is priced under both.
+        for artifact in solved.values():
+            priced = [c["cache_ttl_seconds"] for c in artifact["solve"]["candidates"]]
+            self.assertEqual(priced.count(300), priced.count(3600))
         # The policy carries what it won under, and what the provider does by default.
         slow = solved[1500]
         self.assertEqual(slow["model_spec"], hour.to_dict())
@@ -95,13 +90,14 @@ class WorkloadSolveTests(unittest.TestCase):
         self.assertEqual(slow["solve"]["caching_alone"], slow["solve"]["chosen"])
 
     def test_a_lifetime_changes_nothing_but_the_cache(self):
-        with self.assertRaisesRegex(ContractError, "nothing else"):
-            self.solve(
-                threads(1500),
-                lifetimes=(
-                    replace(self.spec, cache_ttl_seconds=3600, read_multiplier=0.2),
-                ),
-            )
+        hour = replace(self.spec, cache_ttl_seconds=3600, write_multiplier=2.0)
+        for lifetimes, refused in (
+            ((replace(hour, read_multiplier=0.2),), "nothing else"),
+            ((replace(self.spec, write_multiplier=1.0),), "another one"),
+            ((hour, replace(hour, write_multiplier=1.5)), "another one"),
+        ):
+            with self.assertRaisesRegex(ContractError, refused):
+                self.solve(threads(1500), lifetimes=lifetimes)
 
     def test_solved_policy_carries_its_cut_and_ping_count(self):
         sample = threads(400, long_answers=True)

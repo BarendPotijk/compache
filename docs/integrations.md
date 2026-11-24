@@ -24,7 +24,7 @@ All of them run the same code on the JSON that goes over the wire, so a request 
 | Record | Sizes, times and usage of every turn go to a folder, without any text. See [the guide](guide.md#without-past-traces) |
 | Notes | For a sampled share of turns the model is asked, once its reply is in, which earlier parts the reply needed. That request is compache's own, and the application never sees it |
 | A restart | A process that meets a conversation in the middle, as after a deploy, in a function or on the command line, takes the cache to have expired and trims at once. No state has to be kept. Behind a load balancer, keep a conversation on one worker, or each that takes it up trims it again |
-| Anything else | A request shape compache does not know passes through untouched. A request the provider refuses after it was changed is sent again as the application wrote it |
+| Anything else | A request shape compache does not know passes through untouched. A request the provider refuses after it was changed is sent again as the application wrote it. Where it refuses one-hour entries, later conversations are planned on its default |
 
 ### SDK clients
 

@@ -336,7 +336,7 @@ function withCache(c,rules) {
 // Price every call one side makes on a workload. `strategy` is {kind: 'compache', policy} or {kind: 'rules', rules}.
 export function runArm(workload, config, strategy, {collectDecisions=true,collectLedger=true}={}) {
   const base=configure(config), ours=strategy.kind==='compache'; if(!ours && strategy.kind!=='rules')throw new RangeError('invalid strategy');
-  const rules=ours?null:configureRules(strategy.rules), policy=ours?configurePolicy(strategy.policy ?? {}):null, caching=ours || rules.cache!=='off', c=withCache(base,ours?{cache:policy.long?'long':'standard'}:rules);
+  const rules=ours?null:configureRules(strategy.rules), policy=ours?configurePolicy(strategy.policy ?? {}):null, caching=ours || rules.cache!=='off', c=withCache(base,ours?{cache:policy.long && longAvailable(base)?'long':'standard'}:rules);
   const maxAge=Math.max(c.maxTurns,...workload.threads.map(t=>t.turns.length)), laws=needLaws(c,maxAge), future=forecast(c);
   const ledger=[], decisions=[], roles={}, cacheBreakdown=collectLedger?{cached:0,newContext:0,firstRequest:0,expiredPrefix:0,changedPrefix:0,missed:0}:null, total={inputTokens:0,cachedTokens:0,freshTokens:0,outputTokens:0,inputCost:0,cachedCost:0,outputCost:0,cost:0,calls:0};
   const freed=blocks=>blocks.reduce((n,b)=>n+b.tokens-noticeOf(b.kind,c),0);
@@ -624,11 +624,12 @@ export function fitPolicy(workload,config) {
   usable.sort((a,b)=>a.cost-b.cost || (b.coverage??1)-(a.coverage??1) || a.policy.long-b.policy.long || a.policy.maxPings-b.policy.maxPings);
   return {candidates,chosen:usable[0] ?? null};
 }
-// A policy in the package's words.
-export function describePolicy(policy) {
+// A policy in the package's words. `longMinutes` is how long the long cache lives.
+export function describePolicy(policy,longMinutes=60) {
+  const lasting=longMinutes===60?'one-hour':longMinutes%60===0?`${longMinutes/60}-hour`:`${longMinutes}-minute`;
   const window=(n,noun)=>n===null?`all ${noun}`:n===0?`no earlier ${noun}`:`${noun} from the last ${n===1?'turn':`${n} turns`}`;
   const keep=policy.questions===null && policy.answers===null && policy.retrieved===null?'Keep the whole history in view.':`Keep ${window(policy.questions,'questions')}, ${window(policy.answers,'answers')} and ${window(policy.retrieved,'retrieved text')}.`;
-  return [keep,policy.keepUnder?`Parts of at most ${policy.keepUnder} tokens always stay.`:'',policy.long?'Ask for one-hour cache entries.':'',policy.maxPings?`Send up to ${policy.maxPings} keep-warm ping${policy.maxPings===1?'':'s'} while a user is away.`:'Send no keep-warm pings.'].filter(Boolean);
+  return [keep,policy.keepUnder?`Parts of at most ${policy.keepUnder} tokens always stay.`:'',policy.long?`Ask for ${lasting} cache entries.`:'',policy.maxPings?`Send up to ${policy.maxPings} keep-warm ping${policy.maxPings===1?'':'s'} while a user is away.`:'Send no keep-warm pings.'].filter(Boolean);
 }
 // The saving when the threads are drawn again from the ones at hand: the 5th and 95th percentile.
 function savingRange(ours,theirs,seed) {
@@ -639,7 +640,9 @@ function savingRange(ours,theirs,seed) {
 export function simulate(overrides={}) {
   // The policy is fitted on one set of threads and every side is costed on a second set drawn the same way.
   const config=configure(overrides), fitted=generateWorkload(config), workload=generateWorkload({...config,seed:(config.seed+1)>>>0});
-  const fit=fitPolicy(fitted,config), policy=config.policy ?? fit.chosen?.policy ?? configurePolicy({});
+  const fit=fitPolicy(fitted,config), asked=config.policy ?? fit.chosen?.policy ?? configurePolicy({});
+  // A policy made for a model with a long cache asks for none where there is none.
+  const policy=asked.long && !longAvailable(config)?configurePolicy({...asked,long:false}):asked;
   const compache=runArm(workload,config,{kind:'compache',policy}), fittedHere=config.policy && fit.chosen?runArm(workload,config,{kind:'compache',policy:fit.chosen.policy},{collectDecisions:false,collectLedger:false}):null;
   const per=cost=>1000*cost/workload.totalRuns, fetches=arm=>(arm.byRole.recovery?.calls ?? 0)/workload.totalRuns;
   // Every comparison, and the calls of the one on screen. A measured cost has no calls of its own: your app's rules stand in for them.

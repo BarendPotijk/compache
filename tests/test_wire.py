@@ -335,6 +335,63 @@ class ScanTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             wire.cache_mark(60)
 
+    def test_a_mark_is_looked_for_where_one_can_stand(self):
+        mark, hour = {"type": "ephemeral"}, {"type": "ephemeral", "ttl": "1h"}
+        # In the Responses API the conversation itself is called `input`.
+        body = {
+            "model": "anthropic/claude-haiku-5.5",
+            "cache_control": mark,
+            "input": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": "Where?", "cache_control": mark}
+                    ],
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "c",
+                    "output": [
+                        {"type": "input_text", "text": "Here.", "cache_control": mark}
+                    ],
+                },
+            ],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {"name": "f", "cache_control": mark, "parameters": {}},
+                }
+            ],
+        }
+        asked = wire.with_lifetime(body, 3600)
+        self.assertEqual(
+            [
+                asked["cache_control"],
+                asked["input"][0]["content"][0]["cache_control"],
+                asked["input"][1]["output"][0]["cache_control"],
+                asked["tools"][0]["function"]["cache_control"],
+            ],
+            [hour] * 4,
+        )
+        # A schema that has a field of that name carries no mark, whatever the field says.
+        schema = {"type": "object", "properties": {"cache_control": dict(mark)}}
+        for where in (
+            {"output_config": {"format": {"type": "json_schema", "schema": schema}}},
+            {"response_format": {"json_schema": {"schema": schema}}},
+            {"tools": [{"name": "f", "input_schema": schema}]},
+        ):
+            plain = {
+                "model": "claude-sonnet-5-5",
+                "messages": [{"role": "user", "content": "Question?"}],
+                **where,
+            }
+            self.assertIs(wire.with_lifetime(plain, 3600), plain)
+            # So the conversation still gets one.
+            marked = wire.Anthropic.with_cache_mark(plain)
+            self.assertEqual(
+                marked["messages"][-1]["content"][-1]["cache_control"], mark
+            )
+
     def test_a_request_that_waits_for_a_tool_says_so(self):
         call = {
             "id": "c",

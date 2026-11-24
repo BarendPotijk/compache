@@ -30,7 +30,7 @@ from .threads import (
     read_jsonl,
     recorded,
 )
-from .wire import cache_mark
+from .wire import TTLS, cache_mark
 
 __all__ = ["Policy", "Session", "Turn", "fit", "replay"]
 
@@ -115,6 +115,14 @@ def fit(
     """
     labels = _labels(labels, threads)
     threads, spec, found, model = _threads(threads, model)
+    lifetimes = options.pop("lifetimes", None)
+    if lifetimes is None:
+        lifetimes = cache_lifetimes(model)
+    for other in lifetimes:
+        if other.cache_ttl_seconds not in TTLS:
+            raise ContractError(
+                f"no request can ask for cache entries of {other.cache_ttl_seconds:g} seconds"
+            )
     if system_prompt is None:
         system_prompt = found["system_prompt"] or ""
     tools = list(found["tools"] or ()) if tools is None else list(tools)
@@ -130,11 +138,8 @@ def fit(
         ),
         system_prompt=system_prompt,
         default_tools=tools,
-        **{
-            "calls_per_run": _calls(threads),
-            "lifetimes": cache_lifetimes(model),
-            **options,
-        },
+        lifetimes=lifetimes,
+        **{"calls_per_run": _calls(threads), **options},
     )
     scored = artifact["recipes"]
     artifact["fitted"] = {
@@ -307,7 +312,10 @@ class Policy:
     @property
     def cache_lifetime(self) -> float | None:
         """How long the provider is asked to keep what it caches, in seconds. None for its default."""
-        if "standard_spec" not in self.artifact:
+        standard = self.artifact.get("standard_spec")
+        if standard is None or standard["cache_ttl_seconds"] == (
+            self.spec.cache_ttl_seconds
+        ):
             return None
         return self.spec.cache_ttl_seconds
 
@@ -315,6 +323,13 @@ class Policy:
     def cache_control(self) -> dict:
         """The cache mark for a Claude request you assemble yourself."""
         return cache_mark(self.cache_lifetime)
+
+    def at_default_lifetime(self) -> Policy:
+        """The same cut and pings, planned under the provider's default cache lifetime."""
+        if self.cache_lifetime is None:
+            return self
+        artifact = {k: v for k, v in self.artifact.items() if k != "standard_spec"}
+        return Policy({**artifact, "model_spec": self.artifact["standard_spec"]})
 
     @property
     def recipe(self) -> RetentionRecipe | None:

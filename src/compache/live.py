@@ -199,6 +199,8 @@ class _Conversation:
     chain: str
     record_id: str = ""
     session: Any = None
+    # The cache lifetime its requests ask for, where the policy was fitted for another than the default.
+    lifetime: float | None = None
     turns: int = 0
     pending: _Pending | None = None
     lock: Any = field(default_factory=threading.RLock)
@@ -439,7 +441,7 @@ class Live:
                 if earlier is not None and not earlier.reopens:
                     found.sent_whole = earlier.at
                 if self.policy is not None:
-                    found.session = self.policy.session(name)
+                    self._start(found, name)
                 if thread:
                     # A named conversation is found again from its first call. An unnamed one only
                     # once it has an answer, since any two may open with the same words.
@@ -615,24 +617,30 @@ class Live:
         except Exception:
             logger.warning("compache: a turn was not recorded", exc_info=True)
 
-    @property
-    def _lifetime(self) -> float | None:
-        """The cache lifetime the policy was fitted for, where it is not the provider's default."""
-        return None if self.policy is None else self.policy.cache_lifetime
+    @staticmethod
+    def _asking(conversation, body):
+        """A request made here, asking for the cache lifetime the conversation is planned under."""
+        if conversation.session is None:
+            return body
+        return wire.with_lifetime(body, conversation.lifetime)
 
-    def _asking(self, conversation, send, body):
-        """`send`, with the requests made here asking for the cache lifetime of the policy."""
-        if self._lifetime is None:
-            return send
+    def _start(self, conversation, name) -> None:
+        """Apply the policy to a conversation from here on."""
+        conversation.session = self.policy.session(name)
+        conversation.lifetime = self.policy.cache_lifetime
 
-        def asked(payload):
-            # What the application wrote goes out as it wrote it.
-            ours = payload is not body and conversation.session is not None
-            return send(
-                wire.with_lifetime(payload, self._lifetime) if ours else payload
+    def _lifetime_refused(self, conversation, result) -> None:
+        """Plan later conversations under the default lifetime where the provider takes no other."""
+        if conversation.lifetime is None or self.policy.cache_lifetime is None:
+            return
+        said = result.raw if result.raw is not None else json.dumps(result.json)
+        said = said.decode("utf-8", "replace") if isinstance(said, bytes) else said
+        if "ttl" in said.lower():
+            logger.warning(
+                "compache: the cache lifetime of the policy was refused. "
+                "Later conversations are planned under the provider's default"
             )
-
-        return asked
+            self.policy = self.policy.at_default_lifetime()
 
     def _exchange(self, path, body, send, thread, at=None, asks=True) -> Result:
         self.stats["calls"] += 1
@@ -663,7 +671,7 @@ class Live:
                         body,
                         scan,
                         turns,
-                        self._asking(conversation, send, body),
+                        send,
                         asks,
                     )
                 except Exception:
@@ -721,7 +729,7 @@ class Live:
             self._stand_down(conversation, number, now)
             plain = body
         marked = (
-            wire.with_lifetime(dialect.with_cache_mark(plain), self._lifetime)
+            self._asking(conversation, dialect.with_cache_mark(plain))
             if conversation.session is not None
             else plain
         )
@@ -757,6 +765,7 @@ class Live:
             # Refused with the policy applied: send what the application wrote.
             self.stats["retried"] += 1
             self.stats["policy_refused"] += 1
+            self._lifetime_refused(conversation, result)
             self._stand_down(conversation, pending.index, pending.started_at)
             call.plain = call.marked = call.outgoing = call.body
             call.asked, call.carrier = False, None
@@ -788,7 +797,7 @@ class Live:
         # A conversation met in the middle: walk the policy through what was said.
         conversation.pending, conversation.turns = None, 0
         if self.policy is not None:
-            conversation.session = self.policy.session(conversation.thread_id)
+            self._start(conversation, conversation.thread_id)
             # When it was said is not known, and a process that meets a conversation in the middle
             # has usually just been started: the provider's cache is taken to have expired. It has
             # not where this process sent the conversation itself, before a turn was asked again.
@@ -984,8 +993,9 @@ class Live:
                 rounds += 1
                 if rounds > _ROUNDS:
                     break
-                sent = dialect.after_tools(
-                    sent, data, self._reopen(conversation, reply.calls)
+                answers = self._reopen(conversation, reply.calls)
+                sent = self._asking(
+                    conversation, dialect.after_tools(sent, data, answers)
                 )
                 again = call.send(sent)
                 if again.status >= 400 or again.json is None:
@@ -1071,7 +1081,10 @@ class Live:
                         again, kind = self._as_written(call), "retry"
                     else:
                         answers = self._reopen(conversation, editor.ours)
-                        sent = dialect.after_tools(sent, editor.said, answers)
+                        sent = self._asking(
+                            conversation,
+                            dialect.after_tools(sent, editor.said, answers),
+                        )
                         again, kind = call.send(sent), "reopen"
                 closers.append(again.close)
                 if again.status >= 400 or again.events is None:
@@ -1186,7 +1199,7 @@ class Live:
             )
             if body is None:
                 return
-            reply = self._whole(dialect, call.send(body))
+            reply = self._whole(dialect, call.send(self._asking(conversation, body)))
             if reply is None:
                 self._note_refused(call)
                 return
@@ -1364,7 +1377,10 @@ class Live:
         if body is None:
             conversation.pings_off = True
             return 0
-        reply, usage = self._whole(dialect, send(body)), None
+        reply, usage = (
+            self._whole(dialect, send(self._asking(conversation, body))),
+            None,
+        )
         if reply is not None:
             usage = reply.usage
             self._ledger(conversation, "ping", reply)
