@@ -201,7 +201,7 @@ class FitTests(unittest.TestCase):
     def test_without_labels_only_the_pings_are_fitted(self):
         policy = compache.fit(threads(), model="claude-sonnet-5-5", folds=2)
         self.assertIsNone(policy.recipe)
-        self.assertIn("without labels only the pings are fitted", policy.describe())
+        self.assertIn("without labels only the caching is fitted", policy.describe())
         costs = policy.summary["cost_per_1000_turns"]
         self.assertEqual(costs["unit"], "USD")
         self.assertLess(costs["policy"], costs["keep_everything"])

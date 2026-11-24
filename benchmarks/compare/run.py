@@ -200,12 +200,10 @@ def price(args):
     import run as docchat
 
     import compache
-    from compache.models import model_spec
+    from compache.models import cache_lifetimes, model_spec
 
     spec = model_spec(args.model)
     per_token = compache.models.pricing(args.model)["input_price_per_million"] / 1e6
-    # An entry that lives an hour costs twice the input price to write instead of one and a quarter times.
-    hour = dataclasses.replace(spec, cache_ttl_seconds=3600, write_multiplier=2.0)
     sizes = [json.loads(Path(p).read_text()) for p in args.sizes or ()]
     clocks = []
     for root in map(Path, args.data):
@@ -235,7 +233,7 @@ def price(args):
                 **docchat.HEADER,
             )
         )
-        for lifetime in (spec, hour):
+        for lifetime in (spec, *cache_lifetimes(args.model)):
             policy = compache.fit(
                 train,
                 sum(train_labels, []),

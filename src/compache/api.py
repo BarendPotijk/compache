@@ -101,7 +101,7 @@ def fit(
     `threads` and `labels` are paths to JSONL files (or folders of them), or
     lists of dicts. `model` names a known model or gives a model spec. Left
     out, it is the model the threads record, as are the system prompt, the
-    tools and when the record was read. Without labels only the pings are
+    tools and when the record was read. Without labels only the caching is
     fitted and the whole history stays in view. Where the threads record
     several model calls in a turn, those are priced.
 
@@ -419,7 +419,7 @@ class Policy:
             lines.append(
                 "Keep the whole history in view."
                 if summary["labelled_turns"]
-                else "Keep the whole history in view: without labels only the pings are fitted."
+                else "Keep the whole history in view: without labels only the caching is fitted."
             )
         else:
             lines.append(

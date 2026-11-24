@@ -192,9 +192,10 @@ function drawChart(box, c) {
     if (!off && s > 0) svg += `<path class="mark ${c[name] ? 'f-drawn' : 'f-neutral'}" d="${bar(k * slot + 1.5, slot - 3, H - B, Math.min(H - B - 1, y(s)))}"/>`;
   });
   for (const [k, text] of AXIS[kind]) svg += `<text x="${BINS[kind].whole ? (k + .5) * slot : k * slot}" y="${H - 4}" text-anchor="${k === 0 && !BINS[kind].whole ? 'start' : 'middle'}">${text}</text>`;
-  // The cache lifetime among the delays, less the answer time it has already spent.
-  if (kind === 'gap') { const at = binAt('gap', Math.max(.1, c.ttlMinutes - c.answerSeconds / 60)) * slot; svg += `<line class="g-mark" x1="${at}" x2="${at}" y1="${T - 4}" y2="${H - B}"/><text class="halo t-2" x="${at + 4}" y="${T + 4}">cache expires</text>`; }
-  const caption = off ? 'No retrieved text.' : kind === 'gap' ? `${pct(warmReturnShare(c), 0)} back before the cache expires` : c[name] ? 'Drawn' : 'Drag the bars to draw your own';
+  // The cache lifetime of the policy in force among the delays, less the answer time it has already spent.
+  const lives = current?.policy.long && longAvailable(c) ? c.longTtlMinutes : c.ttlMinutes;
+  if (kind === 'gap') { const at = binAt('gap', Math.max(.1, lives - c.answerSeconds / 60)) * slot; svg += `<line class="g-mark" x1="${at}" x2="${at}" y1="${T - 4}" y2="${H - B}"/><text class="halo t-2" x="${at + 4}" y="${T + 4}">cache expires</text>`; }
+  const caption = off ? 'No retrieved text.' : kind === 'gap' ? `${pct(warmReturnShare({...c, ttlMinutes: lives}), 0)} back before the cache expires` : c[name] ? 'Drawn' : 'Drag the bars to draw your own';
   box.innerHTML = `${svg}</svg><p class="caption"><span>${caption}</span>${c[name] ? `<button type="button" class="link" data-reset="${name}">use the curve</button>` : ''}</p>`;
   if (off) return;
   const el = box.firstElementChild;
@@ -291,7 +292,7 @@ function renderMap(r, file) {
   const same = (a, b) => ['questions', 'answers', 'retrieved', 'maxPings', 'keepUnder', 'long'].every(k => (a[k] ?? null) === (b[k] ?? null));
   const points = file && filePolicy.candidates.length && filePolicy.cost !== null ? filePolicy.candidates.map(x => ({...x, kept: x.coverage})) : r.fit.candidates.filter(x => x.complete).map(x => ({policy: x.policy, everything: x.everything, coverage: x.coverage, cost: 1000 * x.cost / r.fit.turns, chosen: same(x.policy, r.policy)}));
   const usable = points.filter(x => Number.isFinite(x.cost)).map(x => ({...x, x: x.coverage ?? 1}));
-  const label = n => n === null ? 'all' : n === 0 ? 'none' : `${n}`, cache = long => minutes(long ? r.config.longTtlMinutes : r.config.ttlMinutes), lasting = usable.some(p => p.policy.long);
+  const label = n => n === null ? 'all' : n === 0 ? 'none' : `${n}`, cache = long => minutes((file ? filePolicy.lives[long ? 1 : 0] : null) ?? (long ? r.config.longTtlMinutes : r.config.ttlMinutes)), lasting = usable.some(p => p.policy.long);
   $('searchNote').textContent = usable.length ? `Cost per 1,000 turns against the needed text that stays in view${file && filePolicy.cost !== null ? ', as the package fitted it' : ''}.${lasting ? ` Dashed: the ${cache(true)} cache.` : ''} ${usable.some(x => x.everything) ? '' : 'Keeping everything does not fit the model here.'}` : 'No candidate fits the model.';
   $('policyRows').innerHTML = [...usable].sort((a, b) => a.cost - b.cost).map(x => `<tr class="${x.chosen ? 'selected' : ''}"><td>${label(x.policy.questions)}</td><td>${label(x.policy.answers)}</td><td>${label(x.policy.retrieved)}</td><td>${x.policy.maxPings}</td><td>${cache(x.policy.long)}</td><td>${pct(x.coverage, 0)}</td><td>${dollars(x.cost)}</td></tr>`).join('');
   const box = $('mapChart'), W = Math.max(300, box.clientWidth), H = box.clientHeight || 280, L = 52, R = 16, T = 24, B = 40; if (!usable.length) { box.innerHTML = ''; return; }

@@ -76,7 +76,7 @@ test('a fitted policy file gives its decision, its candidates and its costs', ()
   // A policy that asks for a longer cache carries the provider's default beside it, and each candidate its own.
   const lasting = readPolicy({...data, model_spec: {model_id: 'claude-sonnet-5-5', cache_ttl_seconds: 3600}, standard_spec: {model_id: 'claude-sonnet-5-5', cache_ttl_seconds: 300},
     solve: {...data.solve, candidates: [300, 3600].map(seconds => ({recipe, max_pings: 3, cache_ttl_seconds: seconds, coverage: .9, expected_cost: 50000, complete: true}))}});
-  assert.equal(lasting.policy.long, true); assert.deepEqual(lasting.candidates.map(c => [c.policy.long, c.chosen]), [[false, false], [true, true]]);
+  assert.equal(lasting.policy.long, true); assert.deepEqual(lasting.lives, [5, 60]); assert.deepEqual(lasting.candidates.map(c => [c.policy.long, c.chosen]), [[false, false], [true, true]]);
   assert.throws(() => readPolicy({}), /not a policy/);
 });
 test('every comparison is a valid set of rules for every model, and your app starts as sending everything', () => {

@@ -28,8 +28,11 @@ __all__ = [
     "TextStream",
     "cache_mark",
     "dialect_for",
+    "has_cache_mark",
     "sse_events",
+    "with_default_lifetime",
     "with_lifetime",
+    "without_lifetime",
 ]
 
 _CACHE = {"type": "ephemeral"}
@@ -126,17 +129,18 @@ def cache_mark(lifetime: float | None = None) -> dict:
     return {**_CACHE, "ttl": TTLS[lifetime]}
 
 
-def _with_marks(body: Any, change) -> Any:
+def _with_marks(body: Any, change, where=("system", "tools", "messages", "input")):
     """A request with `change` applied to every cache mark in it. The same object where none changed.
 
     Marks are looked for where one can stand: on the request, its instructions, tools and messages,
     and the pieces of those. What an application or a model wrote itself, such as a tool's schema
     or a call's arguments, may use the same word and is left alone.
     """
+    pieces = ("content", "output", "function", "source")
 
     def within(value, keys):
         if isinstance(value, list):
-            made = [within(inner, ("content", "output", "function")) for inner in value]
+            made = [within(inner, pieces) for inner in value]
             return made if any(a is not b for a, b in zip(made, value)) else value
         if not isinstance(value, dict):
             return value
@@ -149,27 +153,43 @@ def _with_marks(body: Any, change) -> Any:
         for key in keys:
             inner = value.get(key)
             if isinstance(inner, (dict, list)):
-                made = within(inner, ("content", "output", "function"))
+                made = within(inner, pieces)
                 if made is not inner:
                     changed[key] = made
         return {**value, **changed} if changed else value
 
-    return within(body, ("system", "tools", "messages", "input"))
+    return within(body, where)
 
 
-def with_lifetime(body: Any, lifetime: float | None) -> Any:
+def _plain_mark(mark: dict) -> dict:
+    return {key: value for key, value in mark.items() if key != "ttl"}
+
+
+def with_lifetime(body: Any, lifetime: float) -> Any:
     """A request with every cache mark in it asking for this lifetime. What has none comes back as it is.
 
     All of them change: an entry with a longer lifetime may not follow one with
     a shorter, so one mark alone would be refused.
     """
-    if lifetime is None:
-        return body
     asked = cache_mark(lifetime)
     return _with_marks(body, lambda mark: {**mark, **asked})
 
 
-def _has_cache_mark(body: Any) -> bool:
+def without_lifetime(body: Any) -> Any:
+    """A request with every cache mark in it asking for the provider's default lifetime."""
+    return _with_marks(body, _plain_mark)
+
+
+def with_default_lifetime(body: Any) -> Any:
+    """A request whose conversation is cached for the provider's default lifetime.
+
+    What an application marks ahead of it, such as instructions that all its
+    users share, keeps the lifetime the application chose.
+    """
+    return _with_marks(body, _plain_mark, ("messages", "input"))
+
+
+def has_cache_mark(body: Any) -> bool:
     found: list = []
     _with_marks(body, lambda mark: found.append(mark) or mark)
     return bool(found)
@@ -372,7 +392,7 @@ class OpenAIChat:
         model = str(body.get("model") or "")
         if "claude" not in model and "anthropic" not in model:
             return body
-        return body if _has_cache_mark(body) else cls._mark_last(body, _CACHE)
+        return body if has_cache_mark(body) else cls._mark_last(body, _CACHE)
 
     @staticmethod
     def with_tool(body: dict, tool: dict, instructions: str) -> dict:
@@ -726,7 +746,7 @@ class Anthropic:
 
     @classmethod
     def with_cache_mark(cls, body: dict) -> dict:
-        return body if _has_cache_mark(body) else cls._mark_last(body, _CACHE)
+        return body if has_cache_mark(body) else cls._mark_last(body, _CACHE)
 
     @staticmethod
     def with_tool(body: dict, tool: dict, instructions: str) -> dict:

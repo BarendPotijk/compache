@@ -1199,14 +1199,58 @@ class LifetimeTests(unittest.TestCase):
         self.assertEqual(json.dumps(body), before)
         self.assertEqual(self.marks(sent[0]), [{"type": "ephemeral", "ttl": "1h"}])
 
-    def test_a_provider_that_refuses_it_gets_the_application_s_own_request(self):
+    def test_a_provider_that_refuses_it_is_asked_for_its_default(self):
+        def refusing(request):
+            if '"ttl"' in json.dumps(request["body"]):
+                return {"status": 400, "error": "not supported here"}
+            return claude_looping(request)
+
+        # One that keeps retrieved text for a turn, under one-hour entries.
+        cut = fitted().artifact
+        lasting = compache.Policy(
+            {
+                **cut,
+                "model_spec": self.policy.artifact["model_spec"],
+                "standard_spec": cut["model_spec"],
+            }
+        )
+        live = self.live()
+        live.policy, self.model.script = lasting, refusing
+        app = ClaudeApp(live, self.model, thread="refused")
+        with self.assertLogs("compache.live", "WARNING") as said:
+            self.assertEqual(app.turn("Question 1?", passage(1)), "Answer 1.")
+        self.assertIn("3600 seconds are refused", said.output[0])
+        # The same request again, under the default. The policy goes on, and nothing is pinged on
+        # the lifetime that was refused.
+        self.assertEqual(
+            [self.marks(b) for b in self.model.bodies[:2]],
+            [[{"type": "ephemeral", "ttl": "1h"}], [{"type": "ephemeral"}]],
+        )
+        self.assertIsNone(live.next_ping_at())
+        # From the next turn on it is planned on the default, as is every other conversation.
+        before = len(self.model.bodies)
+        for n in range(2, 5):
+            self.clock.at += 400
+            app.turn(f"Question {n}?", passage(n))
+        self.assertNotIn('"ttl"', json.dumps(self.model.bodies[before:]))
+        archived = json.dumps(self.model.bodies[-1]).count("Archived to save space")
+        self.assertGreater(archived, 0)
+        self.assertIsNone(live.policy.cache_lifetime)
+        self.assertEqual(live.policy.recipe, lasting.recipe)
+        other = ClaudeApp(live, self.model, thread="other")
+        other.turn("Question 1?", passage(1))
+        stats = {k: live.stats[k] for k in ("retried", "policy_refused", "stood_down")}
+        self.assertEqual(stats, {"retried": 1, "policy_refused": 0, "stood_down": 0})
+
+    def test_a_refusal_for_another_reason_changes_no_lifetime(self):
         live = self.live()
         sent = []
 
         def send(payload):
             sent.append(payload)
-            if "ttl" in json.dumps(payload):
-                return Result(400, json={"error": {"message": "ttl: unknown field"}})
+            if "cache_control" in json.dumps(payload):
+                # What was refused is said back, the lifetime in it.
+                return Result(422, raw=json.dumps({"input": payload}).encode())
             return self.model.send("/v1/messages")(payload)
 
         body = {
@@ -1214,36 +1258,54 @@ class LifetimeTests(unittest.TestCase):
             "max_tokens": 64,
             "messages": [{"role": "user", "content": "Question 1?"}],
         }
-        with self.assertLogs("compache.live", "WARNING") as said:
-            reply = live.exchange("/v1/messages", body, send, thread="refused")
-        self.assertEqual(reply.status, 200)
+        reply = live.exchange("/v1/messages", body, send, thread="refused")
+        self.assertEqual((reply.status, len(sent)), (200, 3))
         self.assertIs(sent[-1], body)
         self.assertEqual(live.stats["policy_refused"], 1)
-        self.assertIn("cache lifetime of the policy was refused", said.output[0])
-        # Later conversations are planned under the provider's default, so the policy goes on.
-        self.assertIsNone(live.policy.cache_lifetime)
-        self.assertEqual(live.policy.recipe, self.policy.recipe)
-        reply = live.exchange("/v1/messages", dict(body), send, thread="later")
-        self.assertEqual(reply.status, 200)
-        self.assertEqual(self.marks(sent[-1]), [{"type": "ephemeral"}])
-        self.assertEqual(live.stats["policy_refused"], 1)
+        self.assertEqual(live.policy.cache_lifetime, 3600)
 
-    def test_a_refusal_for_another_reason_changes_no_lifetime(self):
+    def test_where_a_request_cannot_ask_for_it_the_default_is_planned(self):
+        # Nothing marks a request of the Responses API, so nothing in it can ask for a lifetime.
         live = self.live()
+        self.model.script = None
+        body = {"model": "claude-sonnet-5-5", "input": "Question 1?"}
+        send = self.model.send("/v1/responses")
+        live.exchange("/v1/responses", body, send, thread="unmarked")
+        conversation = live._latest["unmarked"]
+        self.assertIsNone(conversation.session.policy.cache_lifetime)
+        self.assertEqual(conversation.session.policy.recipe, self.policy.recipe)
+        # The next conversation may be able to.
+        self.model.script = claude_looping
+        self.assertEqual(live.policy.cache_lifetime, 3600)
+        ClaudeApp(live, self.model, thread="marked").turn("Question 1?", passage(1))
+        self.assertEqual(live._latest["marked"].session.policy.cache_lifetime, 3600)
 
-        def send(payload):
-            if "cache_control" in json.dumps(payload):
-                return Result(400, raw=b'{"error": {"message": "too long"}}')
-            return self.model.send("/v1/messages")(payload)
-
+    def test_a_policy_for_the_default_caches_the_conversation_for_it(self):
+        # An application that asks for an hour by itself, on what its users share and on the conversation.
+        hour = {"type": "ephemeral", "ttl": "1h"}
         body = {
             "model": "claude-sonnet-5-5",
             "max_tokens": 64,
-            "messages": [{"role": "user", "content": "Question 1?"}],
+            "system": [{"type": "text", "text": SYSTEM, "cache_control": hour}],
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "Question 1?", "cache_control": hour}
+                    ],
+                }
+            ],
         }
-        live.exchange("/v1/messages", body, send, thread="refused")
-        self.assertEqual(live.stats["policy_refused"], 1)
-        self.assertEqual(live.policy.cache_lifetime, 3600)
+        for policy, asked in (
+            (self.policy, [hour, hour]),
+            (self.policy.at_default_lifetime(), [hour, {"type": "ephemeral"}]),
+        ):
+            live = self.live()
+            live.policy = policy
+            live.exchange(
+                "/v1/messages", body, self.model.send("/v1/messages"), thread="own"
+            )
+            self.assertEqual(self.marks(self.model.bodies[0]), asked)
 
     def test_pings_ask_for_it(self):
         # Users back after 70 minutes, just past the hour: one ping before it is over keeps the cache.

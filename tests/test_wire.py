@@ -330,7 +330,16 @@ class ScanTests(unittest.TestCase):
         )
         self.assertIs(asked["messages"][1], body["messages"][1])
         self.assertIs(wire.with_lifetime(asked, 3600), asked)
-        self.assertIs(wire.with_lifetime(body, None), body)
+        self.assertEqual(
+            wire.without_lifetime(asked)["tools"][0]["cache_control"], mark
+        )
+        # What is marked ahead of the conversation keeps the lifetime it has.
+        lowered = wire.with_default_lifetime(asked)
+        self.assertEqual(
+            (lowered["cache_control"], lowered["system"], lowered["tools"]),
+            (mark, asked["system"], asked["tools"]),
+        )
+        self.assertNotIn('"ttl"', json.dumps(lowered["messages"]))
         self.assertEqual(wire.cache_mark(), mark)
         with self.assertRaises(ValueError):
             wire.cache_mark(60)
@@ -372,6 +381,24 @@ class ScanTests(unittest.TestCase):
                 asked["tools"][0]["function"]["cache_control"],
             ],
             [hour] * 4,
+        )
+        # In a document of several pieces as well.
+        source = {
+            "type": "content",
+            "content": [{"type": "text", "text": "Page.", "cache_control": mark}],
+        }
+        body = {
+            "model": "claude-sonnet-5-5",
+            "messages": [
+                {"role": "user", "content": [{"type": "document", "source": source}]}
+            ],
+        }
+        self.assertTrue(wire.has_cache_mark(body))
+        self.assertEqual(
+            wire.with_lifetime(body, 3600)["messages"][0]["content"][0]["source"][
+                "content"
+            ][0]["cache_control"],
+            hour,
         )
         # A schema that has a field of that name carries no mark, whatever the field says.
         schema = {"type": "object", "properties": {"cache_control": dict(mark)}}
