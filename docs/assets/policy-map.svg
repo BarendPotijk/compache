@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="880" height="424" viewBox="0 0 880 424" role="img" aria-labelledby="t d">
 <title id="t">The longer users are away, the more sending everything costs</title>
-<desc id="d">Cost per 1,000 messages against the share of the history kept, without and with keep-warm pings and with one-hour cache entries, for three return patterns. Users back after 30 seconds: fitted $19, keep everything with the default cache and no pings $34, with the cheapest cache setting $28. Users back after 4 minutes: fitted $24, keep everything with the default cache and no pings $143, with the cheapest cache setting $37. Users back after 30 minutes: fitted $32, keep everything with the default cache and no pings $286, with the cheapest cache setting $111.</desc>
+<desc id="d">Cost per 1,000 messages against the share of the history kept, for three return patterns and these settings: Default cache, no pings, Up to 3 pings, One-hour cache, up to 3 pings. Users back after 30 seconds: fitted $19, keep everything with the default cache and no pings $34, with the cheapest cache setting $28. Users back after 4 minutes: fitted $24, keep everything with the default cache and no pings $143, with the cheapest cache setting $37. Users back after 30 minutes: fitted $32, keep everything with the default cache and no pings $286, with the cheapest cache setting $111.</desc>
 <style>
 text{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;font-size:12px;fill:#0b0b0b}
 .surface{fill:#fcfcfb;stroke:rgba(11,11,11,.1)}

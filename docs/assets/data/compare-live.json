@@ -1,0 +1,48 @@
+{
+ "model": "Claude Haiku 5.5",
+ "conversations": 5,
+ "arms": [
+  {
+   "name": "Whole history, default cache",
+   "turns": 55,
+   "cost": 2.9,
+   "correct": 33,
+   "graded": 52
+  },
+  {
+   "name": "Whole history, one-hour entries",
+   "turns": 55,
+   "cost": 1.802,
+   "correct": 30,
+   "graded": 52
+  },
+  {
+   "name": "Headroom, target ratio 0.5",
+   "turns": 55,
+   "cost": 2.325,
+   "correct": 22,
+   "graded": 52
+  },
+  {
+   "name": "Kompressor",
+   "turns": 55,
+   "cost": 1.995,
+   "correct": 31,
+   "graded": 52
+  },
+  {
+   "name": "compache",
+   "turns": 55,
+   "cost": 1.482,
+   "correct": 33,
+   "graded": 52
+  },
+  {
+   "name": "Headroom and compache",
+   "turns": 55,
+   "cost": 1.268,
+   "correct": 20,
+   "graded": 52
+  }
+ ]
+}

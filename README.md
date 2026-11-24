@@ -124,13 +124,14 @@ A fixed rule such as "keep the last 20 messages" or "summarize at 75% of the win
 | | Measured on | Cost |
 |:--|:--|:-:|
 | **Claude Haiku 5.5**, against the 5-minute cache | Live calls, billed, four integrations | **42%&nbsp;to&nbsp;49%&nbsp;less** |
+| **Claude Haiku 5.5**, against the 1-hour cache | Live calls, billed, short chats | **18%&nbsp;less** |
 | **GPT-6 Luna**, against the 30-minute cache | Live calls, billed, one integration | **2%&nbsp;to&nbsp;5%&nbsp;less** |
 | **Claude Sonnet 5.5**, against the 5-minute cache | DocChat, modeled cost | **43%&nbsp;to&nbsp;89%&nbsp;less** |
 | **Claude Sonnet 5.5**, against the 1-hour cache | DocChat, modeled cost | **30%&nbsp;to&nbsp;79%&nbsp;less** |
 
-**It pays off most** in long chats with a lot of retrieved or tool text, where users pause longer than the cache lasts. **It pays off least** in short chats and where the cache outlasts the breaks: on GPT-6 Luna these users were always back in time, so there was little to save. If your app already uses Claude's 1-hour cache, the 1-hour row is yours: its writes cost more and its entries last longer, so there is less left to save. The live runs were not repeated with it. [The long cache](docs/comparisons.md#the-long-cache)
+**It pays off most** in long chats with a lot of retrieved or tool text, where users pause longer than the cache lasts. **It pays off least** in short chats and where the cache outlasts the breaks: on GPT-6 Luna these users were always back in time, so there was little to save. If your app already uses Claude's 1-hour cache, the 1-hour row is yours: its writes cost more and its entries last longer, so there is less left to save, most of all in short chats. [The long cache](docs/comparisons.md#the-long-cache)
 
-**Answers hold up.** In all three measurements, the number of right answers with and without compache differs by no more than chance. On GPT-6 Luna it was slightly lower, on too few messages to call. [Live runs](benchmarks/live/README.md) · [All benchmarks](benchmarks/README.md)
+**Answers hold up.** In every measurement, the number of right answers with and without compache differs by no more than chance. On GPT-6 Luna it was slightly lower, on too few messages to call. [Live runs](benchmarks/live/README.md) · [All benchmarks](benchmarks/README.md)
 
 **What would you save?** Put your numbers in the [cost calculator](https://barendpotijk.github.io/compache/), or drop a chat log or a `policy.json` on it: it is read in your browser and sent nowhere. It compares with your own rules, other tools' defaults or what you pay now.
 
@@ -142,6 +143,6 @@ A fixed rule such as "keep the last 20 messages" or "summarize at 75% of the win
 | Keep the last N messages, or summarize at a threshold | N learned per kind of text, cuts timed to the cache, and trimmed text the model can fetch back |
 | OpenClaw or provider compaction at fixed thresholds | A setting fitted to your traffic. Modeled on Claude Sonnet 5.5, [48% to 54% cheaper than OpenClaw's defaults](docs/comparisons.md#openclaw) |
 | A cache tool such as caching.ai, or one-hour cache entries | Sending less. Modeled on document chats, [30% to 70% cheaper](docs/comparisons.md) than the cheapest cache setting alone |
-| Headroom or OptScale Kompressor | The other half: they shrink single tool results, compache decides which parts stay and when the cache is kept warm. [They combine](docs/comparisons.md) |
+| Headroom or OptScale Kompressor | They shrink single tool results, compache decides which parts stay and when the cache is kept warm. Live on document chats, [36% and 26% cheaper](docs/comparisons.md#live) with the answers of the whole history |
 
 [Guide](docs/guide.md) · [Integrations](docs/integrations.md) · [How it works](docs/how-it-works.md) · [Other tools compared](docs/comparisons.md) · [Calculator](https://barendpotijk.github.io/compache/) · [Issues](https://github.com/BarendPotijk/compache/issues) · [Apache-2.0](LICENCE.md)

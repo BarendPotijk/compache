@@ -281,10 +281,14 @@ def policy_map(data):
     legend = [
         ("line ns", "Default cache, no pings"),
         ("line cs", f"Up to {most} pings"),
-        ("line os", f"One-hour cache, up to {most} pings"),
         ("dot c", "What compache picked"),
         ("dot n", "Send everything"),
     ]
+    lives = {r["cache_ttl_seconds"] for _, clock in clocks for r in clock["candidates"]}
+    if len(lives) > 1:
+        hours = max(lives) / 3600
+        named = "One-hour" if hours == 1 else f"{hours:g}-hour"
+        legend.insert(2, ("line os", f"{named} cache, up to {most} pings"))
     at = 24
     for kind, label in legend:
         if kind.startswith("line"):
@@ -395,8 +399,10 @@ def policy_map(data):
         width,
         height,
         "The longer users are away, the more sending everything costs",
-        "Cost per 1,000 messages against the share of the history kept, without and with keep-warm pings and with "
-        "one-hour cache entries, for three return patterns. " + " ".join(summary),
+        "Cost per 1,000 messages against the share of the history kept, for three return patterns and these settings: "
+        + ", ".join(label for kind, label in legend if kind.startswith("line"))
+        + ". "
+        + " ".join(summary),
         body,
     )
 
@@ -800,6 +806,56 @@ def compare(data):
     )
 
 
+def tools(data):
+    """Two panels, one bar per tool in each: what the provider billed, and how many answers were right."""
+    arms, base = data["arms"], data["arms"][0]
+    bar, pitch, top = 16, 27, 106
+    width, height = 880, top + len(arms) * pitch + 12
+    panels = [
+        (262, 232, "cost", "Bill per 1,000 turns"),
+        (656, 150, "correct", f"Right answers, out of {base['graded']}"),
+    ]
+    title = "Live: the same conversations through each tool"
+    body = [
+        text(24, 30, title, "big"),
+        text(
+            24,
+            49,
+            f"{data['conversations']} held-out DocChat conversations, {base['turns']} turns on {data['model']}, "
+            "at the users' own pace. Billed by the provider.",
+            "t2",
+        ),
+    ]
+    for x0, full, key, name in panels:
+        longest = max(arm[key] for arm in arms)
+        body += [
+            text(x0, top - 18, name, "h"),
+            f'<line class="axis" x1="{x0}" x2="{x0}" y1="{top - 6}" y2="{top + len(arms) * pitch - 5}"/>',
+        ]
+        for j, arm in enumerate(arms):
+            ours, with_ours = arm["name"] == "compache", "compache" in arm["name"]
+            yy, length = top + j * pitch, max(6, arm[key] / longest * full)
+            label = f"${arm[key]:.2f}" if key == "cost" else str(arm[key])
+            body += [
+                f'<path class="{"c" if with_ours else "n"}" d="M{x0},{yy} h{length - 4:.1f} a4,4 0 0 1 4,4 '
+                f'v{bar - 8} a4,4 0 0 1 -4,4 h-{length - 4:.1f} z"/>',
+                text(x0 + length + 8, yy + bar - 4, label, "b" if ours else "t2"),
+            ]
+            if key != "cost":
+                continue
+            body.append(
+                text(x0 - 12, yy + bar - 4, arm["name"], "b" if ours else "t2", "end")
+            )
+            if j:
+                change = f"{arm[key] / base[key] - 1:+.0%}".replace("-", "\u2212")
+                body.append(text(x0 + length + 54, yy + bar - 4, change, "t2"))
+    said = [
+        f"{arm['name']} ${arm['cost']:.2f}, {arm['correct']} of {arm['graded']} answers right"
+        for arm in arms
+    ]
+    return svg(width, height, title, ". ".join(said) + ".", body)
+
+
 # -- how it works -----------------------------------------------------------
 
 
@@ -871,6 +927,7 @@ FIGURES = {
     "preview": ("preview.svg", "openclaw.json", preview),
     "live": ("live-cost.svg", "live.json", live),
     "compare": ("compare-cost.svg", "compare.json", compare),
+    "tools": ("compare-live.svg", "compare-live.json", tools),
     "workflow": ("workflow.svg", None, workflow),
 }
 

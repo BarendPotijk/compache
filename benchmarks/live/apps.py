@@ -184,6 +184,10 @@ class ClaudeLoop(App):
             }
         ]
 
+    def request(self) -> list:
+        """The messages of the next request."""
+        return self.messages
+
     def turn(self, question, passages):
         self.messages.append({"role": "user", "content": question})
         searched = False
@@ -194,7 +198,7 @@ class ClaudeLoop(App):
                 max_tokens=self.limit,
                 system=self.system,
                 tools=self.tools,
-                messages=self.messages,
+                messages=self.request(),
                 extra_body=self.extra,
             )
             self.messages.append({"role": "assistant", "content": response.content})

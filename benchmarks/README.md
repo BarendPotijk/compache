@@ -20,4 +20,4 @@ Costs are modeled: every request and ping is priced with the provider's cache ru
 
 ## Other tools
 
-[Compare](compare/README.md): Headroom and Kompressor run on DocChat's retrieved text, and the cheapest way to keep the whole history cached, against compache. Modeled cost, 30% to 70% under the cheapest cache setting. [Read more](../docs/comparisons.md)
+[Compare](compare/README.md): Headroom, Kompressor and the cheapest way to keep the whole history cached, against compache. Modeled, 30% to 70% under the cheapest cache setting. Live, the lowest bill with the answers of the whole history. [Read more](../docs/comparisons.md)
