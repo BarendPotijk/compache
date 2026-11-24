@@ -113,7 +113,7 @@ Because every chatbot needs a different answer. Three workloads, three settings,
 | **Long personal chats** ([BEAM](benchmarks/beam/README.md)) | What the user said matters. Earlier replies of the assistant can go | **57%&nbsp;to&nbsp;91%&nbsp;less** |
 | **Data analysis** ([LongDS](benchmarks/README.md)) | Almost every step builds on earlier ones. Keep nearly everything, and time the pings | **0%&nbsp;to&nbsp;32%&nbsp;less** |
 
-How long users stay away matters as much. The same document chats, with three kinds of users:
+On DocChat that is against Claude's 5-minute cache, and against its 1-hour cache [30% to 79%](#results). How long users stay away matters as much. The same document chats, with three kinds of users:
 
 ![The same chats with users who return after 30 seconds, 4 minutes and 30 minutes: sending everything costs 1.8, 5.9 and 8.9 times what compache's setting costs](docs/assets/policy-map.svg)
 
@@ -121,13 +121,16 @@ A fixed rule such as "keep the last 20 messages" or "summarize at 75% of the win
 
 ## Results
 
-| | Measured on | Cost | Right answers, without → with |
-|:--|:--|:-:|:-:|
-| **Claude Haiku 5.5**, 5-minute cache | Live calls, billed, four integrations | **42%&nbsp;to&nbsp;49%&nbsp;less** | 125 → 132 to 135 of 208 |
-| **GPT-6 Luna**, 30-minute cache | Live calls, billed, one integration | **2%&nbsp;to&nbsp;5%&nbsp;less** | 24 → 20 to 23 of 52 |
-| **Claude Sonnet 5.5** | DocChat, modeled cost, live answers | **43%&nbsp;to&nbsp;89%&nbsp;less** | 25 → 24 of 30 |
+| | Measured on | Cost |
+|:--|:--|:-:|
+| **Claude Haiku 5.5**, against the 5-minute cache | Live calls, billed, four integrations | **42%&nbsp;to&nbsp;49%&nbsp;less** |
+| **GPT-6 Luna**, against the 30-minute cache | Live calls, billed, one integration | **2%&nbsp;to&nbsp;5%&nbsp;less** |
+| **Claude Sonnet 5.5**, against the 5-minute cache | DocChat, modeled cost | **43%&nbsp;to&nbsp;89%&nbsp;less** |
+| **Claude Sonnet 5.5**, against the 1-hour cache | DocChat, modeled cost | **30%&nbsp;to&nbsp;79%&nbsp;less** |
 
-**It pays off most** in long chats with a lot of retrieved or tool text, where users pause longer than the cache lasts. **It pays off least** in short chats and where the cache outlasts the breaks: on GPT-6 Luna these users were always back in time. Differences in right answers are within chance. Grading is strict: one missed fact makes an answer wrong. [Live runs](benchmarks/live/README.md) · [All benchmarks](benchmarks/README.md)
+**It pays off most** in long chats with a lot of retrieved or tool text, where users pause longer than the cache lasts. **It pays off least** in short chats and where the cache outlasts the breaks: on GPT-6 Luna these users were always back in time, so there was little to save. If your app already uses Claude's 1-hour cache, the 1-hour row is yours: its writes cost more and its entries last longer, so there is less left to save. The live runs were not repeated with it. [The long cache](docs/comparisons.md#the-long-cache)
+
+**Answers hold up.** In all three measurements, the number of right answers with and without compache differs by no more than chance. On GPT-6 Luna it was slightly lower, on too few messages to call. [Live runs](benchmarks/live/README.md) · [All benchmarks](benchmarks/README.md)
 
 **What would you save?** Put your numbers in the [cost calculator](https://barendpotijk.github.io/compache/), or drop a chat log or a `policy.json` on it: it is read in your browser and sent nowhere. It compares with your own rules, other tools' defaults or what you pay now.
 
@@ -135,7 +138,7 @@ A fixed rule such as "keep the last 20 messages" or "summarize at 75% of the win
 
 | You use | compache adds |
 |---|---|
-| Prompt caching | What to do when the cache is about to expire, and what to drop once it has |
+| Prompt caching, the 1-hour cache included | What to do when the cache is about to expire, and what to drop once it has |
 | Keep the last N messages, or summarize at a threshold | N learned per kind of text, cuts timed to the cache, and trimmed text the model can fetch back |
 | OpenClaw or provider compaction at fixed thresholds | A setting fitted to your traffic. Modeled on Claude Sonnet 5.5, [48% to 54% cheaper than OpenClaw's defaults](docs/comparisons.md#openclaw) |
 | A cache tool such as caching.ai, or one-hour cache entries | Sending less. Modeled on document chats, [30% to 70% cheaper](docs/comparisons.md) than the cheapest cache setting alone |

@@ -27,7 +27,7 @@ Read on 2026-11-24 from [its site](https://caching.ai) and [documentation](https
 - **What it does.** A proxy behind a base-URL change. It adds cache marks where a request has none, sends one-token pings on Anthropic where that is switched on, and Auto-Tune picks five-minute or one-hour entries from how far apart calls come. It changes nothing a request holds.
 - **What it reports.** 67% saved on support-style traffic with pauses longer than the cache lifetime, pings included, against calling the provider directly. The cloud costs 20% of net savings.
 - **Not run.** Its site calls the core open source, but the repository it links could not be opened. The chart has what a cache tool can reach at best instead.
-- **Its best idea is the one-hour entry,** which costs twice the input price to write instead of one and a quarter times. Alone it takes these chats from $143 to $39 for users back after four minutes. compache fits the lifetime as well: it asks for one-hour entries where users take half an hour, and five minutes with pings is cheaper in the other two cases.
+- **Its best idea is the one-hour entry,** [the long cache](#the-long-cache). compache fits the lifetime as well: it asks for one-hour entries where users take half an hour, and five minutes with pings is cheaper in the other two cases.
 
 ## OptScale
 
@@ -84,7 +84,17 @@ Defaults as documented at revision [`c49b553`](https://github.com/openclaw/openc
 
 Anthropic's tool-result clearing and compaction, and OpenAI's compaction endpoint, act at a context-size threshold. They do not know how your users return or which earlier parts later turns need, and they send no keep-warm request. The calculator models Anthropic's clearing as OpenClaw configures it.
 
-OpenAI's counterpart to Anthropic's one-hour entry is a 12-hour one at 2.5× the input price for a write, in the Responses API only. compache does not fit that one.
+## The long cache
+
+Anthropic keeps an entry for an hour at 2× the input price for a write instead of 1.25×, and OpenAI for 12 hours at 2.5×, in the Responses API only. For an app that sends everything it is the simplest saving there is, and the baseline to beat. DocChat's held-out threads in the package's replay, Claude Sonnet 5.5, per 1,000 turns:
+
+| Users back after | Everything, 5-minute cache | Everything, 1-hour cache | compache | compache against the 1-hour cache |
+|---|---|---|---|---|
+| 30 seconds | $34 | $28 | $19, 5-minute cache | 30% less |
+| 4 minutes | $143 | $39 | $24, 5-minute cache and pings | 38% less |
+| 30 minutes | $286 | $155 | $32, 1-hour cache and pings | 79% less |
+
+`python benchmarks/docchat/run.py cost` reports both. compache fits Claude's lifetime to your users, and does not ask OpenAI for the 12 hours.
 
 ## In the calculator
 

@@ -100,6 +100,20 @@ def cost(args):
             share_headers=HEADER["share_headers"],
         )
         turns = held["turns"]
+        # The whole history on the provider's long cache: the same replay under that cache's rules.
+        other = copy.deepcopy(policy.artifact)
+        other.pop("standard_spec", None)
+        other["model_spec"].update(
+            cache_ttl_seconds=args.long_cache_seconds,
+            write_multiplier=args.long_cache_write,
+        )
+        long_cache = compache.replay(
+            compache.Policy(other),
+            test,
+            sum(test_labels, []),
+            observed_until=END,
+            share_headers=HEADER["share_headers"],
+        )["keep_everything_cost"]
         results.append(
             {
                 "data": str(root),
@@ -120,6 +134,8 @@ def cost(args):
                     "threads": held["threads"],
                     "turns": turns,
                     "keep_everything_per_turn": held["keep_everything_cost"] / turns,
+                    "keep_everything_long_cache_per_turn": long_cache / turns,
+                    "saving_against_long_cache": 1 - held["policy_cost"] / long_cache,
                     "policy_per_turn": held["replayed_cost"] / turns,
                     "recovery_per_turn": held["recovery_cost"] / turns,
                     "saving": held["saving"],
@@ -434,6 +450,18 @@ def main(argv=None):
     commands = parser.add_subparsers(dest="command", required=True)
     pricing = commands.add_parser("cost")
     pricing.add_argument("--data", nargs="+", required=True, help="One build per clock")
+    pricing.add_argument(
+        "--long-cache-seconds",
+        type=int,
+        default=3600,
+        help="Lifetime of the provider's long cache. Default: Anthropic's",
+    )
+    pricing.add_argument(
+        "--long-cache-write",
+        type=float,
+        default=2.0,
+        help="Its write price, as a multiple of the input price",
+    )
     live = commands.add_parser("answers")
     live.add_argument("--data", required=True)
     live.add_argument(
