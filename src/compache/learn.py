@@ -25,9 +25,11 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import threading
 import time
 from collections import Counter
+from dataclasses import replace
 from pathlib import Path
 from typing import Callable
 
@@ -36,8 +38,8 @@ from .agent import default_header
 from .api import Policy, fit
 from .defaults import default_policy
 from .errors import ContractError
-from .models import cache_lifetimes, model_spec
-from .optimizer.contracts import seconds
+from .models import cache_lifetimes, known_models, model_spec
+from .optimizer.contracts import ModelSpec, seconds
 
 __all__ = ["Learner"]
 
@@ -50,6 +52,26 @@ _GROWN = 1.5
 _MOST_CALLS = 20_000
 # One conversation in this many is left as the application wrote it.
 CONTROL_EVERY = 10
+
+
+# A model without a price sheet.
+_OTHER = ModelSpec(
+    "other",
+    context_tokens=1_000_000,
+    cache_ttl_seconds=300,
+    cache_min_tokens=1024,
+    read_multiplier=0.1,
+    write_multiplier=1.0,
+)
+
+
+def _known(spec: ModelSpec) -> bool:
+    return spec.model_id in known_models()
+
+
+def _named(spec: ModelSpec):
+    """A model as `fit` takes it: by name where there is a price sheet, or by its spec."""
+    return spec.model_id if _known(spec) else spec
 
 
 class Learner:
@@ -69,7 +91,6 @@ class Learner:
         self._policies: dict[str, Policy | None] = {}
         # How many conversations have begun, by key: those on record, then those of this process.
         self._begun: dict[str, int] | None = None
-        self._unknown: set[str] = set()
         self._state = self._read_state()
         # When a request last went out, by key.
         self._opened: dict[str, float | None] = {}
@@ -108,13 +129,18 @@ class Learner:
     # -- what a conversation is given -------------------------------------------
 
     @staticmethod
-    def _key(model, tools: bool) -> tuple[str, str] | None:
-        """The name a model's policy goes by, and the model's ID. None for a model without a price sheet."""
-        try:
-            model_id = model_spec(str(model or "")).model_id
-        except ContractError:
+    def _key(model, tools: bool) -> tuple[str, ModelSpec] | None:
+        """The name a model's policy goes by, and the model's spec. None where no model is named."""
+        name = str(model or "").strip()
+        if not name:
             return None
-        return f"{model_id}.{'agent' if tools else 'chat'}", model_id
+        try:
+            spec = model_spec(name)
+        except ContractError:
+            # One without a price sheet: what most providers charge, and no pings at a guess.
+            spec = replace(_OTHER, model_id=name)
+        plain = re.sub(r"[^A-Za-z0-9._-]+", "_", spec.model_id)
+        return f"{plain}.{'agent' if tools else 'chat'}", spec
 
     def _on_record(self) -> dict[str, int]:
         """How many conversations the record holds, by key. Only their first turns are looked at."""
@@ -145,21 +171,18 @@ class Learner:
         """
         found = self._key(model, tools)
         if found is None:
-            if model and model not in self._unknown:
-                self._unknown.add(model)
-                logger.info(
-                    "compache: no price sheet for %s, so it is only recorded", model
-                )
             return None, False
-        key, model_id = found
+        key, spec = found
         with self._lock:
             if key not in self._policies:
                 policy = self._load(key)
                 if policy is None and tools:
-                    policy = default_policy(model_id, agent=True)
+                    policy = default_policy(_named(spec), agent=True)
                     # Whether its header is to live longer shows as it is used.
                     artifact = dict(policy.artifact)
                     artifact.pop("header_spec", None)
+                    if not _known(spec):
+                        artifact["recipe"] = {**artifact["recipe"], "tool_pings": 0}
                     policy = Policy(artifact)
                 self._policies[key] = policy
             policy = self._policies[key]
@@ -199,9 +222,8 @@ class Learner:
         found = self._key(model, True)
         if found is None or self.default_lifetime:
             return None
-        key, model_id = found
-        spec = model_spec(model_id)
-        longer = default_header(spec, cache_lifetimes(model_id))
+        key, spec = found
+        longer = default_header(spec, cache_lifetimes(spec.model_id))
         with self._lock:
             policy = self._policies.get(key)
             if key in self._state or policy is None or longer is None:
@@ -263,7 +285,7 @@ class Learner:
                 continue
             found = self._key(named.most_common(1)[0][0], bool(row.get("tools_bytes")))
             if found is not None:
-                groups.setdefault(found, []).append(row)
+                groups.setdefault(found[0], (found[1], []))[1].append(row)
         return groups, labels
 
     def _refit(self) -> None:
@@ -272,13 +294,13 @@ class Learner:
         except Exception:
             logger.warning("compache: a record was not read", exc_info=True)
             return
-        for (key, model_id), rows in groups.items():
+        for key, (spec, rows) in groups.items():
             try:
-                self._fit(key, model_id, rows, labels)
+                self._fit(key, spec, rows, labels)
             except Exception:
                 logger.warning("compache: a policy was not fitted", exc_info=True)
 
-    def _fit(self, key: str, model_id: str, rows: list, labels: list) -> None:
+    def _fit(self, key: str, spec: ModelSpec, rows: list, labels: list) -> None:
         agentic = key.endswith(".agent")
         calls = sum(run.get("calls") or 1 for row in rows for run in row["runs"])
         before = self._state.get(key, {}).get("calls", 0)
@@ -296,7 +318,7 @@ class Learner:
         if not agentic and not asked:
             # Without labels nothing can be left out, and a chat is given nothing else here.
             return
-        policy = fit(kept, mine, model=model_id, agent=agentic)
+        policy = fit(kept, mine, model=_named(spec), agent=agentic)
         text = json.dumps(policy.artifact, ensure_ascii=False)
         self._write(f"{key}.json", text)
         summary = policy.summary

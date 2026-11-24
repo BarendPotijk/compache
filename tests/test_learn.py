@@ -107,15 +107,37 @@ class LearnerTests(unittest.TestCase):
             learner = Learner(folder)
             self.assertIsNone(learner.policy(MODEL, False))
 
-    def test_a_model_without_a_price_sheet_is_only_recorded(self):
+    def test_a_model_without_a_price_sheet_is_trimmed_at_what_most_charge(self):
+        class Other(Chat):
+            model = "maker/some-model:free"
+
         with tempfile.TemporaryDirectory() as folder:
             live = compache.Live(learn=folder)
-            model = FakeModel(worker(20))
-            app = Agent(live, Chat(), model)
-            app.run("Read twenty files")
-            self.assertFalse(any(noticed(b["messages"]) for b in model.bodies))
-            self.assertNotIn("reopen", json.dumps(model.bodies))
-            self.assertEqual(len(load(folder)[0]), 1)
+            model = FakeModel(worker(40))
+            Agent(live, Other(), model).run("Read forty files")
+            self.assertTrue(any(noticed(b["messages"]) for b in model.bodies))
+            self.assertEqual(live.learner.policy(Other.model, True).max_pings, 0)
+            self.assertIsNone(live.learner.header_lifetime(Other.model, 0.0))
+            self.assertIsNone(live.learner.policy(None, True))
+
+    def test_a_model_without_a_price_sheet_is_fitted_on_too(self):
+        class Other(Haiku):
+            model = "maker/some-model:free"
+
+        clock = Clock()
+        with tempfile.TemporaryDirectory() as folder:
+            learner = Learner(folder, clock=clock, background=False)
+            live = compache.Live(learn=learner, clock=clock)
+            for k in range(9):
+                clock.at += 4_000
+                model = FakeModel(quoting(), clock=lambda: clock.at)
+                Agent(live, Other(), model, clock=clock).run(f"Task {k}")
+            self.assertTrue(
+                (
+                    Path(folder) / "policies" / "maker_some-model_free.agent.json"
+                ).is_file()
+            )
+            self.assertIsNotNone(learner.fitted_on(Other.model))
 
     def test_a_model_that_only_the_path_names(self):
         class Named(Gemini):

@@ -188,8 +188,10 @@ def lines(found: dict) -> list[str]:
             parts.append(_count(entry["pings"], "ping"))
         said.append(f"  {model}: {', '.join(parts)}")
     for model, entry in found["unpriced"].items():
+        whole = entry["input_tokens"] + entry["left_out_tokens"]
+        share = entry["left_out_tokens"] / whole if whole else 0
         said.append(
-            f"  {model}: {_count(entry['calls'], 'call')}, no price sheet, so only recorded"
+            f"  {model}: {_count(entry['calls'], 'call')}, {share:.0%} of the input left out, no price sheet"
         )
     if found["left_alone"]:
         said.append(

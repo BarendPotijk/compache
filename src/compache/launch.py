@@ -205,7 +205,11 @@ def _said(live: Live, calls: list[dict]) -> list[str]:
         return []
     told = f"compache: {found['calls']:,} call{'' if found['calls'] == 1 else 's'}"
     if not found["without"]:
-        return [f"{told} recorded. There is no price sheet for this model."]
+        entries = found["unpriced"].values()
+        left = sum(e["left_out_tokens"] for e in entries)
+        whole = left + sum(e["input_tokens"] for e in entries)
+        share = f"{left / whole:.0%} of the input left out" if whole else "recorded"
+        return [f"{told}, {share}. There is no price sheet for this model."]
     spent, without = found["spent"], found["without"]
     if live.learner is not None and found["left_alone"] == 1 and spent == without:
         return [
