@@ -400,20 +400,35 @@ def command(args, base: str, prompt: str, again: bool, home: Path) -> tuple[list
     return [args.agent, *ahead, *words], {**env, **changes}
 
 
-class Repository:
-    """A generated task (tasks.py), in one prompt or in several."""
+# What follows the corrections in a long session.
+EXTRA = (
+    "Now write a test file `more_<module>.py` for each of {0}: at least ten unittest cases a module, read "
+    "off its section in SPEC.md, its edge cases first. Run them, and correct the module where one shows "
+    "that it still departs from SPEC.md. Reply with the single word DONE."
+)
+REVIEW = (
+    "Read SPEC.md once more, and for each of {0} say in one line which edge case of its section is the "
+    "easiest to get wrong. Run `python3 -m unittest -v` and correct what fails."
+)
 
-    def __init__(self, seed: int, modules: int):
+
+class Repository:
+    """A generated task (tasks.py), in one prompt, in several, or as a long session."""
+
+    def __init__(self, seed: int, modules: int, long: bool = False):
         self.name, self.seed, self.modules = str(seed), seed, modules
+        self.long = long
         self.hidden: dict = {}
 
     def make(self, tree: Path) -> None:
         self.hidden = tasks.make(tree, self.seed, self.modules)
 
     def prompts(self, parts: int) -> list[str]:
+        names = sorted(self.hidden)
+        if self.long:
+            parts = -(-len(names) // 3)
         if parts == 1:
             return [tasks.PROMPT]
-        names = sorted(self.hidden)
         size = -(-len(names) // parts)
         groups = [names[i : i + size] for i in range(0, len(names), size)]
         first = tasks.PROMPT.replace(
@@ -421,7 +436,13 @@ class Repository:
             "Leave the others for later. When every one of these does",
         )
         said = [f"{first} Start with {', '.join(groups[0])}."]
-        return said + [f"Now go on with {', '.join(g)}." for g in groups[1:]]
+        said += [f"Now go on with {', '.join(g)}." for g in groups[1:]]
+        if self.long:
+            # The same modules again, from another side.
+            for ask in (EXTRA, REVIEW):
+                halves = (names[: len(names) // 2], names[len(names) // 2 :])
+                said += [ask.format(", ".join(half)) for half in halves]
+        return said
 
     def grade(self, tree: Path) -> dict:
         return tasks.grade(tree, self.hidden)
@@ -431,7 +452,7 @@ def task_of(args, name: str):
     if args.swe:
         kind = swe.Session if args.session else swe.Issue
         return kind(Path(args.swe), name)
-    return Repository(int(name), args.modules)
+    return Repository(int(name), args.modules, args.long)
 
 
 def play_one(args, arm: str, which: str, repeat: int, key: str, bill: Bill) -> dict:
@@ -495,7 +516,8 @@ def play_one(args, arm: str, which: str, repeat: int, key: str, bill: Bill) -> d
         "task": which,
         "repeat": repeat,
         "parts": args.parts,
-        "pause": args.pause if args.parts > 1 or args.session else [],
+        "long": args.long,
+        "pause": args.pause if args.parts > 1 or args.session or args.long else [],
         "status": status,
         "seconds": round(time.time() - begun, 1),
         "cost": sum(r["cost"] for r in rows if r.get("cost")),
@@ -612,6 +634,9 @@ def main(argv=None):
     sub.add_argument("--parts", type=int, default=1, help="Prompts a task is given in")
     sub.add_argument(
         "--session", action="store_true", help="Sessions of several issues"
+    )
+    sub.add_argument(
+        "--long", action="store_true", help="A long session on a generated task"
     )
     sub.add_argument(
         "--pause",
