@@ -4,11 +4,11 @@
 
 [![Tests](https://github.com/BarendPotijk/compache/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/BarendPotijk/compache/actions/workflows/tests.yml) ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-2a78d6) ![No dependencies](https://img.shields.io/badge/dependencies-none-2a78d6) [![Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-2a78d6)](LICENCE.md)
 
-compache sits between your chatbot and the model API. It learns from your own conversations which parts of the history still matter and when your users come back, then sends less and caches better. The rest of your application stays as it is.
+compache sits between your chatbot or agent and the model API. It learns from your own conversations which parts of the history still matter and when your users come back, then sends less and caches better. The rest of your application stays as it is.
 
 ![Billed per 1,000 user messages on Claude Haiku 5.5: $2.68 without compache, $1.45 with. Right answers out of 208: 125 without, 135 with](docs/assets/headline.svg)
 
-[Get started](#get-started) · [Works with](#works-with) · [Results](#results) · [Cost calculator](https://barendpotijk.github.io/compache/) · [Docs](docs/README.md)
+[Get started](#get-started) · [Coding agents](#coding-agents) · [Works with](#works-with) · [Results](#results) · [Cost calculator](https://barendpotijk.github.io/compache/) · [Docs](docs/README.md)
 
 ## Why long chats get expensive
 
@@ -89,12 +89,25 @@ compache fit threads.jsonl.gz --labels labels.jsonl --model claude-haiku-5-5
 Labels say, for a sample of messages, which earlier parts were needed. A [coding-agent skill](skills/compache-label-dependencies/SKILL.md) writes them. Without labels compache keeps the whole history and tunes the pings. [Guide](docs/guide.md)
 </details>
 
+## Coding agents
+
+```sh
+compache wrap claude          # or codex, opencode, gemini, aider, goose, or any command after --
+```
+
+An agent sends every tool result again with every call. compache keeps the newest ones in view, lets older ones go when that is cheap, keeps the cache through long tool runs and breaks, and fetches a result back when the model asks for it. It starts from what 174 public runs taught and goes on from your own sessions. There is nothing to set. [Agents](docs/agents.md)
+
+![Cost per 1,000 model calls on Claude Sonnet 5.5: one task at a stretch 5% less, a few steps with 4-minute breaks 30% less, three tasks with 4-minute breaks 27% less](docs/assets/agents-cost.svg)
+
+`compache stats` says what it saved. In your own agent it is one argument: `compache.wrap(client, learn="compache-record")`.
+
 ## Works with
 
 | Your stack | What you add |
 |---|---|
+| Claude Code, Codex, OpenCode, Gemini CLI, Aider, Goose and other agents on the command line | `compache wrap <agent>` |
 | OpenAI, Anthropic and Google GenAI SDKs, sync, async and streaming | `compache.wrap(client, "policy.json")` |
-| LangChain and LangGraph on `ChatOpenAI` | `compache.langchain.clients(...)` and `middleware()` |
+| LangChain and LangGraph, any chat model | `compache.langchain.middleware(...)` |
 | OpenAI Agents SDK, Pydantic AI, LlamaIndex, Agno, AutoGen, Strands, Haystack, Langfuse's OpenAI drop-in | The wrapped client, [one line each](docs/integrations.md#python-frameworks) |
 | LiteLLM | `compache.litellm.install(...)`, or a callback in your LiteLLM proxy |
 | Hermes | `context.engine: compache` |
@@ -128,6 +141,7 @@ A fixed rule such as "keep the last 20 messages" or "summarize at 75% of the win
 | **GPT-6 Luna**, against the 30-minute cache | Live calls, billed, one integration | **2%&nbsp;to&nbsp;5%&nbsp;less** |
 | **Claude Sonnet 5.5**, against the 5-minute cache | DocChat, modeled cost | **43%&nbsp;to&nbsp;89%&nbsp;less** |
 | **Claude Sonnet 5.5**, against the 1-hour cache | DocChat, modeled cost | **30%&nbsp;to&nbsp;79%&nbsp;less** |
+| **Coding agents on Claude Sonnet 5.5**, against the 5-minute cache | 174 public runs, modeled cost | **5%&nbsp;to&nbsp;45%&nbsp;less** |
 
 **It pays off most** in long chats with a lot of retrieved or tool text, where users pause longer than the cache lasts. **It pays off least** in short chats and where the cache outlasts the breaks: on GPT-6 Luna these users were always back in time, so there was little to save. If your app already uses Claude's 1-hour cache, the 1-hour row is yours: its writes cost more and its entries last longer, so there is less left to save, most of all in short chats. [The long cache](docs/comparisons.md#the-long-cache)
 
