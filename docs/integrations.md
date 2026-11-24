@@ -139,6 +139,7 @@ In order: `compache.thread(...)` around the call, the header `x-compache-thread`
 | Langfuse | `compache pull langfuse -o threads.jsonl.gz` |
 | MLflow | `compache pull mlflow -o threads.jsonl.gz` |
 | An OpenTelemetry export in the GenAI or OpenInference conventions, as Phoenix and others write | `compache pull otel spans.jsonl -o threads.jsonl.gz` |
+| The sessions that Claude Code or Codex keeps on this machine | `compache pull claude -o threads.jsonl.gz`, or straight into a record: `compache learn claude --from claude` |
 | Your own chat log | Nothing: `compache fit` reads it, see the [guide](guide.md#1-threads) |
 | Nowhere you can read | A record made going forward: `compache fit compache-record` |
 

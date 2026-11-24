@@ -16,6 +16,7 @@ An agent makes dozens of model calls per message, and every call sends every too
 | `compache wrap -- my-agent` | Any other command. It is told by the variables that SDKs read |
 | `compache wrap --watch claude` | Record only, and change nothing |
 | `compache wrap --print claude` | Show the proxy to start and what to set, to do it yourself |
+| `compache learn claude --from claude` | Start from the sessions Claude Code keeps on this machine. Also `codex` |
 | `compache stats` | What was saved, per agent and model |
 | `compache doctor` | Whether it works here, and what it can be used with |
 
@@ -37,13 +38,13 @@ How many rounds of results stay, when a cut pays, how many pings and which lifet
 
 ## How it learns
 
-- **It starts from public runs.** The policy for the first session was fitted on 174 coding-agent runs: the newest 8 rounds in full on models that read their cache at a twentieth of the price, 12 where they read at a tenth.
-- **It goes on from yours.** After some 200 calls, and again whenever that has grown by half, it is fitted on what is on record in `~/.compache/<agent>`, per model, in the seconds after a session.
+- **It starts from public runs.** The policy for the first session was fitted on 174 coding-agent runs and keeps the newest 8 rounds in full.
+- **It goes on from yours.** After some 200 calls, and again whenever that has grown by half, it is fitted on what is on record in `~/.compache/<agent>`, per model, in the seconds after a session. `compache learn claude --from claude` adds the sessions Claude Code or Codex kept before, so that it need not wait.
 - **No labels.** A reply that repeats a line which only a tool had returned shows which result it relied on. Those lines are held as hashes while the conversation runs, and the record keeps which result it was, never the line.
 - **It stays honest.** A policy that hides results hides that they were needed. So one conversation in ten goes out as the agent wrote it. Those say what replies rely on, and what the others save.
 - **No text.** The record holds sizes, times and usage. Conversations go by a hash.
 
-At least 85% of the calls that rely on an earlier result find it in view. The others are priced as fetching it back.
+At least 85% of the calls that rely on an earlier result find it in view, or no more than 1 call in 100 misses one. Those are priced as fetching it back.
 
 ## In your own agent
 

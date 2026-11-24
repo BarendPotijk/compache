@@ -9,7 +9,7 @@ pip install compache
 | Step | Command | Python |
 |---|---|---|
 | See it on sample chats | `compache demo` | |
-| Read traces | `compache pull langfuse -o threads.jsonl.gz`, also `mlflow` and `otel` | `compache.langfuse.pull()` |
+| Read traces | `compache pull langfuse -o threads.jsonl.gz`, also `mlflow`, `otel`, `claude` and `codex` | `compache.langfuse.pull()` |
 | Or record going forward | `compache proxy --record compache-record --sample 0.1` | `compache.wrap(client, record=..., sample=0.1)` |
 | Check the data | `compache check threads.jsonl --labels labels.jsonl` | `compache.load_threads(path)` |
 | Fit | `compache fit threads.jsonl --labels labels.jsonl --model claude-sonnet-5-5` | `compache.fit(threads, labels, model=...)` |

@@ -65,10 +65,10 @@ A turn of an agent is a loop of many calls, so there the unit is the call. `comp
 |---|---|
 | What is decided | The newest rounds of tool results stay in full. Older ones become a notice, and the reasoning of finished turns goes with them, at the next call where that is cheaper at once (the cache has expired, or a long request is billed dearer), or where what goes is so many times as large as what would be written again behind it |
 | What is fitted | How many rounds, how many times, keep-warm pings while a tool runs and while a user is away, the cache lifetime, and whether instructions and tools get a longer one. Some 250 candidates, each priced on every recorded call by the provider's cache rules |
-| What has to stay | At least 85% of the calls that rely on an earlier result find it in view. A call relies on a result where its reply repeats a line that only this tool returned. A call that does not find it is priced as fetching it back: one more call, and the result again |
+| What has to stay | At least 85% of the calls that rely on an earlier result find it in view, or no more than 1% of all calls miss one. A call relies on a result where its reply repeats a line that only this tool returned. A call that does not find it is priced as fetching it back: one more call, and the result again |
 | Sizes | The provider's own count. What a request grew by belongs to the results that joined it, so text that is dense in tokens counts as dense |
 | Shared instructions | A conversation that begins while another has the same instructions and tools in the cache reads them |
-| Too little data | Under 40 calls that rely on something, only the cut that public runs taught is priced, with every lifetime and number of pings |
+| Too little data | Under 200 calls, only the cut that public runs taught is priced, with every lifetime and number of pings |
 
 `Flow`, what a conversation holds and what the provider has cached of it, is one class that the fit, the replay and the runtime share, so what was priced is what happens.
 
