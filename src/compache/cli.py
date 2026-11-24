@@ -22,7 +22,7 @@ from .models import _sheet, known_models
 from .optimizer.contracts import ModelSpec
 from .profile import history_resent, measure, profile
 from .proxy import main as run_proxy
-from .record import is_record
+from .record import is_record, load_calls, thread_name
 from .record import load as load_record
 from .threads import load_threads, read_jsonl
 from .transcripts import AGENTS as TRANSCRIPTS
@@ -251,7 +251,12 @@ def _parser() -> argparse.ArgumentParser:
         "folder",
         nargs="*",
         type=Path,
-        help="Record folders. Left out, all that `compache wrap` keeps",
+        help="Record folders, or names of agents. Left out, all that `compache wrap` keeps",
+    )
+    sub.add_argument(
+        "--line",
+        action="store_true",
+        help="A few words, for the status line of an agent that gives its session on standard input",
     )
     sub.add_argument("--json", action="store_true", help="Print JSON")
 
@@ -729,8 +734,39 @@ def _default(args):
     return summary, "\n".join(lines)
 
 
+def _of_agent(folder: Path) -> Path:
+    """A record folder, where the name of an agent stands for the one that `wrap` makes."""
+    named = len(folder.parts) == 1 and not folder.exists()
+    return home() / folder if named else folder
+
+
+# How much of a record's end a status line looks at.
+_RECENT = 2_000_000
+
+
+def _line(folders) -> str:
+    """The status line of the session that is told of on standard input, or of the last day."""
+    said = None
+    try:
+        said = None if sys.stdin.isatty() else json.loads(sys.stdin.read() or "null")
+    except (OSError, ValueError):
+        pass
+    session = said.get("session_id") if isinstance(said, dict) else None
+    rows = [row for folder in folders for row in load_calls(folder, _RECENT)]
+    if isinstance(session, str):
+        rows = [row for row in rows if row.get("thread") == thread_name(session)]
+    else:
+        since = max((row["at"] for row in rows), default=0) - 86_400
+        rows = [row for row in rows if row["at"] >= since]
+    return stats.line(stats.savings(rows))
+
+
 def _stats(args):
-    folders = args.folder or sorted(f.parent for f in home().glob("*/calls.jsonl"))
+    folders = [_of_agent(f) for f in args.folder]
+    folders = folders or sorted(f.parent for f in home().glob("*/calls.jsonl"))
+    if args.line:
+        said = _line(folders)
+        return {"line": said}, said
     if not folders:
         return (
             {},
@@ -756,10 +792,7 @@ def _stats(args):
 
 
 def _learn(args):
-    folder = args.folder
-    if len(folder.parts) == 1 and not folder.exists():
-        # The name of an agent, whose folder `wrap` makes.
-        folder = home() / folder
+    folder = _of_agent(args.folder)
     lines, report = [], {}
     if args.source:
         report = imported(folder, args.source, args.sessions, days=args.days)

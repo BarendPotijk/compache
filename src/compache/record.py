@@ -204,13 +204,18 @@ def is_record(source: Any) -> bool:
     return isinstance(source, (str, Path)) and (Path(source) / _TURNS).is_file()
 
 
-def _read(file: Path) -> tuple[list[dict], int]:
-    """The rows of a file, and how many lines of it are none."""
+def _read(file: Path, last: int | None = None) -> tuple[list[dict], int]:
+    """The rows of a file, or of its last so many bytes, and how many lines of it are none."""
     rows, others = [], 0
     if not file.is_file():
         return rows, others
-    with open(file, encoding="utf-8", errors="replace") as stream:
-        for line in stream:
+    with open(file, "rb") as stream:
+        if last is not None and file.stat().st_size > last:
+            stream.seek(-last, os.SEEK_END)
+            # The line that was cut in two.
+            stream.readline()
+        for raw in stream:
+            line = raw.decode("utf-8", "replace")
             try:
                 row = json.loads(line) if line.strip() else None
             except ValueError:
@@ -226,9 +231,9 @@ def _lines(file: Path) -> list[dict]:
     return _read(file)[0]
 
 
-def load_calls(path: str | Path) -> list[dict]:
-    """Every model call of a record, as written."""
-    return _lines(Path(path) / _CALLS)
+def load_calls(path: str | Path, last: int | None = None) -> list[dict]:
+    """Every model call of a record, as written, or those in its last so many bytes."""
+    return _read(Path(path) / _CALLS, last)[0]
 
 
 def unreadable(path: str | Path) -> int:

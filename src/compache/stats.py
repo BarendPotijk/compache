@@ -20,7 +20,7 @@ from .models import cache_lifetimes, model_spec, pricing
 from .optimizer.contracts import ModelSpec
 from .optimizer.distribution import _charge
 
-__all__ = ["lines", "savings"]
+__all__ = ["line", "lines", "savings"]
 
 _COUNTED = ("answer", "reopen", "retry", "ping", "note")
 # The lifetime of the entries that a provider counts apart.
@@ -195,6 +195,21 @@ def _dollars(amount: float) -> str:
 
 def _count(n, noun: str) -> str:
     return f"{n:,} {noun}{'' if n == 1 else 's'}"
+
+
+def line(found: dict) -> str:
+    """What was saved, in a few words, as for a status line."""
+    if not found["calls"]:
+        return "compache"
+    if not found["without"]:
+        entries = found["unpriced"].values()
+        left = sum(e["left_out_tokens"] for e in entries)
+        whole = left + sum(e["input_tokens"] for e in entries)
+        return f"compache {left / whole if whole else 0:.0%} left out"
+    spent, without = found["spent"], found["without"]
+    share = abs(found["saving"])
+    change = f"{share:.0%} {'less' if spent <= without else 'more'}"
+    return f"compache {change}, {_dollars(spent)} of {_dollars(without)}"
 
 
 def lines(found: dict) -> list[str]:

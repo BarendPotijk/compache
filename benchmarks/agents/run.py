@@ -46,12 +46,14 @@ sys.path.insert(0, str(HERE))
 import swe  # noqa: E402
 import tasks  # noqa: E402
 
+import compache  # noqa: E402
 from compache import launch, stats  # noqa: E402
 from compache.learn import Learner  # noqa: E402
 from compache.live import Live  # noqa: E402
+from compache.models import pricing  # noqa: E402
 from compache.proxy import serve  # noqa: E402
 from compache.threads import canonical_usage  # noqa: E402
-from compache.transcripts import imported  # noqa: E402
+from compache.transcripts import imported, pull  # noqa: E402
 
 ARMS = ("none", "compache", "learned", "headroom", "kompressor")
 KOMPRESSOR = """
@@ -656,6 +658,40 @@ def report(args):
                 )
 
 
+def priced(args):
+    """What the sessions of the first arm would have cost under compache: the same calls, modeled."""
+    model = {"claude": "claude-haiku-5-5", "codex": "gpt-6-luna"}[args.agent]
+    kept = {"claude": ".claude/projects", "codex": ".codex/sessions"}[args.agent]
+    threads: dict[str, list] = {}
+    for folder in sorted((Path(args.work) / "runs").iterdir()):
+        sessions = folder / "home" / kept
+        if folder.name.startswith(f"{args.agent}-none-") and sessions.is_dir():
+            task = folder.name.split("-none-")[1].rsplit("-", 1)[0]
+            for row in pull(args.agent, sessions, days=365)[0]:
+                threads.setdefault(task, []).append(row)
+    default = compache.default_policy(model, agent=True)
+    paid = [0.0, 0.0, 0.0]
+    for task, rows in threads.items():
+        others = [r for name, some in threads.items() if name != task for r in some]
+        fitted = compache.fit(others, model=model, agent=True)
+        found = [compache.replay(policy, rows) for policy in (default, fitted)]
+        for k, cost in enumerate(
+            [found[0]["keep_everything_cost"], *(f["policy_cost"] for f in found)]
+        ):
+            paid[k] += cost
+        whole = found[0]["keep_everything_cost"]
+        print(
+            f"{task}: {found[0]['calls']} calls, as compache starts "
+            f"{1 - found[0]['policy_cost'] / whole:.0%} less, learned on the others "
+            f"{1 - found[1]['policy_cost'] / whole:.0%} less, {fitted.recipe}"
+        )
+    unit = pricing(model)["input_price_per_million"] / 1e6
+    print(
+        f"all: ${paid[0] * unit:.4f} whole, as it starts {1 - paid[1] / paid[0]:.0%} less, "
+        f"learned {1 - paid[2] / paid[0]:.0%} less"
+    )
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     commands = parser.add_subparsers(dest="command", required=True)
@@ -701,8 +737,11 @@ def main(argv=None):
     )
     sub = commands.add_parser("report")
     sub.add_argument("--work", default="agents-out")
+    sub = commands.add_parser("priced")
+    sub.add_argument("--agent", choices=["claude", "codex"], default="claude")
+    sub.add_argument("--work", default="agents-out")
     args = parser.parse_args(argv)
-    {"play": play, "report": report}[args.command](args)
+    {"play": play, "report": report, "priced": priced}[args.command](args)
 
 
 if __name__ == "__main__":

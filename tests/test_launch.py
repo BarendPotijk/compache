@@ -21,7 +21,7 @@ import compache
 from compache import doctor, launch, proxy
 from compache.cli import main
 from compache.proxy import _decoded, serve as proxied
-from compache.record import load, load_calls
+from compache.record import load, load_calls, thread_name
 from fakes import FakeModel, serve
 from test_agent_live import worker
 
@@ -338,6 +338,32 @@ class RunTests(Wrapped):
         self.assertEqual(status, 0)
         self.assertIn("compache proxy --port 8787 --learn", out)
         self.assertIn("export ANTHROPIC_BASE_URL='http://127.0.0.1:8787'", out)
+
+
+class LineTests(Wrapped):
+    """The status line of an agent."""
+
+    def line(self, said):
+        before, sys.stdin = sys.stdin, io.StringIO(said)
+        try:
+            return self.ask("stats", "claude", "--line")
+        finally:
+            sys.stdin = before
+
+    def test_a_session_s_savings_in_a_few_words(self):
+        self.assertEqual(self.line(""), (0, "compache\n"))
+        self.wrap("--upstream", self.url, "claude", "--", "files")
+        status, out = self.line("{}")
+        self.assertRegex(out, r"^compache \d+% less, \$0\.\d+ of \$0\.\d+$")
+        self.assertEqual(self.line('{"session_id": "another"}')[1], "compache\n")
+        folder = self.home / "kept" / "claude"
+        row = {"v": 1, "thread": thread_name("mine"), "turn": 1, "kind": "answer"}
+        usage = {"input": 9_000, "output": 1, "cache_read": 0, "cache_write": 0}
+        row |= {"at": 1.0, "model": "claude-haiku-5-5", "usage": usage}
+        with open(folder / "calls.jsonl", "a") as stream:
+            stream.write(json.dumps(row) + "\n")
+        _, out = self.line('{"session_id": "mine"}')
+        self.assertIn("$0.0009 of $0.0009", out)
 
 
 class DoctorTests(Wrapped):

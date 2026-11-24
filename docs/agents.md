@@ -17,7 +17,7 @@ An agent makes dozens of model calls per message, and every call sends every too
 | `compache wrap --watch claude` | Record only, and change nothing |
 | `compache wrap --print claude` | Show the proxy to start and what to set, for an agent in an editor or one that is always on |
 | `compache learn claude --from claude` | Start from the sessions Claude Code keeps on this machine. Also `codex` |
-| `compache stats` | What was saved, per agent and model |
+| `compache stats` | What was saved, per agent and model. For Claude Code's status line: `"statusLine": {"type": "command", "command": "compache stats claude --line"}` in its settings |
 | `compache doctor` | Whether it works here, and what it can be used with |
 
 `wrap` starts a proxy on a free local port, starts the agent with its base URL set to it, and says at the end what the session cost and what it would have cost. No file of the agent's is changed. Where the agent's own settings name a base URL, such as a gateway's, requests go on to that. Credentials pass through, and go nowhere else. On a subscription nothing is billed by the token: what is saved there is room in the window and in the plan's limits.
