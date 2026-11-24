@@ -58,7 +58,7 @@ Each column is a turn and each row a kind of part. Most turns need nothing earli
 | 4 minutes | Up to 3 | $143 | $24 | 83% |
 | 30 minutes | Up to 3 | $286 | $43 | 85% |
 
-Cost per 1,000 turns on the 15 held-out threads (625 turns), at list prices and a five-minute cache, including the cost of fetching back what the cut archived. A cut waits for a return that finds the cache cold. Where users are back in 30 seconds the policy keeps 57% of the history tokens, and 92% of the 181 held-out turns that need history still have enough of it in view. Where they take 30 minutes it keeps 15%, and 76%. It was the cheapest of the 21 policies the fit priced in two of the three cases and within 3% in the third: the [policy map](../../README.md#why-fitted-beats-default) shows all of them.
+Cost per 1,000 turns on the 15 held-out threads (625 turns), at list prices and a five-minute cache, including the cost of fetching back what the cut archived. A cut waits for a return that finds the cache cold. Where users are back in 30 seconds the policy keeps 57% of the history tokens, and 92% of the 181 held-out turns that need history still have enough of it in view. Where they take 30 minutes it keeps 15%, and 76%. It was the cheapest of the 21 policies the fit priced in two of the three cases and within 3% in the third: the [policy map](../../README.md#why-learn-it-from-your-data) shows all of them.
 
 Then Sonnet 5.5 answered 30 held-out turns twice, and Sonnet 5.5 graded each answer against the turn's key facts.
 

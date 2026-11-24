@@ -7,6 +7,7 @@ import gzip
 import hashlib
 import json
 import sys
+from importlib import resources
 from pathlib import Path
 
 from . import __version__
@@ -63,6 +64,21 @@ def _parser() -> argparse.ArgumentParser:
         help="When the record was cut, if conversations were still going",
     )
     sub.add_argument("-o", "--output", type=Path, default=Path("policy.json"))
+
+    text = "Fit a policy on four sample conversations that come with compache"
+    sub = commands.add_parser("demo", help=text, description=text)
+    sub.add_argument(
+        "--model",
+        default="claude-sonnet-5-5",
+        help="The model to fit for, by name or a JSON file of model spec fields",
+    )
+    sub.add_argument(
+        "-o",
+        "--output",
+        type=Path,
+        help="Keep the policy here. Left out, it is only shown",
+    )
+    sub.add_argument("--json", action="store_true", help="Print JSON")
 
     sub = command("replay", "Price a fitted policy on threads it has not seen")
     sub.add_argument("--policy", type=Path, required=True)
@@ -239,6 +255,30 @@ def _fit(args):
         ]
     )
     return {"output": str(args.output), **summary}, text
+
+
+def _demo(args):
+    with resources.as_file(resources.files(__package__).joinpath("demo")) as sample:
+        policy = fit(
+            sample / "threads.jsonl.gz", sample / "labels.jsonl", model=args.model
+        )
+    if args.output is not None:
+        policy.save(args.output)
+    summary = policy.summary
+    text = "\n".join(
+        [
+            f"Fitted on {summary['threads']:,} sample threads, {summary['turns']:,} turns "
+            f"({summary['labelled_turns']:,} labelled) for {summary['model']}.",
+            "",
+            policy.describe(),
+            "",
+            f"Wrote {args.output}"
+            if args.output is not None
+            else "Not kept. Give -o to keep it.",
+            "Your own: compache fit threads.jsonl --labels labels.jsonl",
+        ]
+    )
+    return summary, text
 
 
 def _replay(args):
@@ -588,6 +628,7 @@ def _models(args):
 
 _COMMANDS = {
     "fit": _fit,
+    "demo": _demo,
     "replay": _replay,
     "profile": _profile,
     "check": _check,

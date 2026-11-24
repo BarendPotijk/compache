@@ -60,13 +60,11 @@ That is all. There are no thresholds to tune.
 <summary><b>Try it now</b>, on four sample chats in two seconds, without an API key</summary>
 
 ```sh
-git clone https://github.com/BarendPotijk/compache && cd compache && pip install .
-compache fit examples/quickstart/threads.jsonl.gz \
-  --labels examples/quickstart/labels.jsonl --model claude-sonnet-5-5
+compache demo -o policy.json
 ```
 
 ```text
-Fitted on 4 threads, 71 turns (71 labelled) for claude-sonnet-5-5.
+Fitted on 4 sample threads, 71 turns (71 labelled) for claude-sonnet-5-5.
 
 Keep questions from the last 4 turns, answers from the last 9 turns and retrieved text from the last turn.
 Send up to 1 keep-warm ping while a user is away.
@@ -76,7 +74,7 @@ $16.10 per 1,000 turns against $50.25 keeping everything: 68% less.
 Wrote policy.json
 ```
 
-`python examples/quickstart/apply.py` then plays one of those chats, the one in the figure above, message by message.
+In a clone of this repository, `python examples/quickstart/apply.py` then plays one of those chats, the one in the figure above, message by message.
 </details>
 
 <details>
@@ -96,10 +94,13 @@ Labels say, for a sample of messages, which earlier parts were needed. A [coding
 |---|---|
 | OpenAI, Anthropic and Google GenAI SDKs, sync, async and streaming | `compache.wrap(client, "policy.json")` |
 | LangChain and LangGraph on `ChatOpenAI` | `compache.langchain.clients(...)` and `middleware()` |
-| Anything with a base URL: agent harnesses, LiteLLM, LlamaIndex, Pydantic AI, the Vercel AI SDK | `compache proxy --policy policy.json` |
+| OpenAI Agents SDK, Pydantic AI, LlamaIndex, Agno, AutoGen, Strands, Haystack, Langfuse's OpenAI drop-in | The wrapped client, [one line each](docs/integrations.md#python-frameworks) |
+| LiteLLM | `compache.litellm.install(...)`, or a callback in your LiteLLM proxy |
+| Hermes | `context.engine: compache` |
+| Anything with a base URL: the Vercel AI SDK, OpenClaw and other agent harnesses | `compache proxy --policy policy.json` |
 | Your own prompt assembly | `policy.session(thread_id)` |
 
-Everything runs in your own process and talks only to your model provider. Keep-warm pings need a process that stays up; without one, fit with `ping_counts=(0,)`. A request the provider refuses after compache changed it is sent again as your app wrote it. [All integrations](docs/integrations.md)
+Everything runs in your own process and talks only to your model provider. No state is kept outside the process, so trimming works in serverless functions and across deploys. Keep-warm pings need a process that stays up; without one, fit with `ping_counts=(0,)`. A request the provider refuses after compache changed it is sent again as your app wrote it. [All integrations](docs/integrations.md)
 
 ## Why learn it from your data?
 
@@ -136,6 +137,7 @@ A fixed rule such as "keep the last 20 messages" or "summarize at 75% of the win
 | Prompt caching | What to do when the cache is about to expire, and what to drop once it has |
 | Keep the last N messages, or summarize at a threshold | N learned per kind of text, cuts timed to the cache, and trimmed text the model can fetch back |
 | OpenClaw or provider compaction at fixed thresholds | A setting fitted to your traffic. Modeled on Claude Sonnet 5.5, [48% to 54% cheaper than OpenClaw's defaults](docs/comparisons.md#openclaw) |
-| Headroom | The other half: Headroom shrinks single tool results, compache decides which parts stay and when the cache is kept warm |
+| A cache tool such as caching.ai, or one-hour cache entries | Sending less. Modeled on document chats, [30% to 60% cheaper](docs/comparisons.md) than the cheapest cache setting alone |
+| Headroom or OptScale Kompressor | The other half: they shrink single tool results, compache decides which parts stay and when the cache is kept warm. [They combine](docs/comparisons.md) |
 
 [Guide](docs/guide.md) · [Integrations](docs/integrations.md) · [How it works](docs/how-it-works.md) · [Other tools compared](docs/comparisons.md) · [Calculator](https://barendpotijk.github.io/compache/) · [Issues](https://github.com/BarendPotijk/compache/issues) · [Apache-2.0](LICENCE.md)
