@@ -3,6 +3,8 @@ name = "compache"
 version = "0.13.0"
 description = "Fit prompt caching and context compaction to your own conversation traces."
 readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENCE.md"]
 authors = [
     { name = "Richard Debets", email = "rrd.technl@gmail.com" }
 ]
