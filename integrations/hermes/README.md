@@ -24,12 +24,11 @@ prompt_caching:
 
 | | |
 |---|---|
-| Reads | The policy file in `COMPACHE_POLICY` |
+| Reads | The policy file in `COMPACHE_POLICY`, and `prompt_caching.cache_ttl` in Hermes' configuration |
 | Writes | Nothing, unless `COMPACHE_RECORD` names a folder. Then sizes, times and token counts of every turn, never text |
-| Network, model calls, telemetry, credentials | None |
-| Background threads or processes | None |
-| Tools | `reopen`, once something has been trimmed. It returns that text from the conversation |
-| When a conversation outgrows the model | Hermes' own compressor |
+| Network, telemetry, shell, background work | None |
+| Model calls, credentials | None of its own. When a conversation outgrows the model, it hands the model route Hermes gave it to Hermes' own compressor |
+| Tools | `reopen`, while a policy is set. It returns trimmed text of the same conversation |
 | Installs | `compache` from PyPI, which has no dependencies |
 
 Needs Hermes 0.23 or later. [Other ways in](https://github.com/BarendPotijk/compache/blob/main/docs/integrations.md), with keep-warm pings and a policy learned from your own sessions: `compache proxy`.
