@@ -15,7 +15,9 @@ blocks and everything a dialect does not know pass through as they came.
 
 from __future__ import annotations
 
+import hashlib
 import json
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Iterator
 
@@ -202,17 +204,20 @@ def with_default_lifetime(body: Any) -> Any:
     return _with_marks(body, _plain_mark, ("messages", "input"))
 
 
-def _header_marked(body: dict, mark: dict, spot) -> dict:
+def _header_marked(body: dict, mark: dict, spot, ahead) -> dict:
     """A request whose instructions and tools are cached as `mark` says, the conversation behind them as before.
 
-    What is marked there already is marked so, and else `spot` gives the place
-    for a mark: its path and the content to put there. A longer lifetime may
-    come ahead of a shorter one, so nothing else has to change.
+    `ahead(path)` says whether a mark is one of theirs. What is marked there
+    already is marked so, and else `spot` gives the place for a mark: its path
+    and the content to put there. A longer lifetime may come ahead of a shorter
+    one, so nothing else has to change.
     """
-    found = [p for p in _marks(body) if p[0] in ("tools", "system")]
-    if found:
-        return _with_marks(body, lambda m: {**m, **mark}, ("tools", "system"))
-    if len(_marks(body)) + ("cache_control" in body) >= _MOST_MARKS:
+    marks = _marks(body)
+    found = [path for path in marks if ahead(path)]
+    for path in found:
+        path = (*path, "cache_control")
+        body = put(body, path, {**get(body, path), **mark})
+    if found or len(marks) + ("cache_control" in body) >= _MOST_MARKS:
         return body
     place = spot(body, mark)
     return body if place is None else put(body, *place)
@@ -249,14 +254,21 @@ def _marks(body: Any) -> list[tuple]:
 _MOST_MARKS = 4
 
 
-def _with_boundary(body: dict, at: int, pieces) -> dict:
-    """A request with a cache mark at the end of what comes ahead of message `at`.
+def _with_boundaries(body: dict, places, pieces) -> dict:
+    """A request with a cache mark at the end of what comes ahead of each of these messages.
 
     A request that was cut still shares its start with the one before it. The
     provider looks for that only a little way back from each mark, so there has
     to be one. `pieces(message)` gives a message's content as pieces that can
-    carry a mark, or None.
+    carry a mark, or None. The first place matters most.
     """
+    placed: list = []
+    for at in places:
+        body = _with_boundary(body, at, pieces, placed)
+    return body
+
+
+def _with_boundary(body: dict, at: int, pieces, placed: list) -> dict:
     found = _marks(body)
     used = len(found) + ("cache_control" in body)
     for i in range(min(at, len(body["messages"])) - 1, -1, -1):
@@ -273,7 +285,9 @@ def _with_boundary(body: dict, at: int, pieces) -> dict:
     else:
         return body
     j = good[-1]
+    here = ("messages", i, "content", j)
     if blocks[j].get("cache_control"):
+        placed.append(here)
         return body
     # The mark copies the lifetime of the last one: a longer may not follow a shorter.
     mark = dict(get(body, found[-1])["cache_control"]) if found else dict(_CACHE)
@@ -281,7 +295,9 @@ def _with_boundary(body: dict, at: int, pieces) -> dict:
         # One of two marks ahead of the conversation can go: the later one covers it.
         ahead = [path for path in found if path[0] in ("tools", "system")]
         ahead += [p for p in found if p[0] == "messages" and p[1] == 0]
-        spare = ahead if len(ahead) > 1 else [p for p in found[:-1] if p not in ahead]
+        ahead = [path for path in ahead if path not in placed]
+        others = [p for p in found[:-1] if p not in ahead and p not in placed]
+        spare = ahead if len(ahead) > 1 else others
         if not spare:
             return body
         held = get(body, spare[0])
@@ -290,7 +306,8 @@ def _with_boundary(body: dict, at: int, pieces) -> dict:
         blocks = pieces(body["messages"][i])
     marked = [*blocks]
     marked[j] = {**marked[j], "cache_control": mark}
-    return put(body, ("messages", i, "content"), marked)
+    placed.append(here)
+    return put(body, here[:3], marked)
 
 
 def _cost(usage: Any) -> float | None:
@@ -362,7 +379,8 @@ class TextStream:
     `text` is the reply as the application has seen it. Every dialect builds on
     this, and sets `again` when the provider stopped only to call the tool
     named here: the caller then answers the calls in `ours`, sends `said` back
-    and feeds the next stream into the same object.
+    and feeds the next stream into the same object. `over` says that nothing
+    more will come, where the API has an event for that.
     """
 
     def __init__(self, dialect, tool: str | None = None):
@@ -375,7 +393,7 @@ class TextStream:
         self.calls: list = []
         self.ours: list = []
         self.again = False
-        self.finished = False
+        self.finished = self.over = False
         self._shown = ""
 
     @property
@@ -394,8 +412,13 @@ class TextStream:
     def end(self) -> list[bytes]:
         return []
 
+    def failed(self, status: int, error: dict) -> list[bytes]:
+        """What ends a reply that cannot go on, as the API says so inside a stream."""
+        return [sse_bytes(None, {"error": error})]
+
     def next_round(self) -> None:
-        self.again, self.ours = False, []
+        self.again, self.ours, self.calls = False, [], []
+        self.finished = self.over = False
 
 
 # Where a chat-completions message carries reasoning, as gateways and model makers name it.
@@ -505,24 +528,26 @@ class OpenAIChat:
         model = str(body.get("model") or "")
         if "claude" not in model and "anthropic" not in model:
             return body
-        mark = cache_mark(lifetime)
-        for i, message in enumerate(body["messages"]):
+        opening = 0
+        for message in body["messages"]:
             if message.get("role") not in ("system", "developer"):
                 break
-            content = message.get("content")
-            if isinstance(content, str) and content:
-                parts = [{"type": "text", "text": content, "cache_control": mark}]
-            elif isinstance(content, list) and content:
-                parts = [
-                    {**p, "cache_control": mark} if p.get("cache_control") else p
-                    for p in content
-                ]
-                if parts == content:
-                    parts[-1] = {**parts[-1], "cache_control": mark}
-            else:
-                continue
-            return put(body, ("messages", i, "content"), parts)
-        return body
+            opening += 1
+
+        def spot(body, mark):
+            for i in range(opening):
+                content = body["messages"][i].get("content")
+                if isinstance(content, str) and content:
+                    content = [{"type": "text", "text": content}]
+                if isinstance(content, list) and content:
+                    last = {**content[-1], "cache_control": mark}
+                    return ("messages", i, "content"), [*content[:-1], last]
+            return None
+
+        def ahead(path):
+            return path[0] == "tools" or (path[0] == "messages" and path[1] < opening)
+
+        return _header_marked(body, cache_mark(lifetime), spot, ahead)
 
     @staticmethod
     def said_so_far(body: dict) -> list:
@@ -545,7 +570,7 @@ class OpenAIChat:
         return {**body, "messages": [*said[:at], *extra, *said[at:]]}
 
     @staticmethod
-    def with_boundary(body: dict, at: int) -> dict:
+    def with_boundaries(body: dict, places) -> dict:
         model = str(body.get("model") or "")
         if "claude" not in model and "anthropic" not in model:
             return body
@@ -556,7 +581,7 @@ class OpenAIChat:
                 return [{"type": "text", "text": content}] if content else None
             return content
 
-        return _with_boundary(body, at, pieces)
+        return _with_boundaries(body, places, pieces)
 
     @staticmethod
     def fetched(said: dict, results: dict) -> list:
@@ -728,6 +753,8 @@ class OpenAIChat:
             super().__init__(dialect, tool)
             self._calls: dict[int, dict] = {}
             self._mine: set[int] = set()
+            # Calls by the number the application sees: they count from nought.
+            self._out: dict[int, int] = {}
             self._round = ""
             self._last: dict | None = None
 
@@ -738,6 +765,7 @@ class OpenAIChat:
                     self._meter(data)
                 return []
             if not isinstance(data, dict):
+                self.over = self.over or b"[DONE]" in raw
                 return [raw]
             self._meter(data)
             self.model = data.get("model") or self.model
@@ -760,12 +788,19 @@ class OpenAIChat:
                 seen["arguments"] += function.get("arguments") or ""
                 if self.tool is not None and seen["name"] == self.tool:
                     self._mine.add(index)
-            if fragments and self._mine:
-                kept = [c for c in fragments if c.get("index", 0) not in self._mine]
-                changed = len(kept) != len(fragments)
-                delta.pop("tool_calls")
-                if kept:
-                    delta["tool_calls"] = kept
+            if fragments:
+                kept = []
+                for call in fragments:
+                    index = call.get("index", 0)
+                    if index in self._mine:
+                        continue
+                    number = self._out.setdefault(index, len(self._out))
+                    kept.append(call if number == index else {**call, "index": number})
+                if kept != list(fragments):
+                    changed = True
+                    delta.pop("tool_calls")
+                    if kept:
+                        delta["tool_calls"] = kept
             if isinstance(delta.get("content"), str):
                 self._shown += delta["content"]
                 self._round += delta["content"]
@@ -803,6 +838,7 @@ class OpenAIChat:
         def next_round(self):
             super().next_round()
             self._calls, self._mine, self._round = {}, set(), ""
+            self._out = {}
 
         @property
         def said(self) -> dict:
@@ -975,11 +1011,14 @@ class Anthropic:
                 return ("tools", len(tools) - 1, "cache_control"), mark
             return None
 
-        return _header_marked(body, cache_mark(lifetime), spot)
+        def ahead(path):
+            return path[0] in ("tools", "system")
+
+        return _header_marked(body, cache_mark(lifetime), spot, ahead)
 
     @classmethod
-    def with_boundary(cls, body: dict, at: int) -> dict:
-        return _with_boundary(body, at, lambda m: cls._blocks(m.get("content")))
+    def with_boundaries(cls, body: dict, places) -> dict:
+        return _with_boundaries(body, places, lambda m: cls._blocks(m.get("content")))
 
     @staticmethod
     def fetched(said: dict, results: dict) -> list:
@@ -1271,7 +1310,12 @@ class Anthropic:
                     self._ending = data
                     return []
                 return [raw]
+            self.over = self.over or kind == "message_stop"
             return [raw]
+
+        def failed(self, status, error):
+            said = {"type": "error", "error": {"type": "api_error", **error}}
+            return [sse_bytes("error", said)]
 
         def end(self):
             if not self.again:
@@ -1307,6 +1351,17 @@ class Anthropic:
                     block["input"] = _arguments(entry["json"])
                 content.append(block)
             return {"content": content}
+
+
+# Calls that the application itself has to make. Others, such as a web search, the provider makes.
+_CLIENT_CALLS = {
+    "function_call",
+    "custom_tool_call",
+    "local_shell_call",
+    "shell_call",
+    "apply_patch_call",
+    "computer_call",
+}
 
 
 class OpenAIResponses:
@@ -1363,14 +1418,19 @@ class OpenAIResponses:
                 found = _text_parts(
                     item.get("output"), base, ("input_text", "output_text", "text")
                 )
+                if kind == "shell_call_output" and isinstance(item.get("output"), list):
+                    found = [
+                        ((*base, j, "stdout"), part["stdout"])
+                        for j, part in enumerate(item["output"])
+                        if isinstance(part, dict)
+                        and isinstance(part.get("stdout"), str)
+                    ]
                 scan.slots += [
                     Slot("retrieval", path, text, i, i, answers=True)
                     for path, text in found or [(base, "")]
                 ]
                 last = "tool"
-            elif kind.endswith("_call") and (
-                kind in ("function_call", "custom_tool_call") or last != "tool"
-            ):
+            elif kind in _CLIENT_CALLS or (kind.endswith("_call") and last != "tool"):
                 last = "call"
             elif kind == "reasoning":
                 held = item.get("encrypted_content") or ""
@@ -1388,10 +1448,7 @@ class OpenAIResponses:
     @classmethod
     def waits_for_tools(cls, body: dict) -> bool:
         items = cls._items(body)
-        return bool(items) and items[-1].get("type") in (
-            "function_call",
-            "custom_tool_call",
-        )
+        return bool(items) and items[-1].get("type") in _CLIENT_CALLS
 
     @staticmethod
     def tool_names(body: dict) -> set:
@@ -1415,8 +1472,20 @@ class OpenAIResponses:
 
     @classmethod
     def without_thoughts(cls, body: dict, places) -> tuple[dict, list]:
-        gone = sorted(places)
-        kept = [item for i, item in enumerate(cls._items(body)) if i not in set(gone)]
+        gone, kept, alone = sorted(places), [], False
+        for i, item in enumerate(cls._items(body)):
+            kind = item.get("type", "message")
+            if kind == "reasoning":
+                alone = i in gone
+                if alone:
+                    continue
+            elif kind.endswith("_call") or item.get("role") == "assistant":
+                # What was said after reasoning is only taken with it, under the name it was given then.
+                if alone and "id" in item:
+                    item = {k: v for k, v in item.items() if k != "id"}
+            else:
+                alone = False
+            kept.append(item)
         return {**body, "input": kept}, gone
 
     @classmethod
@@ -1425,7 +1494,7 @@ class OpenAIResponses:
         return {**body, "input": [*said[:at], *extra, *said[at:]]}
 
     @staticmethod
-    def with_boundary(body: dict, at: int) -> dict:
+    def with_boundaries(body: dict, places) -> dict:
         return body
 
     @staticmethod
@@ -1528,7 +1597,7 @@ class OpenAIResponses:
                     if part.get("type") == "output_text":
                         texts.append(part.get("text") or "")
                         reply.paths.append(("output", i, "content", j, "text"))
-            elif item.get("type") in ("function_call", "custom_tool_call"):
+            elif item.get("type") in _CLIENT_CALLS:
                 reply.calls.append(cls._call(item))
             elif item.get("type") == "reasoning":
                 reply.reasons = True
@@ -1537,25 +1606,34 @@ class OpenAIResponses:
 
     @staticmethod
     def _call(item: dict) -> dict:
-        arguments = (
-            {"input": item.get("input")}
-            if item.get("type") == "custom_tool_call"
-            else _arguments(item.get("arguments"))
-        )
+        if item.get("type") == "function_call":
+            arguments = _arguments(item.get("arguments"))
+        else:
+            # What it is to do stands under a name of its own for every kind.
+            known = ("type", "id", "call_id", "status", "name")
+            arguments = {k: v for k, v in item.items() if k not in known}
         return {
             "id": item.get("call_id"),
-            "name": item.get("name"),
+            "name": item.get("name") or item.get("type"),
             "arguments": arguments,
         }
 
     @staticmethod
     def without_tool(body: dict, name: str) -> dict:
-        kept = [
-            i
-            for i in body.get("output") or ()
-            if not (i.get("type") == "function_call" and i.get("name") == name)
-        ]
-        return {**body, "output": kept}
+        kept: list = []
+        thoughts: list = []
+        led = False
+        for item in body.get("output") or ():
+            if item.get("type") == "reasoning":
+                # Reasoning that led to our call and to nothing else goes with it.
+                kept += [] if led else thoughts
+                thoughts, led = [item], False
+            elif item.get("type") == "function_call" and item.get("name") == name:
+                led = True
+            else:
+                kept += [*thoughts, item]
+                thoughts, led = [], False
+        return {**body, "output": kept + ([] if led else thoughts)}
 
     @staticmethod
     def prune(body: dict) -> dict:
@@ -1583,10 +1661,15 @@ class OpenAIResponses:
             self._mine: set[int] = set()
             self._out: dict[int, int] = {}
             self._held: list[tuple] = []
+            # Whether what is held back led to a call of our tool.
+            self._led = False
             self._passed: list[dict] = []
             self._next = self._number = self._rounds = 0
             self._edited = False
             self._ending: dict = {}
+            self._begun: dict = {}
+            # The piece of text that came last.
+            self._piece: tuple | None = None
 
         def _pass(self, raw, name, data) -> bytes:
             """An event for the application: as it came, or numbered anew once something was left out."""
@@ -1610,7 +1693,7 @@ class OpenAIResponses:
             return sse_bytes(name, {**data, **changed}) if changed else raw
 
         def _release(self) -> list[bytes]:
-            held, self._held = self._held, []
+            held, self._held, self._led = self._held, [], False
             return [self._pass(*event) for event in held]
 
         def feed(self, raw, name, data):
@@ -1625,7 +1708,8 @@ class OpenAIResponses:
                 "response.in_progress",
                 "response.queued",
             ):
-                self.model = (data.get("response") or {}).get("model") or self.model
+                self._begun = data.get("response") or {}
+                self.model = self._begun.get("model") or self.model
                 return [] if self._rounds else [self._pass(raw, name, data)]
             if kind == "response.output_item.added":
                 item = data.get("item") or {}
@@ -1635,8 +1719,11 @@ class OpenAIResponses:
                     and item.get("name") == self.tool
                 ):
                     self._mine.add(index)
-                    self._edited = True
+                    self._edited = self._led = True
                     return []
+                if item.get("type") == "reasoning" and self._led:
+                    # What came before it led to our call and to nothing else.
+                    self._held, self._led = [], False
                 return [*self._release(), self._pass(raw, name, data)]
             if kind == "response.output_item.done":
                 item = data.get("item") or {}
@@ -1648,14 +1735,19 @@ class OpenAIResponses:
                     if self.tool is not None:
                         self._held.append((raw, name, data))
                         return []
-                if item.get("type") in ("function_call", "custom_tool_call"):
+                if item.get("type") in _CLIENT_CALLS:
                     self.calls.append(self.dialect._call(item))
             elif index in self._mine:
                 return []
-            if kind == "response.output_text.delta":
-                self._shown += data.get("delta") or ""
+            if kind == "response.output_text.delta" and data.get("delta"):
+                piece = (self._rounds, index, data.get("content_index"))
+                if self._shown and piece != self._piece:
+                    self._shown += "\n\n"
+                self._piece = piece
+                self._shown += data["delta"]
             if kind in self._ENDS:
                 self.finished = kind != "response.failed"
+                self.over = True
                 self.ours = [
                     self.dialect._call(self._items[i])
                     for i in sorted(self._mine)
@@ -1666,6 +1758,8 @@ class OpenAIResponses:
                     # What led to our call is no part of what the application saw.
                     self._held = []
                     return []
+                if self._led:
+                    self._held = []
                 return [*self._release(), self._pass(raw, name, data)]
             return [self._pass(raw, name, data)]
 
@@ -1675,14 +1769,28 @@ class OpenAIResponses:
             closing = {**self._ending, "type": "response.completed"}
             return [self._pass(b"", "response.completed", closing)]
 
+        def failed(self, status, error):
+            code = error.get("code") or error.get("type") or str(status)
+            said = {"code": str(code), "message": str(error.get("message") or status)}
+            whole = {**self._begun, "status": "failed", "error": said}
+            whole["output"] = self._passed
+            event = {"type": "response.failed", "response": whole}
+            event["sequence_number"] = self._number
+            return [sse_bytes("response.failed", event)]
+
         def next_round(self):
             super().next_round()
             self._items, self._mine, self._out = {}, set(), {}
+            self._led = False
             self._rounds += 1
 
         @property
         def said(self) -> dict:
             return {"output": [item for _, item in sorted(self._items.items())]}
+
+
+# What Gemini takes in place of a signature for a call that it did not make where it stands.
+_UNSIGNED = "skip_thought_signature_validator"
 
 
 class Gemini:
@@ -1788,31 +1896,57 @@ class Gemini:
         return {**body, "contents": [*said[:at], *extra, *said[at:]]}
 
     @staticmethod
-    def with_boundary(body: dict, at: int) -> dict:
+    def with_boundaries(body: dict, places) -> dict:
         return body
 
     @classmethod
     def fetched(cls, said: dict, results: dict) -> list:
-        calls = [
-            part
-            for part in cls._parts(said)
-            if cls._call_id(part.get("functionCall")) in results
+        parts = cls._parts(said)
+        made = [(p, key) for p, key in cls._keyed(parts) if key in results]
+        calls = [part for part, _ in made]
+        if any(p.get("thoughtSignature") for p in parts) and calls:
+            # The first call of a step has to carry one, and that may have been another's.
+            calls[0] = {"thoughtSignature": _UNSIGNED, **calls[0]}
+        return [
+            {"role": "model", "parts": calls},
+            {"role": "user", "parts": cls._answers(made, results)},
         ]
+
+    @staticmethod
+    def _keyed(parts) -> list[tuple]:
+        """The parts that call a tool, each with what its call goes by: its ID, or its name and number."""
+        found: list = []
+        count: Counter = Counter()
+        for part in parts:
+            call = part.get("functionCall")
+            if not isinstance(call, dict):
+                continue
+            name = call.get("name")
+            count[name] += 1
+            number = f"{name}:{count[name]}" if count[name] > 1 else name
+            found.append((part, call.get("id") or number))
+        return found
+
+    @staticmethod
+    def _answers(made, results: dict) -> list:
         answers = []
-        for part in calls:
+        for part, key in made:
             call = part["functionCall"]
-            answer = {
-                "name": call.get("name"),
-                "response": {"output": results[cls._call_id(call)]},
-            }
+            answer = {"name": call.get("name"), "response": {"output": results[key]}}
             if call.get("id"):
                 answer["id"] = call["id"]
             answers.append({"functionResponse": answer})
-        return [{"role": "model", "parts": calls}, {"role": "user", "parts": answers}]
+        return answers
 
     @staticmethod
-    def _call_id(call: Any) -> str | None:
-        return call.get("id") or call.get("name") if isinstance(call, dict) else None
+    def _signed(kept: list, gone: list) -> list:
+        """Parts with the signature of what was taken out on the first call that stays, which must have one."""
+        signs = [p["thoughtSignature"] for p in gone if p.get("thoughtSignature")]
+        first = next((i for i, p in enumerate(kept) if p.get("functionCall")), None)
+        if not signs or first is None or kept[first].get("thoughtSignature"):
+            return kept
+        signed = {**kept[first], "thoughtSignature": signs[0]}
+        return [*kept[:first], signed, *kept[first + 1 :]]
 
     @classmethod
     def again(cls, body: dict, limit: int) -> dict | None:
@@ -1892,18 +2026,10 @@ class Gemini:
             return body
         return {**body, name: {k: v for k, v in config.items() if k not in shaped}}
 
-    @staticmethod
-    def after_tools(body: dict, said: dict, results: dict) -> dict:
-        answers = [
-            {
-                "functionResponse": {
-                    "name": "reopen",
-                    "id": call_id,
-                    "response": {"output": text},
-                }
-            }
-            for call_id, text in results.items()
-        ]
+    @classmethod
+    def after_tools(cls, body: dict, said: dict, results: dict) -> dict:
+        made = [(p, key) for p, key in cls._keyed(cls._parts(said)) if key in results]
+        answers = cls._answers(made, results)
         turn = said["candidates"][0]["content"]
         return {
             **body,
@@ -1940,31 +2066,29 @@ class Gemini:
             model=body.get("modelVersion"),
             cut=candidates[0].get("finishReason") == "MAX_TOKENS",
         )
-        texts = []
-        for j, part in enumerate(cls._parts(body)):
+        texts, parts = [], cls._parts(body)
+        for j, part in enumerate(parts):
             if isinstance(part.get("text"), str) and not part.get("thought"):
                 texts.append(part["text"])
                 reply.paths.append(("candidates", 0, "content", "parts", j, "text"))
-            elif isinstance(part.get("functionCall"), dict):
-                call = part["functionCall"]
-                reply.calls.append(
-                    {
-                        "id": cls._call_id(call),
-                        "name": call.get("name"),
-                        "arguments": _arguments(call.get("args")),
-                    }
-                )
+        for part, key in cls._keyed(parts):
+            reply.calls.append(cls._call(part["functionCall"], key))
         reply.text = "\n\n".join(texts)
         return reply
 
+    @staticmethod
+    def _call(call: dict, key) -> dict:
+        arguments = _arguments(call.get("args"))
+        return {"id": key, "name": call.get("name"), "arguments": arguments}
+
     @classmethod
     def without_tool(cls, body: dict, name: str) -> dict:
-        kept = [
-            p
-            for p in cls._parts(body)
-            if (p.get("functionCall") or {}).get("name") != name
-        ]
-        return put(body, ("candidates", 0, "content", "parts"), kept)
+        kept, gone = [], []
+        for part in cls._parts(body):
+            ours = (part.get("functionCall") or {}).get("name") == name
+            (gone if ours else kept).append(part)
+        path = ("candidates", 0, "content", "parts")
+        return put(body, path, cls._signed(kept, gone))
 
     @staticmethod
     def prune(body: dict) -> dict:
@@ -1981,6 +2105,8 @@ class Gemini:
             super().__init__(dialect, tool)
             self._round: list[dict] = []
             self._last: dict = {}
+            # Parts that were taken out, until a call that stays carries their signature.
+            self._gone: list[dict] = []
 
         def feed(self, raw, name, data):
             if not isinstance(data, dict):
@@ -1990,24 +2116,19 @@ class Gemini:
             if self.again:
                 return []
             parts = self.dialect._parts(data)
-            self._round += parts
-            mine = [
-                part
-                for part in parts
-                if self.tool is not None
-                and (part.get("functionCall") or {}).get("name") == self.tool
-            ]
+            kept, mine = [], []
             for part in parts:
+                call = (part.get("functionCall") or {}).get("name")
+                ours = self.tool is not None and call == self.tool
+                (mine if ours else kept).append(part)
                 if isinstance(part.get("text"), str) and not part.get("thought"):
                     self._shown += part["text"]
-                elif isinstance(part.get("functionCall"), dict):
-                    call = part["functionCall"]
-                    made = {
-                        "id": self.dialect._call_id(call),
-                        "name": call.get("name"),
-                        "arguments": _arguments(call.get("args")),
-                    }
-                    (self.ours if part in mine else self.calls).append(made)
+            before = len(self.dialect._keyed(self._round))
+            self._round += parts
+            for part, key in self.dialect._keyed(self._round)[before:]:
+                made = self.dialect._call(part["functionCall"], key)
+                ours = self.tool is not None and made["name"] == self.tool
+                (self.ours if ours else self.calls).append(made)
             candidates = data.get("candidates") or ()
             ends = bool(candidates and candidates[0].get("finishReason"))
             if ends:
@@ -2015,13 +2136,21 @@ class Gemini:
                 if self.ours and not self.calls:
                     self.again, self._last = True, data
                     return []
-            if not mine:
+            self._gone += mine
+            signed = self.dialect._signed(kept, self._gone)
+            if any(part.get("functionCall") for part in kept):
+                # Only the first call of a reply has to have one.
+                self._gone = []
+            if not mine and signed is kept:
                 return [raw]
-            kept = [part for part in parts if part not in mine]
             if not kept and not ends:
                 return []
             path = ("candidates", 0, "content", "parts")
-            return [sse_bytes(name, put(data, path, kept))]
+            return [sse_bytes(name, put(data, path, signed))]
+
+        def failed(self, status, error):
+            said = {"code": status, "message": str(error.get("message") or status)}
+            return [sse_bytes(None, {"error": {**said, **error}})]
 
         def end(self):
             if not self.again:
@@ -2031,7 +2160,7 @@ class Gemini:
 
         def next_round(self):
             super().next_round()
-            self._round = []
+            self._round, self._gone = [], []
 
         @property
         def said(self) -> dict:
@@ -2040,6 +2169,44 @@ class Gemini:
 
 
 DIALECTS = (OpenAIChat, Anthropic, OpenAIResponses, Gemini)
+# Where the calls that a message makes or answers have their IDs, and where its words are.
+_IDS = ("tool_call_id", "tool_use_id", "call_id", "id")
+_HOLDS = ("content", "tool_calls", "parts", "functionCall", "functionResponse")
+_WORDS = ("content", "text", "output", "arguments", "parts", "functionCall", "name")
+
+
+def _called(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [found for inner in value for found in _called(inner)]
+    if not isinstance(value, dict):
+        return []
+    found = [value[k] for k in _IDS if isinstance(value.get(k), str)]
+    return found + [name for key in _HOLDS for name in _called(value.get(key))]
+
+
+def _spoken(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        return [text for inner in value for text in _spoken(inner)]
+    if not isinstance(value, dict):
+        return []
+    return [text for key in _WORDS for text in _spoken(value.get(key))]
+
+
+def landmark(message: Any) -> str:
+    """What a message is known by, whatever of it is rendered anew: the calls it makes or answers, else its words.
+
+    Cache marks come and go, and a text may stand there as a string or in pieces.
+    """
+    said = _called(message) or _spoken(message)
+    role = message.get("role") if isinstance(message, dict) else None
+    return hashlib.sha256(json.dumps([role, said]).encode()).hexdigest()
+
+
+def instructs(message: Any) -> bool:
+    """Whether nobody said a message: it gives instructions, and may be there for one request only."""
+    return isinstance(message, dict) and message.get("role") in ("system", "developer")
 
 
 def dialect_for(path: str):

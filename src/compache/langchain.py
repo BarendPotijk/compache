@@ -23,7 +23,7 @@ import json
 import logging
 from typing import Any
 
-from .live import _AGENT_TOOL, Live
+from .live import _AGENT_TOOL, _REOPEN, Live
 from .wrap import async_http_client, http_client, thread
 
 __all__ = ["clients", "middleware"]
@@ -130,7 +130,7 @@ def _usage(message) -> dict | None:
     }
 
 
-def _replied(live: Live, name: str, body: dict, response) -> None:
+def _replied(shown, name: str, body: dict, response) -> None:
     """Keep the books on a reply, and close the turn if it ends it."""
     from langchain_core.messages import convert_to_openai_messages
 
@@ -139,12 +139,15 @@ def _replied(live: Live, name: str, body: dict, response) -> None:
     reply = next((m for m in reversed(said) if getattr(m, "type", "") == "ai"), None)
     if reply is None:
         return
-    calls = [c.get("args") for c in getattr(reply, "tool_calls", None) or ()]
+    calls = [
+        {"id": c.get("id"), "arguments": c.get("args")}
+        for c in getattr(reply, "tool_calls", None) or ()
+    ]
     said = _text(reply.content) or ""
-    live.heard(name, _usage(reply), model=body.get("model"), said=said, calls=calls)
+    shown.heard(_usage(reply), model=body.get("model"), said=said, calls=calls)
     if not calls:
         messages = [*body["messages"], *convert_to_openai_messages([reply])]
-        live.conclude(_PATH, {**body, "messages": messages}, thread=name)
+        shown.conclude({**body, "messages": messages}, thread=name)
 
 
 def _reopen_tool(live: Live):
@@ -176,39 +179,87 @@ def middleware(live: Live | None = None):
         tools = [_reopen_tool(live)] if live is not None else []
 
         def _before(self, request):
-            """The request to make instead, and what is needed to keep the books on its reply."""
+            """The request to make instead, and what keeps the books on its reply."""
             name = _thread_id(request)
             if live is None or name is None:
                 return name, request, None
             try:
                 body, owners = _body(request)
-                shown = live.view(_PATH, body, thread=name)
-                changed = _shown(request, body, shown, owners)
-                return name, request.override(messages=changed), body
+                shown = live.show(_PATH, body, thread=name)
             except Exception:
                 logger.warning(
                     "compache: a request was passed on unchanged", exc_info=True
                 )
                 return name, request, None
+            try:
+                changed = _shown(request, body, shown.body, owners)
+                return name, request.override(messages=changed), (shown, body)
+            except Exception:
+                shown.over()
+                logger.warning(
+                    "compache: a request was passed on unchanged", exc_info=True
+                )
+                return name, request, None
 
-        def _after(self, name, body, response):
-            if body is not None:
+        def _after(self, name, books, response):
+            if books is not None:
+                shown, body = books
                 try:
-                    _replied(live, name, body, response)
+                    _replied(shown, name, body, response)
                 except Exception:
                     logger.warning("compache: a reply was not recorded", exc_info=True)
+                finally:
+                    shown.over()
             return response
 
+        @staticmethod
+        def _failed(books):
+            if books is not None:
+                books[0].over()
+
         def wrap_model_call(self, request, handler):
-            name, request, body = self._before(request)
-            with thread(name):
-                response = handler(request)
-            return self._after(name, body, response)
+            name, request, books = self._before(request)
+            try:
+                with thread(name):
+                    response = handler(request)
+            except BaseException:
+                self._failed(books)
+                raise
+            return self._after(name, books, response)
 
         async def awrap_model_call(self, request, handler):
-            name, request, body = self._before(request)
-            with thread(name):
-                response = await handler(request)
-            return self._after(name, body, response)
+            name, request, books = self._before(request)
+            try:
+                with thread(name):
+                    response = await handler(request)
+            except BaseException:
+                self._failed(books)
+                raise
+            return self._after(name, books, response)
+
+        def _answer(self, request):
+            """The answer to a call of our tool, from the conversation whose model made it."""
+            call = request.tool_call
+            if live is None or call.get("name") != _REOPEN:
+                return None
+            from langchain_core.messages import ToolMessage
+
+            given = call.get("args") or {}
+            found = live.reopen(
+                _thread_id(request) or "",
+                str(given.get("reference", "")),
+                given.get("offset") or 0,
+                call=call.get("id"),
+            )
+            text = json.dumps(found, ensure_ascii=False)
+            return ToolMessage(text, tool_call_id=call.get("id"), name=_REOPEN)
+
+        def wrap_tool_call(self, request, handler):
+            answer = self._answer(request)
+            return handler(request) if answer is None else answer
+
+        async def awrap_tool_call(self, request, handler):
+            answer = self._answer(request)
+            return await handler(request) if answer is None else answer
 
     return Compache()

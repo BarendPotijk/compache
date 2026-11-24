@@ -1,0 +1,1147 @@
+"""Where requests of agents go astray: several under one name, replies that break off, odd shapes on the wire."""
+
+from __future__ import annotations
+
+import json
+import tempfile
+import threading
+import unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+import compache
+from compache import wire
+from compache.live import Result
+from compache.record import load
+from fakes import NOTICE, FakeModel, noticed
+from test_agent_live import (
+    REOPEN,
+    SHAPES,
+    SPEC,
+    Agent,
+    Chat,
+    Claude,
+    Clock,
+    Codex,
+    Gemini,
+    policy,
+    result,
+    worker,
+)
+
+MARK = {"type": "ephemeral"}
+
+
+def for_an_hour(**recipe):
+    """A policy whose instructions and tools are cached for an hour."""
+    made = policy(rounds=2, **recipe)
+    hour = {**SPEC.to_dict(), "cache_ttl_seconds": 3600, "write_multiplier": 2.0}
+    return compache.Policy({**made.artifact, "header_spec": hour})
+
+
+def fetching(at, count, text="Let me look back.", beside=()):
+    """A model that reads `count` files and looks back once, after `at` of them."""
+    done: list = []
+
+    def extra(request, seen):
+        if seen == at and not done:
+            done.append(NOTICE.search(json.dumps(request["body"])).group())
+            return {"text": text, "tools": [*beside, (REOPEN, {"reference": done[0]})]}
+        return None
+
+    return worker(count, extra)
+
+
+def files(k, j):
+    line = f"a line of file number {k}-{j} that only it holds\n"
+    return f"result {k}.{j}: " + line * 60
+
+
+class NameTests(unittest.TestCase):
+    """Several agents under one session name, at the same time."""
+
+    def play(self, thread, fork=False, same=True, unique=True, shape=Claude):
+        """What three agents sent that was not read from the cache, and how many sessions were begun."""
+        clock = Clock()
+        model = FakeModel(worker(30), clock=lambda: clock.at)
+        usages: list = []
+        send = model.send(shape.path)
+
+        def keeping(body):
+            answered = send(body)
+            usages.append(answered.json["usage"])
+            if not unique:
+                made = sum(len(m.get("tool_calls") or ()) for m in body["messages"])
+                calls = answered.json["choices"][0]["message"].get("tool_calls") or ()
+                for k, call in enumerate(calls):
+                    call["id"] = f"functions.read:{made + k}"
+            return answered
+
+        model.send = lambda path: keeping
+        live = compache.Live(policy(rounds=12, ratio=1.5), clock=clock)
+        apps = [Agent(live, shape(), model, thread=thread) for _ in range(3)]
+        for k, app in enumerate(apps):
+            if not fork:
+                app.shape.ask("Review the diff" if same else f"Review part {k}")
+        if fork:
+            apps[0].shape.ask("Do the whole task")
+            for _ in range(3):
+                _, calls = apps[0].call()
+                apps[0].made += 1
+                done = [(call, result(apps[0].made)) for call, _ in calls]
+                apps[0].shape.answer(done)
+            for app in apps[1:]:
+                app.shape.said = json.loads(json.dumps(apps[0].shape.said))
+                app.made = 3
+        begun = list(apps)
+        while begun:
+            for app in list(begun):
+                _, calls = app.call()
+                if not calls:
+                    begun.remove(app)
+                    continue
+                app.made += 1
+                clock.at += 1
+                found = files(apps.index(app), app.made)
+                app.shape.answer([(call, found) for call, _ in calls])
+        fresh = 0
+        for usage in usages:
+            counted = compache.threads.canonical_usage(usage)
+            fresh += counted["input"] - counted["cache_read"]
+        self.assertEqual(live.stats["turns"], 3)
+        return fresh, len(live.conversations())
+
+    def test_agents_with_one_task_are_kept_apart(self):
+        alone, _ = self.play(None)
+        for same in (True, False):
+            named, conversations = self.play("session", same=same)
+            self.assertEqual(conversations, 3)
+            self.assertLess(abs(named / alone - 1), 0.02)
+
+    def test_agents_that_go_on_from_one_conversation_are_kept_apart(self):
+        alone, _ = self.play(None, fork=True)
+        named, conversations = self.play("session", fork=True)
+        self.assertEqual((named, conversations), (alone, 3))
+
+    def test_call_ids_need_not_be_unique(self):
+        alone, _ = self.play(None, shape=Chat, same=False)
+        for thread in (None, "session"):
+            fresh, conversations = self.play(
+                thread, shape=Chat, same=False, unique=False
+            )
+            self.assertEqual(conversations, 3)
+            self.assertLess(abs(fresh / alone - 1), 0.02)
+
+    def test_another_agent_s_past_is_not_taken_for_this_one_s(self):
+        model = FakeModel(worker(8))
+        live = compache.Live(policy(rounds=1))
+        main = Agent(live, Claude(), model, thread="session")
+        main.shape.ask("The code word is PINEAPPLE. Fix the parser " + "x" * 300)
+        body, path = main.shape.body(True), main.shape.path
+        # Its first call is under way.
+        events = iter(
+            live.exchange(path, body, model.send(path), thread="session").events
+        )
+        next(events)
+        other = Agent(live, Claude(), model, thread="session")
+        other.shape.said = [
+            {"role": "user", "content": "Summary so far"},
+            {"role": "assistant", "content": [{"type": "text", "text": "Understood."}]},
+            {"role": "user", "content": "Go on"},
+        ]
+        other.call()
+        self.assertEqual(live.stats["turns"], 0)
+        found = live._latest["session"].session.reopen(
+            "code word", search=("retrieval", "input", "output")
+        )
+        self.assertNotIn("PINEAPPLE", json.dumps(found))
+
+    def test_first_requests_at_the_same_moment(self):
+        for _ in range(10):
+            model = FakeModel(worker(3))
+            live = compache.Live(policy(rounds=2))
+            met: dict = {}
+            prepare = live._prepare
+
+            def keeping(conversation, chains, dialect, body, scan, turns, *more, **kw):
+                met[turns[-1].question] = conversation
+                return prepare(
+                    conversation, chains, dialect, body, scan, turns, *more, **kw
+                )
+
+            live._prepare = keeping
+            start = threading.Barrier(3)
+
+            def go(k):
+                app = Agent(live, Claude(), model, thread="session", stream=True)
+                app.shape.ask(f"Subtask {k} " + "context " * 2_000)
+                start.wait()
+                app.call()
+
+            threads = [threading.Thread(target=go, args=(k,)) for k in range(3)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+            self.assertEqual(len({id(c) for c in met.values()}), 3)
+
+    def test_the_main_agent_s_cache_is_kept_while_another_works(self):
+        clock = Clock()
+        model = FakeModel(worker(6), clock=lambda: clock.at)
+        kept = policy(rounds=None, ratio=None, tool_pings=3)
+        live = compache.Live(kept, clock=clock)
+        main = Agent(live, Claude(), model, thread="session", clock=clock)
+        main.shape.ask("The main task")
+        _, calls = main.call()
+        (conversation,) = live.conversations()
+        sub = Agent(live, Claude(), model, thread="session", clock=clock)
+        sub.shape.ask("A subtask")
+        for _ in range(3):
+            _, made = sub.call()
+            sub.made += 1
+            sub.shape.answer([(call, result(sub.made)) for call, _ in made])
+            clock.at += 5
+        for _ in range(2):
+            clock.at += 256
+            live.tick()
+            flow = conversation.session._engine.flow
+            self.assertGreater(flow.at, clock.at - 5)
+            main.shape.answer([(call, result(1)) for call, _ in calls])
+            _, calls = main.call()
+
+    def test_a_side_request_on_another_model_leaves_the_main_line_s_cache(self):
+        for other in (None, "claude-small"):
+            clock = Clock()
+            model = FakeModel(worker(8), clock=lambda: clock.at)
+            live = compache.Live(policy(rounds=2, ratio=5.0), clock=clock)
+            app = Agent(live, Claude(), model, clock=clock, thread="session")
+            app.run("Read eight files")
+            kept = list(app.shape.said)
+            app.shape.ask("Suggest what the user may say next")
+            app.shape.model = other or Claude.model
+            app.call()
+            app.shape.said, app.shape.model = kept, Claude.model
+            model.script, before = worker(10), len(model.bodies)
+            clock.at += 20
+            app.run("Read two more")
+            later = model.bodies[before:]
+            self.assertFalse(any(noticed(b["messages"]) for b in later))
+
+    def test_a_request_without_tools_does_not_keep_the_agent_from_its_policy(self):
+        """A host asks for a title under the same name, with the user's own words, before the agent begins."""
+        with tempfile.TemporaryDirectory() as folder:
+            live = compache.Live(learn=folder)
+            model = FakeModel(worker(40))
+            body = {"model": Claude.model, "max_tokens": 50, "stream": True}
+            body["messages"] = [{"role": "user", "content": "Read forty files"}]
+            send = model.send(Claude.path)
+            title = live.exchange(Claude.path, body, send, thread="session")
+            next(title.events)
+            Agent(live, Claude(), model, thread="session").run("Read forty files")
+            self.assertTrue(noticed(model.bodies[-1]["messages"]))
+            title.events.close()
+
+    def test_the_host_s_own_calls_are_told_to_the_agent_that_made_them(self):
+        """LangChain's way in: the host sends the requests, and two agents of one thread take turns."""
+        tools = [
+            {"type": "function", "function": {"name": n}} for n in ("read", REOPEN)
+        ]
+        live = compache.Live(policy(rounds=1))
+
+        class Sub:
+            def __init__(self, name, size):
+                self.name, self.size, self.k = name, size, 0
+                self.said = [{"role": "user", "content": f"Task of {name}"}]
+
+            def call(self):
+                body = {"model": "agent-model", "messages": list(self.said)}
+                body["tools"] = tools
+                self.shown = live.show("/v1/chat/completions", body, thread="t")
+
+            def replied(self):
+                self.k += 1
+                call = {"id": f"{self.name}-{self.k}", "arguments": {}}
+                usage = {"prompt_tokens": self.size + 600 * self.k}
+                usage["completion_tokens"] = 10
+                self.shown.heard(usage, said="", calls=[call])
+                made = {"name": "read", "arguments": "{}"}
+                made = {"id": call["id"], "type": "function", "function": made}
+                text = f"SECRET-OF-{self.name} number {self.k}\n" * 80
+                self.said += [
+                    {"role": "assistant", "content": None, "tool_calls": [made]},
+                    {"role": "tool", "tool_call_id": call["id"], "content": text},
+                ]
+
+        agents = [Sub("A", 1_000), Sub("B", 60_000)]
+        for _ in range(4):
+            for agent in agents:
+                agent.call()
+            for agent in agents:
+                agent.replied()
+        for agent in agents:
+            agent.call()
+        self.assertEqual(len(live.conversations()), 2)
+        for agent in agents:
+            handles = NOTICE.findall(json.dumps(agent.shown.body))
+            self.assertEqual(len(handles), 3)
+            for words in (handles[0], f"SECRET-OF-{agent.name} number 1"):
+                call = f"{agent.name}-{agent.k}"
+                found = live.reopen("t", words, call=call)
+                self.assertIn(f"SECRET-OF-{agent.name}", json.dumps(found))
+            size = agent.shown._conversation.session._engine.flow.size
+            self.assertEqual(size > 30_000, agent.name == "B")
+
+    def test_the_next_call_may_come_before_the_body_of_the_last_one_ends(self):
+        for shape in (Chat, Claude, Codex):
+            model = FakeModel(worker(8))
+            live = compache.Live(policy(rounds=2))
+            app = Agent(live, shape(), model, stream=True)
+            app.shape.ask("Read eight files")
+            left, most = [], 12
+            for k in range(most):
+                path = shape.path
+                answered = live.exchange(path, app.shape.body(True), model.send(path))
+                events, data = iter(answered.events), []
+                ends = ("message_stop", "response.completed")
+                for chunk in events:
+                    data += [d for _, _, d in wire.sse_events([chunk]) if d]
+                    if b"[DONE]" in chunk or (data and data[-1].get("type") in ends):
+                        # As an SDK that stops reading at the last event.
+                        break
+                left.append(events)
+                text, calls = app.shape.take(app.shape.gathered(data))
+                if not calls:
+                    break
+                app.shape.answer([(call, result(k + 1)) for call, _ in calls])
+            self.assertEqual(text, "All done.")
+            self.assertEqual(live.stats["turns"], 1, shape.__name__)
+            for events in left:
+                events.close()
+            self.assertEqual(len(live.conversations()), 1)
+
+
+class FailTests(unittest.TestCase):
+    """What compache sends of its own may fail, and then the application has to hear what it needs to."""
+
+    def play(self, shape, stream, failing, text="", count=9):
+        """An agent whose model looks back once. `failing(body)` says what comes of a request, if not a reply."""
+        model = FakeModel(fetching(5, count, text))
+        live = compache.Live(policy(rounds=2))
+
+        def send_for(path):
+            send = FakeModel.send(model, path)
+
+            def sending(body):
+                found = failing(body)
+                if isinstance(found, Exception):
+                    raise found
+                return send(body) if found is None else found
+
+            return sending
+
+        model.send = send_for
+        return live, model, Agent(live, shape(), model, stream=stream)
+
+    @staticmethod
+    def follows(body):
+        return '\\"status\\": \\"ok\\"' in json.dumps(body).replace("\\\\\\", "\\")
+
+    def test_what_follows_a_fetch_may_fail(self):
+        for shape in SHAPES:
+            for stream in (False, True):
+                for text in ("", "Let me look back."):
+                    for status in (400, 529, ConnectionError("gone")):
+                        failed: list = []
+
+                        def failing(body):
+                            if "archived" in json.dumps(body) and self.follows(body):
+                                if status == 400 or not failed:
+                                    failed.append(1)
+                                    if isinstance(status, Exception):
+                                        return status
+                                    said = {"error": {"message": "no"}}
+                                    return Result(status, json=said)
+                            return None
+
+                        with self.subTest(shape.__name__, stream=stream, status=status):
+                            live, _, app = self.play(shape, stream, failing, text)
+                            self.assertIn("All done.", app.run("Read nine files"))
+                            self.assertEqual(app.made, 9)
+                            self.assertTrue(failed)
+                            self.assertEqual(live.stats["turns"], 1)
+
+    def test_where_nothing_works_the_provider_s_error_is_passed_on(self):
+        for shape in SHAPES:
+            for stream in (False, True):
+                down: list = []
+
+                def failing(body):
+                    if down or self.follows(body):
+                        down.append(1)
+                        said = {"message": "overloaded", "type": "overloaded_error"}
+                        return Result(529, json={"type": "error", "error": said})
+                    return None
+
+                with self.subTest(shape.__name__, stream=stream):
+                    live, model, app = self.play(shape, stream, failing, "Hm.")
+                    app.shape.ask("Read nine files")
+                    path = shape.path
+                    if stream:
+                        path = path.replace(":generate", ":streamGenerate")
+                    for k in range(1, 7):
+                        body = app.shape.body(stream)
+                        answered = live.exchange(path, body, model.send(path))
+                        if not stream:
+                            if answered.status != 200:
+                                break
+                            _, calls = app.shape.take(answered.json)
+                        else:
+                            raw = b"".join(answered.events)
+                            events = [d for _, _, d in wire.sse_events([raw]) if d]
+                            if down:
+                                break
+                            _, calls = app.shape.take(app.shape.gathered(events))
+                        app.shape.answer([(call, result(k)) for call, _ in calls])
+                    if stream:
+                        self.assertIn(b"overloaded", raw)
+                        self.assertNotIn(b"message_stop", raw)
+                        self.assertNotIn(b"[DONE]", raw)
+                        self.assertNotIn(b'"response.completed"', raw)
+                        self.assertNotIn(b'"function_call"', raw)
+                        self.assertNotIn(b"tool_use", raw)
+                    else:
+                        self.assertEqual(answered.status, 529)
+                    self.assertEqual(live.stats["turns"], 0)
+                    # It asks again once the provider is back, and the turn goes on.
+                    down.clear()
+                    self.follows = lambda body: False
+                    try:
+                        body = app.shape.body(False)
+                        again = live.exchange(shape.path, body, model.send(shape.path))
+                        _, calls = app.shape.take(again.json)
+                        self.assertTrue(calls)
+                        self.assertEqual(len(live.conversations()), 1)
+                    finally:
+                        del self.follows
+
+    def test_where_nothing_can_be_sent_the_application_hears_why(self):
+        for stream in (False, True):
+            down: list = []
+
+            def failing(body):
+                if down or self.follows(body):
+                    down.append(1)
+                    return ConnectionResetError("the network is down")
+                return None
+
+            live, _, app = self.play(Claude, stream, failing, "Hm.")
+            with self.assertRaises(ConnectionResetError):
+                app.run("Read nine files")
+            self.assertEqual(app.made, 5)
+
+    def test_a_refusal_that_is_none_of_the_policy_s_doing(self):
+        limit, credit = 60_000, [True]
+
+        def failing(body):
+            said = None
+            if not credit:
+                said = "Your credit balance is too low"
+            elif len(json.dumps(body)) > limit:
+                said = "prompt is too long"
+            return said and Result(400, json={"error": {"message": said}})
+
+        model = FakeModel(worker(200))
+        live = compache.Live(policy(rounds=3))
+        send = FakeModel.send(model, Claude.path)
+        model.send = lambda path: lambda body: failing(body) or send(body)
+        app = Agent(live, Claude(), model)
+        app.shape.ask("Read")
+        for _ in range(60):
+            _, calls = app.call()
+            app.made += 1
+            app.shape.answer([(call, result(app.made)) for call, _ in calls])
+        body = app.shape.body(False)
+        self.assertGreater(len(json.dumps(body)), limit)
+        credit.clear()
+        answered = live.exchange(Claude.path, body, model.send(Claude.path))
+        self.assertEqual(answered.status, 400)
+        credit.append(True)
+        answered = live.exchange(Claude.path, body, model.send(Claude.path))
+        self.assertEqual(answered.status, 200)
+        self.assertEqual(live.stats["stood_down"], 0)
+
+    def test_a_reply_that_breaks_off_after_a_fetch_is_no_answer(self):
+        for shape in SHAPES:
+            broken: list = []
+            model = FakeModel(fetching(5, 9))
+            live = compache.Live(policy(rounds=2))
+
+            def send_for(path):
+                send = FakeModel.send(model, path)
+
+                def sending(body):
+                    made = send(body)
+                    if self.follows(body) and not broken and made.events:
+                        broken.append(1)
+                        events = list(made.events)
+
+                        def some():
+                            yield from events[: len(events) // 2]
+                            raise ConnectionResetError("the connection dropped")
+
+                        return Result(200, events=some())
+                    return made
+
+                return sending
+
+            model.send = send_for
+            app = Agent(live, shape(), model, stream=True)
+            with self.subTest(shape.__name__):
+                with self.assertRaises(ConnectionResetError):
+                    app.run("Read nine files")
+                self.assertEqual(live.stats["turns"], 0)
+                _, calls = app.call()
+                self.assertTrue(calls)
+                sent = json.dumps(model.bodies[-1])
+                self.assertIn("a line of file number 1 that", sent)
+                self.assertEqual(len(live.conversations()), 1)
+
+    def test_a_stream_that_is_closed_unread_lets_go(self):
+        model = FakeModel(worker(3))
+        live = compache.Live(policy())
+        closed: list = []
+
+        def send(body):
+            made = FakeModel.send(model, Claude.path)(body)
+            made.close = lambda: closed.append(1)
+            return made
+
+        app = Claude()
+        app.ask("Read")
+        for begun in (False, True):
+            body = app.body(True)
+            events = live.exchange(Claude.path, body, send, thread="t").events
+            if begun:
+                next(events)
+            events.close()
+        self.assertEqual(len(closed), 2)
+        self.assertEqual(live._latest["t"].pending.in_flight, 0)
+
+
+class MarkTests(unittest.TestCase):
+    """Cache marks beside those of the application."""
+
+    def strict(self, model, path, marks, refused):
+        send = FakeModel.send(model, path)
+
+        def sending(body):
+            found = marks(body)
+            short = False
+            wrong = len(found) > 4
+            for mark in found:
+                short = short or mark.get("ttl", "5m") == "5m"
+                wrong = wrong or (short and mark.get("ttl") == "1h")
+            if wrong:
+                refused.append(found)
+                return Result(400, json={"error": {"message": "cache_control"}})
+            return send(body)
+
+        return sending
+
+    @staticmethod
+    def marks(body):
+        found = [t["cache_control"] for t in body["tools"] if "cache_control" in t]
+        for key in ("system", "messages"):
+            value = body.get(key)
+            for item in value if isinstance(value, list) else ():
+                pieces = item.get("content")
+                pieces = pieces if isinstance(pieces, list) else []
+                for piece in (item, *pieces):
+                    if "cache_control" in piece:
+                        found.append(piece["cache_control"])
+        return [*found, *([body["cache_control"]] if "cache_control" in body else [])]
+
+    def play(self, shape, stream, **recipe):
+        clock, refused = Clock(), []
+        model = FakeModel(fetching(5, 8), clock=lambda: clock.at)
+        path = shape.path
+        model.send = lambda _: self.strict(model, path, self.marks, refused)
+        live = compache.Live(for_an_hour(**recipe), clock=clock)
+        app = Agent(live, shape(), model, stream=stream, clock=clock)
+        self.assertEqual(app.run("Read eight files"), "All done.")
+        self.assertEqual(refused, [])
+        self.assertEqual(live.stats["reopened"], 1)
+        self.assertEqual(live.stats["stood_down"], 0)
+        return live, model, app, clock
+
+    def test_the_mark_for_a_whole_request_keeps_its_lifetime(self):
+        class App(Claude):
+            own = False
+
+            def body(self, stream):
+                body = {**super().body(stream), "cache_control": MARK}
+                if self.own:
+                    text = {"type": "text", "text": "You are an agent."}
+                    body["system"] = [{**text, "cache_control": MARK}]
+                return body
+
+        class Own(App):
+            own = True
+
+        for shape in (App, Own):
+            for stream in (False, True):
+                _, model, _, _ = self.play(shape, stream)
+                for body in model.bodies:
+                    self.assertEqual(body["cache_control"], MARK)
+                    self.assertEqual(self.marks(body)[0].get("ttl"), "1h")
+
+    def test_chat_completions_for_claude_keeps_to_the_rules(self):
+        def marked(message):
+            content = message.get("content")
+            if not isinstance(content, str) or not content:
+                return message
+            piece = {"type": "text", "text": content, "cache_control": MARK}
+            return {**message, "content": [piece]}
+
+        class Base(Chat):
+            model = "anthropic/claude-agent"
+
+        class Rolling(Base):
+            def body(self, stream):
+                body = super().body(stream)
+                said = list(body["messages"])
+                last = [i for i, m in enumerate(said) if m["role"] in ("user", "tool")]
+                for i in last[-2:]:
+                    said[i] = marked(said[i])
+                return {**body, "messages": said}
+
+        class Two(Base):
+            def body(self, stream):
+                body = super().body(stream)
+                said = list(body["messages"])
+                fixed = {"type": "text", "text": "Fixed.", "cache_control": MARK}
+                moment = {"type": "text", "text": "Of the moment."}
+                said[0] = {"role": "system", "content": [fixed, moment]}
+                said[-1] = marked(said[-1])
+                return {**body, "messages": said}
+
+        class Tool(Base):
+            def body(self, stream):
+                body = super().body(stream)
+                said = list(body["messages"])
+                said[-1] = marked(said[-1])
+                tools = [{**body["tools"][0], "cache_control": MARK}]
+                return {**body, "messages": said, "tools": tools}
+
+        for shape in (Rolling, Two, Tool):
+            for stream in (False, True):
+                with self.subTest(shape.__name__, stream=stream):
+                    self.play(shape, stream)
+
+    def test_the_mark_at_the_cut_does_not_give_way_to_the_next_one(self):
+        class App(Claude):
+            def body(self, stream):
+                body = super().body(stream)
+                text = {"type": "text", "text": "A long prompt. " * 60}
+                body["system"] = [{**text, "cache_control": MARK}] * 2
+                said = [dict(m) for m in body["messages"]]
+                for i in [i for i, m in enumerate(said) if m["role"] == "user"][-2:]:
+                    content = said[i]["content"]
+                    if isinstance(content, str):
+                        content = [{"type": "text", "text": content}]
+                    last = {**content[-1], "cache_control": MARK}
+                    said[i]["content"] = [*content[:-1], last]
+                return {**body, "messages": said}
+
+        clock, usages = Clock(), []
+        model = FakeModel(worker(60), clock=lambda: clock.at)
+        send = FakeModel.send(model, Claude.path)
+
+        def keeping(body):
+            self.assertLessEqual(len(self.marks(body)), 4)
+            answered = send(body)
+            usages.append(answered.json["usage"])
+            return answered
+
+        model.send = lambda path: keeping
+        live = compache.Live(policy(rounds=12, ratio=1.5), clock=clock)
+        Agent(live, App(), model, clock=clock).run("Read sixty files", most=80)
+        gone = [sum(map(noticed, Claude.results(b))) for b in model.bodies]
+        cuts = [n for n in range(1, len(gone)) if gone[n] > gone[n - 1]]
+        self.assertGreaterEqual(len(cuts), 2)
+        for n in cuts:
+            self.assertGreater(usages[n]["cache_read_input_tokens"], 0)
+
+
+class ShapeTests(unittest.TestCase):
+    """Shapes of requests and replies that agents and providers have of their own."""
+
+    def test_an_instruction_of_the_moment_does_not_move_what_was_fetched(self):
+        note = {"role": "system", "content": "Tokens left: 100."}
+        aside = {"type": "message", "role": "developer", "content": []}
+
+        class ChatE(Chat):
+            def body(self, stream):
+                body = super().body(stream)
+                return {**body, "messages": [*body["messages"], note]}
+
+        class ClaudeE(Claude):
+            def body(self, stream):
+                body = super().body(stream)
+                return {**body, "messages": [*body["messages"], note]}
+
+        class CodexE(Codex):
+            def body(self, stream):
+                body = super().body(stream)
+                return {**body, "input": [*body["input"], aside]}
+
+        for shape in (ChatE, ClaudeE, CodexE):
+            for beside in ((), (("read", {"file": 5}),)):
+                for stream in (False, True):
+                    model = FakeModel(fetching(5, 9, beside=beside))
+                    live = compache.Live(policy(rounds=2))
+                    app = Agent(live, shape(), model, stream=stream)
+                    self.assertEqual(app.run("Read nine files"), "All done.")
+                    for body in model.bodies:
+                        self.paired(body)
+
+    def paired(self, body):
+        """Every call is followed by its result."""
+        waiting: set = set()
+        for item in body.get("messages") or body.get("input"):
+            kind = item.get("type")
+            results = {item["tool_call_id"]} if item.get("role") == "tool" else set()
+            if kind == "function_call_output":
+                results = {item["call_id"]}
+            content = item.get("content")
+            pieces = content if isinstance(content, list) else []
+            results |= {
+                p["tool_use_id"] for p in pieces if p.get("type") == "tool_result"
+            }
+            self.assertLessEqual(results, waiting)
+            if not results and item.get("role") not in ("system", "developer"):
+                if kind != "function_call":
+                    self.assertFalse(waiting, "a call without its result")
+            waiting -= results
+            waiting |= {c["id"] for c in item.get("tool_calls") or ()}
+            waiting |= {p["id"] for p in pieces if p.get("type") == "tool_use"}
+            waiting |= {item["call_id"]} if kind == "function_call" else set()
+
+    def test_what_was_fetched_for_one_api_is_not_put_into_another_s_request(self):
+        model = FakeModel(fetching(4, 5))
+        live = compache.Live(policy(rounds=3))
+        app = Agent(live, Claude(), model, thread="session")
+        app.run("Read five files")
+        self.assertEqual(live.stats["reopened"], 1)
+        said = [{"role": "system", "content": "You are an agent."}]
+        for message in app.shape.said:
+            content, role = message["content"], message["role"]
+            if isinstance(content, str):
+                said.append({"role": role, "content": content})
+            elif role == "assistant":
+                calls = [
+                    {
+                        "id": b["id"],
+                        "type": "function",
+                        "function": {
+                            "name": b["name"],
+                            "arguments": json.dumps(b["input"]),
+                        },
+                    }
+                    for b in content
+                    if b["type"] == "tool_use"
+                ]
+                text = "".join(b["text"] for b in content if b["type"] == "text")
+                made = {"role": role, "content": text or None}
+                said.append({**made, "tool_calls": calls} if calls else made)
+            else:
+                for b in content:
+                    one = {"role": "tool", "tool_call_id": b["tool_use_id"]}
+                    said.append({**one, "content": b["content"]})
+        other = Agent(live, Chat(), model, thread="session")
+        other.shape.said = said
+        other.run("And now with another model")
+        self.assertNotIn("tool_result", json.dumps(model.bodies[-1]))
+        self.assertEqual(live.stats["policy_refused"], 0)
+
+    def test_an_answer_in_pieces_is_the_same_answer(self):
+        """Said something, fetched, answered: the next turn goes on from there."""
+        for shape in SHAPES:
+            for stream in (False, True):
+                model = FakeModel(fetching(6, 6))
+                live = compache.Live(policy(rounds=2))
+                app = Agent(live, shape(), model, stream=stream, thread="session")
+                app.run("Read six files")
+                model.script = worker(8)
+                app.run("And two more")
+                with self.subTest(shape.__name__, stream=stream):
+                    self.assertEqual(live._names, {"session": 1})
+                    self.assertEqual(live.stats["turns"], 2)
+
+    def test_a_reply_of_two_messages_is_one_answer(self):
+        def send_for(output):
+            events = [{"type": "response.created", "response": {"model": "m"}}]
+            for i, item in enumerate(output):
+                text = item["content"][0]["text"]
+                at = {"output_index": i, "content_index": 0}
+                done = {"output_index": i, "item": item}
+                events += [
+                    {"type": "response.output_item.added", **done},
+                    {"type": "response.output_text.delta", "delta": text, **at},
+                    {"type": "response.output_item.done", **done},
+                ]
+            usage = {"input_tokens": 10, "output_tokens": 2}
+            whole = {"output": output, "usage": usage}
+            events.append({"type": "response.completed", "response": whole})
+            sent = [wire.sse_bytes(e["type"], e) for e in events]
+            return lambda body: Result(200, events=iter(sent))
+
+        with tempfile.TemporaryDirectory() as folder:
+            live, said = compache.Live(record=folder), []
+            for n in range(1, 4):
+                said.append({"role": "user", "content": f"Question {n}"})
+                output = [
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": text}],
+                    }
+                    for text in (f"Thinking about {n}.", f"Answer {n}.")
+                ]
+                body = {"model": "m", "input": list(said), "stream": True}
+                answered = live.exchange("/v1/responses", body, send_for(output))
+                list(answered.events)
+                said += output
+            self.assertEqual([len(t["runs"]) for t in load(folder)[0]], [3])
+
+    def test_the_tools_that_the_api_has_of_its_own_are_calls_too(self):
+        kinds = {
+            "local_shell_call": {"action": {"type": "exec", "command": ["cat", "f"]}},
+            "apply_patch_call": {"operation": {"type": "update_file", "path": "f"}},
+            "shell_call": {"action": {"commands": ["cat f"]}},
+            "custom_tool_call": {"name": "patch", "input": "*** Begin"},
+        }
+        for kind, what in kinds.items():
+            for stream in (False, True):
+                sent: list = []
+
+                def send(body):
+                    sent.append(body)
+                    n = len(sent)
+                    done = sum(
+                        "_call_output" in str(i.get("type")) for i in body["input"]
+                    )
+                    item = {"type": kind, "id": f"x_{n}", "call_id": f"c{n}", **what}
+                    if done >= 8:
+                        text = [{"type": "output_text", "text": "All done."}]
+                        item = {"type": "message", "role": "assistant", "content": text}
+                    size = len(json.dumps(body)) // 4
+                    usage = {"input_tokens": size, "output_tokens": 20}
+                    whole = {"model": "m", "output": [item], "usage": usage}
+                    if not stream:
+                        return Result(200, json=whole)
+                    events = [
+                        {"type": "response.created", "response": {}},
+                        {"type": "response.output_item.added", "output_index": 0},
+                        {"type": "response.output_item.done", "output_index": 0},
+                        {"type": "response.completed", "response": whole},
+                    ]
+                    for event in events[1:3]:
+                        event["item"] = item
+                    return Result(
+                        200, events=iter([wire.sse_bytes(e["type"], e) for e in events])
+                    )
+
+                live = compache.Live(policy(rounds=2))
+                said = [{"role": "user", "content": "Do it"}]
+                tool = {"type": "function", "name": "read", "parameters": {}}
+                for k in range(1, 12):
+                    body = {"model": "m", "store": False, "input": list(said)}
+                    body |= {"tools": [tool], **({"stream": True} if stream else {})}
+                    answered = live.exchange("/v1/responses", body, send)
+                    if stream:
+                        events = [d for _, _, d in wire.sse_events(answered.events)]
+                        done = "response.output_item.done"
+                        output = [e["item"] for e in events if e["type"] == done]
+                    else:
+                        output = answered.json["output"]
+                    said += output
+                    if output[0]["type"] != kind:
+                        break
+                    text = result(k)
+                    found = [{"stdout": text}] if kind == "shell_call" else text
+                    made = {"type": kind + "_output", "call_id": output[0]["call_id"]}
+                    said.append({**made, "output": found})
+                with self.subTest(kind, stream=stream):
+                    self.assertEqual(len(sent), 9)
+                    self.assertEqual(len(NOTICE.findall(json.dumps(sent[-1]))), 6)
+                    self.assertEqual(live.stats["turns"], 1)
+
+    def test_reasoning_that_led_to_our_call_alone_is_not_passed_on(self):
+        def thought(n):
+            return {"type": "reasoning", "id": f"rs_{n}", "encrypted_content": "e"}
+
+        def call(n, name):
+            made = {"type": "function_call", "id": f"fc_{n}", "call_id": f"c{n}"}
+            return {**made, "name": name, "arguments": "{}"}
+
+        cases = (
+            (
+                [thought(1), call(1, "read"), thought(2), call(2, REOPEN)],
+                ["rs_1", "fc_1"],
+            ),
+            ([thought(1), call(2, REOPEN), call(1, "read")], ["rs_1", "fc_1"]),
+            (
+                [thought(1), call(2, REOPEN), thought(2), call(1, "read")],
+                ["rs_2", "fc_1"],
+            ),
+        )
+        for output, kept in cases:
+            whole = wire.OpenAIResponses.without_tool({"output": output}, REOPEN)
+            self.assertEqual([i["id"] for i in whole["output"]], kept)
+            events = [{"type": "response.created", "response": {}}]
+            for i, item in enumerate(output):
+                at = {"output_index": i, "item": item}
+                events.append({"type": "response.output_item.added", **at})
+                events.append({"type": "response.output_item.done", **at})
+            done = {"output": output}
+            events.append({"type": "response.completed", "response": done})
+            stream = wire.OpenAIResponses.Stream(wire.OpenAIResponses, REOPEN)
+            passed: list = []
+            for k, event in enumerate(events):
+                event["sequence_number"] = k
+                name = event["type"]
+                passed += stream.feed(wire.sse_bytes(name, event), name, event)
+            got = [d for _, _, d in wire.sse_events(passed)]
+            shown = [d["item"]["id"] for d in got if "done" in d["type"]]
+            self.assertEqual(shown, kept)
+            self.assertEqual([i["id"] for i in got[-1]["response"]["output"]], kept)
+            self.assertEqual([d["sequence_number"] for d in got], list(range(len(got))))
+
+    def test_what_followed_reasoning_is_not_named_without_it(self):
+        items = [
+            {"role": "user", "content": "Fix it"},
+            {"type": "reasoning", "id": "rs_1"},
+            {"type": "function_call", "id": "fc_1", "call_id": "c1"},
+            {"type": "function_call_output", "call_id": "c1", "output": "x"},
+            {"type": "reasoning", "id": "rs_2"},
+            {"type": "message", "role": "assistant", "id": "msg_2", "content": []},
+        ]
+        body, gone = wire.OpenAIResponses.without_thoughts({"input": items}, [1])
+        self.assertEqual(gone, [1])
+        names = [item.get("id") for item in body["input"]]
+        self.assertEqual(names, [None, None, None, "rs_2", "msg_2"])
+
+    def test_the_calls_an_application_sees_count_from_nought(self):
+        asked: list = []
+
+        def script(request):
+            if len(request["texts"]) > 4 and not asked:
+                asked.append(NOTICE.search(json.dumps(request["body"])).group())
+                return {
+                    "text": "",
+                    "tools": [(REOPEN, {"reference": asked[0]}), ("read", {"file": 7})],
+                }
+            return {"text": "", "tool": ("read", {"file": 1})}
+
+        model = FakeModel(script)
+        live = compache.Live(policy(rounds=1))
+        app = Agent(live, Chat(), model, stream=True)
+        app.shape.ask("Read")
+        while not asked:
+            path = Chat.path
+            answered = live.exchange(path, app.shape.body(True), model.send(path))
+            data = [d for _, _, d in wire.sse_events(answered.events) if d]
+            _, calls = app.shape.take(app.shape.gathered(data))
+            app.shape.answer([(call, result(1)) for call, _ in calls])
+        numbers = {
+            call["index"]
+            for event in data
+            for choice in event["choices"]
+            for call in choice["delta"].get("tool_calls") or ()
+        }
+        self.assertEqual(numbers, {0})
+
+    def test_two_fetches_without_ids_get_an_answer_each(self):
+        for beside in ((), (("read", {"file": 9}),)):
+            for stream in (False, True):
+                done: list = []
+
+                def extra(request, seen):
+                    if seen == 5 and not done:
+                        done.extend(NOTICE.findall(json.dumps(request["body"]))[:2])
+                        looked = [(REOPEN, {"reference": h}) for h in done]
+                        return {"text": "", "tools": [*beside, *looked]}
+                    return None
+
+                model = FakeModel(worker(8, extra))
+                live = compache.Live(policy(rounds=2))
+                Agent(live, Gemini(), model, stream=stream).run("Read eight files")
+                self.assertEqual(live.stats["reopened"], 2)
+                (body,) = [
+                    b
+                    for b in model.bodies
+                    if json.dumps(b).count('"name": "reopen"') > 3
+                ][:1]
+                answers = [
+                    json.loads(part["functionResponse"]["response"]["output"])["handle"]
+                    for content in body["contents"]
+                    for part in content["parts"]
+                    if part.get("functionResponse", {}).get("name") == REOPEN
+                ]
+                self.assertEqual(answers, done)
+
+    def test_gemini_s_signature_stays_on_the_first_call(self):
+        ours = {"functionCall": {"name": REOPEN, "args": {}, "id": "a"}}
+        theirs = {"functionCall": {"name": "read", "args": {}, "id": "b"}}
+        signed = {**ours, "thoughtSignature": "SIGNED"}
+
+        def reply(parts, ends=True):
+            found: dict = {"content": {"role": "model", "parts": parts}}
+            return {
+                "candidates": [{**found, **({"finishReason": "STOP"} if ends else {})}]
+            }
+
+        gemini = wire.Gemini
+        kept = gemini._parts(gemini.without_tool(reply([signed, theirs]), REOPEN))
+        self.assertEqual(kept, [{**theirs, "thoughtSignature": "SIGNED"}])
+        stream, passed = gemini.Stream(gemini, REOPEN), []
+        for parts, ends in (([signed], False), ([theirs], True)):
+            data = reply(parts, ends)
+            passed += stream.feed(wire.sse_bytes(None, data), None, data)
+        shown = [p for _, _, d in wire.sse_events(passed) for p in gemini._parts(d)]
+        self.assertEqual(shown, [{**theirs, "thoughtSignature": "SIGNED"}])
+        mixed = reply([{**theirs, "thoughtSignature": "SIGNED"}, ours])
+        (call,) = gemini.fetched(mixed, {"a": "text"})[0]["parts"]
+        self.assertTrue(call["thoughtSignature"])
+
+    def test_a_remark_is_what_stands_in_a_tag(self):
+        for text, turns in (("<system-reminder>go on", 1), ("And then?", 2)):
+            model = FakeModel(worker(3))
+            live = compache.Live(policy(rounds=2))
+            app = Agent(live, Claude(), model)
+            app.shape.ask("Read three files")
+            _, calls = app.call()
+            app.shape.answer([(call, result(1)) for call, _ in calls], text)
+            app.call()
+            self.assertEqual(live.stats["turns"], turns - 1)
+
+
+class ChatTests(unittest.TestCase):
+    """A chat's application has one line of it, whatever it renders anew."""
+
+    def play(self, shape, change):
+        """A chat of eight turns, each of which searches twice."""
+        from test_live import SYSTEM, fitted, passage
+
+        if not hasattr(ChatTests, "policy"):
+            ChatTests.policy = fitted()
+            ChatTests.runs = 0
+        ChatTests.runs += 1
+        clock = Clock(1_950_000_000.0 + 1e7 * ChatTests.runs)
+        with tempfile.TemporaryDirectory() as folder:
+            live = compache.Live(ChatTests.policy, record=folder, clock=clock)
+            model = FakeModel(clock=clock)
+            said: list = []
+            for n in range(1, 9):
+                said.append({"role": "user", "content": f"Question {n}?"})
+                for k in range(3):
+                    tool = ("search", {"k": k}) if k < 2 else None
+                    made = {"text": "" if tool else f"Answer {n}.", "tool": tool}
+                    model.script = lambda request, made=made: made
+                    body = {"model": "claude-sonnet-5-5", "max_tokens": 99}
+                    body |= {"system": SYSTEM, "messages": change(said, n, k)}
+                    body["tools"] = [{"name": "search", "input_schema": {}}]
+                    answered = live.exchange(
+                        Claude.path,
+                        body,
+                        model.send(Claude.path),
+                        thread=f"chat {ChatTests.runs}",
+                    ).json
+                    said.append({"role": "assistant", "content": answered["content"]})
+                    found = [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": block["id"],
+                            "content": f"{n}.{k} " + passage(n),
+                        }
+                        for block in answered["content"]
+                        if block["type"] == "tool_use"
+                    ]
+                    if found:
+                        said.append({"role": "user", "content": found})
+                    clock.at += 2
+                clock.at += 7_200
+            runs = [len(t["runs"]) for t in load(folder)[0]]
+            last = sum(map(noticed, Claude.results(model.bodies[-1])))
+            return live, runs, last
+
+    def test_as_it_was(self):
+        live, runs, gone = self.play(Claude, lambda said, n, k: list(said))
+        self.assertEqual((runs, live.stats["stood_down"]), ([8], 0))
+        self.assertGreater(gone, 8)
+
+    def test_an_earlier_result_of_the_turn_is_shortened(self):
+        def shortened(said, n, k):
+            for message in said[:-1]:
+                if isinstance(message["content"], list):
+                    for block in message["content"]:
+                        if block["type"] == "tool_result":
+                            block["content"] = block["content"][:300]
+            return json.loads(json.dumps(said))
+
+        live, runs, gone = self.play(Claude, shortened)
+        self.assertEqual((sum(runs), live.stats["stood_down"]), (8, 0))
+        self.assertEqual(live.stats["turns"], 8)
+        self.assertGreater(gone, 4)
+
+    def test_the_question_holds_the_time(self):
+        def timed(said, n, k):
+            made = list(said)
+            at = max(i for i, m in enumerate(made) if isinstance(m["content"], str))
+            text = f"[12:00:{n}{k}] {made[at]['content']}"
+            made[at] = {**made[at], "content": text}
+            return made
+
+        live, runs, _ = self.play(Claude, timed)
+        self.assertEqual(live.stats["turns"], 8)
+        self.assertEqual(sum(runs), 8)
+
+    def test_the_next_question_stands_beside_a_result(self):
+        """Anthropic's API has the answer to a tool the application shows something with in the user's message."""
+        from test_live import SYSTEM, fitted, passage
+
+        clock = Clock(1_980_000_000.0)
+        live = compache.Live(fitted(), clock=clock)
+        model = FakeModel(clock=clock)
+        said: list = []
+        for n in range(1, 7):
+            opens: list = [{"type": "text", "text": f"Question {n}?"}]
+            if n > 1:
+                shown = {"type": "tool_result", "tool_use_id": last, "content": "shown"}
+                opens.insert(0, shown)
+            said.append({"role": "user", "content": opens})
+            for name in ("search", "show_chart"):
+                model.script = lambda request, name=name: {
+                    "text": "Hm.",
+                    "tool": (name, {}),
+                }
+                body = {
+                    "model": "claude-sonnet-5-5",
+                    "max_tokens": 99,
+                    "system": SYSTEM,
+                }
+                body |= {"messages": list(said), "tools": []}
+                answered = live.exchange(Claude.path, body, model.send(Claude.path))
+                said.append({"role": "assistant", "content": answered.json["content"]})
+                last = answered.json["content"][-1]["id"]
+                if name == "search":
+                    found = {"type": "tool_result", "tool_use_id": last}
+                    found["content"] = passage(n)
+                    said.append({"role": "user", "content": [found]})
+            clock.at += 3_600
+        self.assertEqual(live.stats["turns"], 5)
+        self.assertNotIn("Clause 001", json.dumps(model.bodies[-1]))
+
+
+if __name__ == "__main__":
+    unittest.main()

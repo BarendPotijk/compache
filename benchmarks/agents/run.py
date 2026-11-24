@@ -10,6 +10,7 @@ cost is read off the provider's bill on its way back, and the work is graded by 
 
   none        the agent as it is, with its own caching
   compache    compache's proxy as `compache wrap` starts it, learning from nothing
+  learned     the same after `compache learn`, on the sessions of the first arm on other tasks
   headroom    Headroom's proxy with its defaults
   kompressor  OptScale Kompressor's proxy with the settings its package ships
 
@@ -34,6 +35,7 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import asdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from statistics import mean
@@ -49,8 +51,9 @@ from compache.learn import Learner  # noqa: E402
 from compache.live import Live  # noqa: E402
 from compache.proxy import serve  # noqa: E402
 from compache.threads import canonical_usage  # noqa: E402
+from compache.transcripts import imported  # noqa: E402
 
-ARMS = ("none", "compache", "headroom", "kompressor")
+ARMS = ("none", "compache", "learned", "headroom", "kompressor")
 KOMPRESSOR = """
 [server]
 listen = "127.0.0.1:{port}"
@@ -304,15 +307,31 @@ def process(command: list[str], port: int, folder: Path, env: dict):
     raise RuntimeError(f"it did not start: {log.read_text()[-800:]}")
 
 
+def learn_from(args, which: str, learner: Learner) -> None:
+    """Fit on the sessions that the agent kept of other tasks, with nothing in between."""
+    kept = {"claude": ".claude/projects", "codex": ".codex/sessions"}[args.agent]
+    for folder in sorted((Path(args.past or args.work) / "runs").iterdir()):
+        sessions = folder / "home" / kept
+        if folder.name.startswith(f"{args.agent}-none-") and sessions.is_dir():
+            if f"-none-{which}-" not in folder.name:
+                imported(learner.folder, args.agent, sessions, days=365)
+    learner.refit(wait=True)
+    if not learner.fitted:
+        raise RuntimeError("too few sessions of other tasks to learn from")
+
+
 class Between:
     """What stands between the agent and the provider in one arm: where it listens, and how to end it."""
 
-    def __init__(self, arm: str, upstream: str, folder: Path, args):
+    def __init__(self, arm: str, upstream: str, folder: Path, args, which: str):
         self.base, self.process, self.server, self.live = upstream, None, None, None
         self.folder = folder
         sandbox, port = shlex.split(args.sandbox), free_port()
-        if arm == "compache":
-            self.live = Live(learn=Learner(folder / "compache"))
+        if arm in ("compache", "learned"):
+            learner = Learner(folder / "compache")
+            if arm == "learned":
+                learn_from(args, which, learner)
+            self.live = Live(learn=learner)
             self.server = started(serve(self.live, port=0, upstream=upstream))
             self.base = at(self.server)
         elif arm == "headroom":
@@ -357,7 +376,13 @@ class Between:
             self.server.shutdown()
             self.server.server_close()
             found = stats.savings(self.folder / "compache")
-            return {"stats": self.live.stats, "estimate": found["without"]}
+            policies = self.live.learner._policies.values()
+            recipes = [asdict(p.recipe) for p in policies if p is not None]
+            return {
+                "stats": self.live.stats,
+                "estimate": found["without"],
+                "recipes": recipes,
+            }
         return {}
 
 
@@ -410,6 +435,16 @@ REVIEW = (
     "Read SPEC.md once more, and for each of {0} say in one line which edge case of its section is the "
     "easiest to get wrong. Run `python3 -m unittest -v` and correct what fails."
 )
+GUIDE = (
+    "Write docs/<module>.md for each of {0}: every rule of its section with an example call and what it "
+    "returns. Run every example and print what it returns, and correct the page where it says otherwise. "
+    "Reply with the single word DONE."
+)
+RANDOM = (
+    "For each of {0}, write a file `random_<module>.py` that checks it on 200 random inputs against a "
+    "second, plain implementation of its section that you write in the test file. Run them, and where the "
+    "two differ, read the section again and correct the one that is wrong. Reply with the single word DONE."
+)
 
 
 class Repository:
@@ -438,8 +473,8 @@ class Repository:
         said = [f"{first} Start with {', '.join(groups[0])}."]
         said += [f"Now go on with {', '.join(g)}." for g in groups[1:]]
         if self.long:
-            # The same modules again, from another side.
-            for ask in (EXTRA, REVIEW):
+            # The same modules again, from other sides.
+            for ask in (EXTRA, REVIEW, GUIDE, RANDOM):
                 halves = (names[: len(names) // 2], names[len(names) // 2 :])
                 said += [ask.format(", ".join(half)) for half in halves]
         return said
@@ -475,7 +510,7 @@ def play_one(args, arm: str, which: str, repeat: int, key: str, bill: Bill) -> d
     )
     log = folder / "provider.jsonl"
     server = provider(key, bill, log)
-    between = Between(arm, at(server), folder, args)
+    between = Between(arm, at(server), folder, args, which)
     status, begun, said, pauses = None, time.time(), [], args.pause
     try:
         for k, prompt in enumerate(asked.prompts(args.parts)):
@@ -661,6 +696,9 @@ def main(argv=None):
     sub.add_argument("--hf-home", default="")
     sub.add_argument("--kompressor", default="kompressor")
     sub.add_argument("--work", default="agents-out")
+    sub.add_argument(
+        "--past", help="The folder whose sessions `learned` learns from, if another"
+    )
     sub = commands.add_parser("report")
     sub.add_argument("--work", default="agents-out")
     args = parser.parse_args(argv)

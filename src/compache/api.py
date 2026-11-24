@@ -875,6 +875,11 @@ class Session:
         """Whether text that was fetched back under `name` still stands where it was put."""
         return self.policy.agentic and self._engine.shows_again(name)
 
+    def dropped(self, name: str) -> None:
+        """Say that what was fetched back under `name` no longer stands in the conversation."""
+        if self.policy.agentic:
+            self._engine.dropped(name)
+
     def complete(
         self,
         turn: Turn,

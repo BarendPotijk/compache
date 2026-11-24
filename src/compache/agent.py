@@ -1138,6 +1138,14 @@ class AgentEngine:
         """Whether what was fetched back under `name` still stands where it was put."""
         return name in self.flow.back
 
+    def dropped(self, name) -> None:
+        """What was fetched back under `name` could not be put in its place any more."""
+        self.flow.back.discard(name)
+        for i in range(len(self.flow.names) - 1, -1, -1):
+            if self.flow.names[i] == (name, True):
+                self.flow.forget(i)
+                break
+
     # -- pings -------------------------------------------------------------------
 
     @property

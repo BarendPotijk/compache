@@ -905,7 +905,7 @@ class StepTests(unittest.TestCase):
                 "role": "user",
                 "content": [
                     {"type": "tool_result", "tool_use_id": "a", "content": "text"},
-                    {"type": "text", "text": "A reminder from the harness."},
+                    {"type": "text", "text": "<reminder>from the harness</reminder>"},
                 ],
                 "at": 3,
             },

@@ -21,6 +21,7 @@ from __future__ import annotations
 import copy
 import gzip
 import json
+import re
 from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -705,6 +706,11 @@ def _reasoned(message: dict) -> bool:
     )
 
 
+def tagged(text: str) -> bool:
+    """Whether a text stands in a tag, as what a harness adds to its tools' results does."""
+    return re.match(r"\s*<[A-Za-z][\w-]*[\s>]", text) is not None
+
+
 def _timed(value: Any) -> bool:
     """Whether a time can be read."""
     try:
@@ -776,8 +782,9 @@ def _runs_from_messages(messages: Any, thread_id: str) -> list[dict]:
                 part["part_id"] = _id(message["part_id"], "part_id")
             found.append(part)
         if role == "user" and text:
-            # What is said along with the results of tools is a remark in the same turn.
-            if current is not None and current["answers"] and not results:
+            # What a harness puts beside the results of tools, in a tag, is a remark in the same turn.
+            remark = bool(results) and tagged(text)
+            if current is not None and current["answers"] and not remark:
                 close()
             if current is None:
                 if at is None:

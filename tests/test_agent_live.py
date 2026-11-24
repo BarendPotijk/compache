@@ -443,7 +443,7 @@ class LoopTests(unittest.TestCase):
         live = compache.Live(policy(rounds=3, ratio=1.0), clock=clock)
         app = Agent(live, Claude(), model, clock=clock)
         app.run("Read fifteen files")
-        (conversation,) = live._by_chain.values()
+        (conversation,) = live.conversations()
         flow = conversation.session._engine.flow
         self.assertEqual(flow.size, sum(flow.shown))
         counted = tokens([model.bodies[-1]["messages"]])
@@ -465,7 +465,7 @@ class LoopTests(unittest.TestCase):
                 clock.at += 5
                 app.made += 1
                 app.shape.answer([(c, result(app.made)) for c, _ in calls])
-            (conversation,) = {id(c): c for c in app.live._by_call.values()}.values()
+            (conversation,) = app.live.conversations()
             engine = conversation.session._engine
             flow = engine.flow
             self.assertEqual(flow.size, sum(flow.shown))
@@ -492,7 +492,7 @@ class LoopTests(unittest.TestCase):
         model.script = script
         clock.at += 20
         app.run("What did the first file say?")
-        (conversation,) = live._by_chain.values()
+        (conversation,) = live.conversations()
         flow = conversation.session._engine.flow
         counted = tokens([model.bodies[-1]["messages"]])
         self.assertLess(abs(flow.size - counted) / counted, 0.2)
@@ -747,7 +747,7 @@ class ReasoningTests(unittest.TestCase):
                     self.assertFalse(set(range(5)) & set(kept), kept)
                     self.assertEqual(len(kept), 4, "that of the turn that goes on")
                     self.assertEqual(live.stats["stood_down"], 0)
-                    (conversation,) = live._by_chain.values()
+                    (conversation,) = live.conversations()
                     flow = conversation.session._engine.flow
                     self.assertEqual(flow.size, sum(flow.shown))
 
@@ -759,7 +759,7 @@ class ReasoningTests(unittest.TestCase):
         app.run("Read eight files")
         model.script = reasoning(16)
         app.run("Read eight more")
-        (conversation,) = live._by_chain.values()
+        (conversation,) = live.conversations()
         flow = conversation.session._engine.flow
         counted = tokens([model.bodies[-1]["messages"]])
         self.assertLess(abs(flow.size - counted) / counted, 0.25)
@@ -777,7 +777,7 @@ class ReasoningTests(unittest.TestCase):
         model.script = reasoning(8)
         self.assertEqual(app.run("Read four more"), "All done.")
         self.assertEqual(live.stats["stood_down"], 0)
-        (conversation,) = live._by_chain.values()
+        (conversation,) = live.conversations()
         flow = conversation.session._engine.flow
         self.assertEqual(flow.size, sum(flow.shown))
 
@@ -1231,28 +1231,6 @@ class StreamTests(unittest.TestCase):
         ours = [dict(d, response=None) for _, _, d in wire.sse_events([passed])]
         theirs = [dict(d, response=None) for _, _, d in wire.sse_events(events)]
         self.assertEqual(ours, theirs)
-
-    def test_a_stream_that_ends_on_our_tool_alone_is_closed(self):
-        """The follow-up fails: the reply ends as it stands, and as a stream should."""
-        for shape in SHAPES:
-            with self.subTest(shape=shape.__name__):
-                model = FakeModel(
-                    lambda r: {"text": "Hm.", "tool": (REOPEN, {"reference": "x y z"})}
-                )
-                app, sent = shape(), []
-                app.ask("Read a file")
-                path = shape.path.replace(":generate", ":streamGenerate")
-
-                def send(body, model=model, path=path, sent=sent):
-                    sent.append(body)
-                    if len(sent) > 1:
-                        return Result(500, json={"error": "no"})
-                    return model.send(path)(body)
-
-                answered = compache.Live(policy()).exchange(path, app.body(True), send)
-                events = [d for _, _, d in wire.sse_events(answered.events) if d]
-                text, calls = app.take(app.gathered(events))
-                self.assertEqual((text, calls), ("Hm.", []))
 
 
 if __name__ == "__main__":

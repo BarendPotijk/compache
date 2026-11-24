@@ -50,9 +50,10 @@ from .threads import (
     canonical_usage,
     long_writes,
     reasoning_tokens,
+    tagged,
 )
 
-__all__ = ["Live", "Result"]
+__all__ = ["Live", "Result", "Shown"]
 
 logger = logging.getLogger(__name__)
 
@@ -152,6 +153,10 @@ _ROUNDS = 3
 _AGENT_ROUNDS = 8
 # How many of the newest tool results are looked at to find the loop a request goes on with.
 _LOOK_BACK = 64
+# How far a message may have moved in a conversation for what was put in behind it to follow.
+_MOVED = 4
+# How many conversations that stand at the same point, or share a call's ID, are told apart.
+_MOST_AT_ONE_POINT = 16
 # A note is one line. The room is for a model that reasons before it writes: on Claude Haiku
 # 5.5 that took a median of some 500 tokens, and more than 1,000 for one note in twelve.
 _NOTE_TOKENS = 2048
@@ -216,16 +221,34 @@ class _Segment:
         return "\n\n".join(s.text for s in self.outputs if s.text)
 
 
-@dataclass
+@dataclass(frozen=True)
 class _Insert:
     """What the model fetched back while answering, as messages of ours in the conversation."""
 
-    # Where in the application's messages it stands.
+    # Behind which of the application's messages it stands: its place, and what it is known by.
     at: int
+    behind: str | None
+    # The API its messages are written for.
+    dialect: str
     messages: list
     # What it goes by in the policy's session, and the turn it was fetched in.
     names: tuple
     turn: int
+
+
+@dataclass(frozen=True)
+class _Point:
+    """How a conversation stood when a request came, for another that goes on from there."""
+
+    chain: str
+    # Its session and the turn under way as they were then. Both are copied before they are used.
+    session: Any
+    pending: Any
+    inserts: tuple
+    reopens: bool
+    # The model its requests named, and the size of what opens them.
+    requested: str | None
+    opens: tuple
 
 
 @dataclass
@@ -243,6 +266,11 @@ class _Pending:
     # Requests of it that went out and have no reply yet, and when the last one went out.
     in_flight: int = 0
     sent_at: float = 0.0
+    # Whether the latest of them has been answered, and the tool calls that answer made.
+    answered: bool = False
+    called: tuple = ()
+    # Whether the latest was answered to the application's own request, with everything in view.
+    whole: bool = False
     # Its calls one by one, for the record.
     steps: list = field(default_factory=list)
     # Bytes of text compache left out of its last request, less what it added, and what it held.
@@ -263,6 +291,15 @@ class _Pending:
     cited: tuple = ()
     # Parts the model fetched back while answering.
     reopened: list = field(default_factory=list)
+
+    def copy(self) -> _Pending:
+        return replace(
+            self,
+            seen=list(self.seen),
+            steps=list(self.steps),
+            reopened=list(self.reopened),
+            in_flight=0,
+        )
 
     def goes_on_from(self, earlier: _Pending) -> None:
         """Take over what an earlier state of the same turn has counted."""
@@ -312,8 +349,11 @@ class _Conversation:
     left_alone: bool = False
     # What was fetched back and still stands in the conversation, in order.
     inserts: list = field(default_factory=list)
-    # How it stood before its latest turn, for a request that branches off there.
-    base: tuple | None = None
+    # How it stood before its latest turn and at its latest request, for one that branches off there.
+    base: _Point | None = None
+    here: _Point | None = None
+    # Whether another went on from where it stands, so that nothing is paid to keep it warm.
+    superseded: bool = False
     # What went out of view with the request that is being made, and what goes first with the next cut.
     went: list = field(default_factory=list)
     holds: tuple | None = None
@@ -356,11 +396,92 @@ class _Call:
     pending: Any = None
 
 
-def _segments(slots) -> list[_Segment]:
+class _Unsent(Exception):
+    """A request of the application's own could not be sent: what is wrong is for it to hear."""
+
+
+def _said_wrong(result: Result) -> dict:
+    """What a provider says is wrong, as an object with a message."""
+    found = result.json
+    if found is None and result.raw:
+        try:
+            found = json.loads(result.raw)
+        except ValueError:
+            found = None
+    if isinstance(found, dict) and isinstance(found.get("error"), dict):
+        return found["error"]
+    said = found.get("error") if isinstance(found, dict) else None
+    return {"message": str(said or f"the provider answered {result.status}")}
+
+
+class _Passing:
+    """A streamed reply on its way. One that is closed before it was read lets go of what it holds too."""
+
+    def __init__(self, events, release: Callable[[], None]):
+        self._events, self._release, self._begun = events, release, False
+
+    def __iter__(self) -> _Passing:
+        return self
+
+    def __next__(self) -> bytes:
+        self._begun = True
+        return next(self._events)
+
+    def close(self) -> None:
+        begun, self._begun = self._begun, True
+        self._events.close()
+        if not begun:
+            self._release()
+
+    def __del__(self):
+        if not self._begun:
+            try:
+                self.close()
+            except Exception:
+                pass
+
+
+class Shown:
+    """A request as the policy would send it, for a host that sends it itself and tells how it went."""
+
+    def __init__(self, live, path, body, conversation=None, pending=None):
+        self.body = body
+        self._live, self._path = live, path
+        self._conversation, self._pending = conversation, pending
+        self._waits = False
+
+    def begin(self) -> None:
+        """It goes out now."""
+        if self._conversation is not None:
+            with self._conversation.lock:
+                self._waits = True
+                self._pending.in_flight += 1
+
+    def over(self) -> None:
+        """Its reply is in, or none will come."""
+        if self._waits:
+            with self._conversation.lock:
+                self._waits = False
+                self._pending.in_flight -= 1
+
+    def heard(self, usage, *, model=None, said=None, calls=()) -> None:
+        """What it was billed and what its reply said. `calls` are its tool calls, with `id` and `arguments`."""
+        self.over()
+        if self._conversation is not None:
+            self._live._told(
+                self._conversation, self._pending, usage, model, said, list(calls)
+            )
+
+    def conclude(self, body, *, thread: str) -> None:
+        """Close the turn: `body` holds the conversation up to and including the answer."""
+        self._live.conclude(self._path, body, thread=thread)
+
+
+def _segments(slots, remarks: bool = True) -> list[_Segment]:
     """Turns of a request: a question opens one, and everything up to the next question is its.
 
-    What is said in the same message as the results of tools is a remark in the
-    same turn.
+    What a harness puts beside the results of tools, in a tag of its own, is a
+    remark in the same turn, unless `remarks` is False.
     """
     turns: list[_Segment] = []
     waiting = []
@@ -371,7 +492,8 @@ def _segments(slots) -> list[_Segment]:
         if not slot.text and not slot.closes:
             continue
         if slot.kind == "input":
-            if not turns or (turns[-1].outputs and slot.message != results):
+            remark = remarks and slot.message == results and tagged(slot.text)
+            if not turns or (turns[-1].outputs and not remark):
                 turns.append(_Segment(retrievals=waiting))
                 waiting = []
             turns[-1].inputs.append(slot)
@@ -409,7 +531,9 @@ def _hashes(found: list) -> list[int]:
 
 
 def _link(chain: str, segment: _Segment) -> str:
-    said = [segment.question, [s.text for s in segment.retrievals], segment.answer]
+    # An application keeps an answer that streamed in as many pieces as it likes.
+    answer = "".join("".join(s.text.split()) for s in segment.outputs if s.text)
+    said = [segment.question, [s.text for s in segment.retrievals], answer]
     return hashlib.sha256((chain + json.dumps(said)).encode()).hexdigest()
 
 
@@ -530,10 +654,12 @@ class Live:
             )
         self._limit = max_conversations
         self._lock = threading.RLock()
-        self._by_chain: OrderedDict[str, _Conversation] = OrderedDict()
-        # The same by how a conversation stood before its latest turn, and by its tool calls.
+        # Those that stand at the same point, the newest last.
+        self._by_chain: OrderedDict[str, list[_Conversation]] = OrderedDict()
+        # The same by how a conversation stood before its latest turn, and by its tool calls, whose
+        # IDs need not be unique.
         self._by_base: OrderedDict[str, _Conversation] = OrderedDict()
-        self._by_call: OrderedDict[str, _Conversation] = OrderedDict()
+        self._by_call: OrderedDict[str, list[_Conversation]] = OrderedDict()
         # The conversations that a keep-warm ping is planned for.
         self._warm: dict[int, _Conversation] = {}
         self._names: dict[str, int] = {}
@@ -566,10 +692,28 @@ class Live:
 
     # -- conversations -------------------------------------------------------
 
+    def _taken(self, thread: str | None, turns: list[_Segment], scan, closing=False):
+        """The conversation a request continues, with its lock held, and the chain of what it has said."""
+        for last in (False, False, False, True):
+            found, chains = self._conversation(thread, turns, scan, closing)
+            found.lock.acquire()
+            try:
+                # Another request may have come first while this one waited.
+                if last or self._stands(found, chains, turns, scan, closing):
+                    return found, chains
+            except BaseException:
+                found.lock.release()
+                raise
+            found.lock.release()
+        raise AssertionError("not reached")
+
     def _conversation(
-        self, thread: str | None, turns: list[_Segment], scan
+        self, thread: str | None, turns: list[_Segment], scan, closing: bool = False
     ) -> tuple[_Conversation, list[str]]:
-        """The conversation a request continues, found by what it has said so far."""
+        """The conversation a request continues, found by what it has said so far.
+
+        `closing` says that the request is no new one: it ends on its answer.
+        """
         seed = "thread:" + thread if thread else "auto"
         chains = [hashlib.sha256(seed.encode()).hexdigest()]
         for segment in turns[:-1]:
@@ -577,24 +721,26 @@ class Live:
         done = len(turns) - 1
         with self._lock:
             found = self._in_loop(scan.results, chains, turns)
-            if found is None and (thread or done):
-                found = self._by_chain.get(chains[-1])
-                if found is not None and self._elsewhere(found, turns):
-                    found = self._branch(found, chains[-1], turns, thread)
-            if found is None and done:
+            others = [] if found is None else [found]
+            if not others and (thread or done):
+                others = self._by_chain.get(chains[-1], ())[::-1]
+            own = [c for c in others if self._own(c, turns, scan, closing)]
+            # One that is in the middle of something else comes last.
+            own.sort(key=lambda c: not self._fits(c.pending, turns))
+            found = own[0] if own else None
+            for other in others if found is None else ():
+                found = found or self._branch(other, chains[-1], turns, scan, thread)
+            if found is None and done and (thread or done > 1):
                 # Its last turn may have been answered without the answer passing here.
-                earlier = self._by_chain.get(chains[-2]) if thread or done > 1 else None
-                if (
-                    earlier is not None
-                    and earlier.pending is not None
-                    and earlier.pending.index == done
-                ):
-                    found = earlier
+                for one in reversed(self._by_chain.get(chains[-2], ())):
+                    pending = one.pending
+                    if pending is not None and pending.index == done:
+                        if not self._several(one) or self._goes_on(pending, turns[-2]):
+                            found = found or one
             if found is None and done and chains[-1] in self._by_base:
                 # It goes on from where another request, such as a host's own, branched off.
-                found = self._branch(
-                    self._by_base[chains[-1]], chains[-1], turns, thread
-                )
+                other = self._by_base[chains[-1]]
+                found = self._branch(other, chains[-1], turns, scan, thread)
             if found is None:
                 name = record = thread or "c-" + uuid.uuid4().hex[:16]
                 if thread:
@@ -623,36 +769,48 @@ class Live:
 
     def _in_loop(self, results, chains, turns) -> _Conversation | None:
         """The conversation whose reply made the tool calls that a request answers."""
-        done = len(turns) - 1
+        done, near = len(turns) - 1, []
         for call_id in reversed(results[-_LOOK_BACK:]):
-            found = self._by_call.get(call_id) if call_id else None
-            if found is None:
-                continue
-            pending = found.pending
-            if pending is None:
-                return None
-            if pending.index == done + 1 and found.chain == chains[-1]:
+            for found in reversed(self._by_call.get(call_id, ()) if call_id else ()):
                 # IDs need not be unique, so what was said has to agree.
-                if self._goes_on(pending, turns[-1]):
-                    return found
-            elif pending.index == done and done and found.chain == chains[-2]:
-                if self._goes_on(pending, turns[-2]):
-                    return found
-            return None
+                pending = found.pending
+                if pending is None:
+                    continue
+                if pending.index == done + 1 and found.chain == chains[-1]:
+                    if self._goes_on(pending, turns[-1]):
+                        return found
+                    if call_id in pending.called and found not in near:
+                        near.append(found)
+                elif pending.index == done and done and found.chain == chains[-2]:
+                    if self._goes_on(pending, turns[-2]):
+                        return found
+        if len(near) == 1:
+            # It answers the calls of this one and of no other: the application renders its turn anew.
+            return near[0]
         if not any(results[-_LOOK_BACK:]):
             # An API without IDs: found by what its tools had returned when the reply came.
             asked, seen = turns[-1].question, _hashes(turns[-1].retrievals)
             for k in range(len(seen) - 1, -1, -1):
-                found = self._by_call.get(self._loop(chains[-1], asked, seen[:k]))
-                if found is not None and found.pending is not None:
-                    if found.pending.index == done + 1 and found.chain == chains[-1]:
-                        return found
+                key = self._loop(chains[-1], asked, seen[:k])
+                for found in reversed(self._by_call.get(key, ())):
+                    pending = found.pending
+                    if pending is not None and found.chain == chains[-1]:
+                        if pending.index == done + 1 and self._goes_on(
+                            pending, turns[-1]
+                        ):
+                            return found
         return None
 
     @staticmethod
     def _loop(chain: str, question: str, seen: list) -> str:
         said = json.dumps([chain, question, seen]).encode()
         return "loop:" + hashlib.sha256(said).hexdigest()
+
+    def _fits(self, pending: _Pending | None, turns: list[_Segment]) -> bool:
+        """Whether nothing speaks against a turn being the one a request goes on with."""
+        if pending is None or pending.index != len(turns):
+            return True
+        return self._goes_on(pending, turns[-1])
 
     @staticmethod
     def _goes_on(pending: _Pending, segment: _Segment) -> bool:
@@ -661,24 +819,79 @@ class Live:
         return seen == pending.seen and segment.question.startswith(pending.question)
 
     @staticmethod
-    def _elsewhere(conversation: _Conversation, turns) -> bool:
-        """Whether a conversation is busy with another question than the one a request asks at this point."""
-        pending = conversation.pending
-        return (
-            pending is not None
-            and pending.index == len(turns)
-            and bool(pending.calls or pending.in_flight)
-            and not turns[-1].question.startswith(pending.question)
+    def _several(conversation: _Conversation) -> bool:
+        """Whether several conversations may be under way where this one is.
+
+        So it is with agents. A chat has one line, whatever its application
+        renders anew from call to call.
+        """
+        return conversation.session is None or conversation.agentic
+
+    def _own(self, conversation, turns, scan, closing=False) -> bool:
+        """Whether a request that meets a conversation at this point is its next one."""
+        pending, current = conversation.pending, turns[-1]
+        if pending is None or pending.index != len(turns):
+            return True
+        if not (pending.calls or pending.in_flight):
+            # Nothing has come of it yet.
+            return True
+        if not self._goes_on(pending, current):
+            # What it had said was rendered anew, if this answers the calls that were made last.
+            return bool(set(pending.called) & set(scan.results))
+        if closing or len(current.retrievals) > len(pending.seen):
+            return True
+        # The same request again: for want of an answer, or of another that goes on from here.
+        return not self._several(conversation) or not (
+            pending.answered or pending.in_flight
         )
 
+    def _stands(self, conversation, chains, turns, scan, closing) -> bool:
+        """Whether a conversation still is where a request found it."""
+        pending, done = conversation.pending, len(turns) - 1
+        if pending is not None and pending.index == done:
+            return not self._several(conversation) or (
+                conversation.chain == chains[-2] and self._goes_on(pending, turns[-2])
+            )
+        if conversation.chain == chains[-1]:
+            return self._own(conversation, turns, scan, closing)
+        # One that is met for the first time, perhaps in the middle.
+        return pending is None and not conversation.turns
+
+    def _point(self, conversation, chain, scan, pending=None) -> _Point | None:
+        """How a conversation stands, for one that branches off. Only an agent's can be copied."""
+        session = conversation.session
+        if not (conversation.left_alone or (conversation.agentic and session)):
+            return None
+        return _Point(
+            chain,
+            session.copy() if session is not None else None,
+            pending.copy() if pending is not None else None,
+            tuple(conversation.inserts),
+            conversation.reopens,
+            conversation.requested,
+            self._opens(scan),
+        )
+
+    @staticmethod
+    def _opens(scan) -> tuple:
+        tools = _size(json.dumps(scan.tools)) if scan.tools else 0
+        return _size(scan.system), tools
+
     def _branch(
-        self, other: _Conversation, chain: str, turns: list, thread: str | None
+        self, other: _Conversation, chain: str, turns: list, scan, thread: str | None
     ) -> _Conversation | None:
         """A conversation that goes on from where another stood. None where that is not known."""
-        done = len(turns) - 1
-        if other.base is None or other.base[0] != chain:
+        done, point = len(turns) - 1, other.here
+        if (
+            point is None
+            or point.pending is None
+            or point.pending.index != len(turns)
+            or not self._goes_on(point.pending, turns[-1])
+            or point.opens != self._opens(scan)
+        ):
+            point = other.base
+        if point is None or point.chain != chain:
             return None
-        _, session, inserts, reopens = other.base
         record = other.record_id
         if not done and thread:
             # Nothing was said before it: it is another conversation of the same name.
@@ -686,22 +899,37 @@ class Live:
             record = f"{thread}~{count}"
         made = _Conversation(other.thread_id, chain, record)
         made.agentic, made.left_alone = other.agentic, other.left_alone
-        made.inserts, made.reopens = list(inserts), reopens
+        made.inserts, made.reopens = list(point.inserts), point.reopens
         made.lifetime, made.five_minutes = other.lifetime, other.five_minutes
         made.header_lifetime = other.header_lifetime
         made.default_lifetime = other.default_lifetime
         made.model, made.policy = other.model, other.policy
-        made.requested = other.requested
+        made.requested = point.requested
         made.turns, made.at = done, other.at
-        if session is not None and other.session is not None:
-            made.session = session.copy()
-            made.session.follows(other.session)
-        # What they share is kept warm for the newest of them.
-        other.pings_off = True
+        if point.session is not None and other.session is not None:
+            made.session = point.session.copy()
+            if other.requested == point.requested:
+                made.session.follows(other.session)
+        if other.pending is None:
+            # What they share is kept warm for the newest of them.
+            other.superseded = True
         self._remember(made, turns[:done])
+        if point.pending is not None:
+            made.pending = point.pending.copy()
+            made.base, made.here = other.base, point
+            found = turns[-1].retrievals[: len(point.pending.seen)]
+            self._heard(made, len(turns), point.pending.question, found)
         if thread or done:
             self._index(made, chain)
         return made
+
+    def conversations(self) -> list[_Conversation]:
+        """Those that are known here, each once."""
+        found: dict[int, _Conversation] = {}
+        with self._lock:
+            for some in (*self._by_chain.values(), *self._by_call.values()):
+                found.update((id(c), c) for c in some)
+        return list(found.values())
 
     def _now(self, conversation: _Conversation) -> float:
         """The time, and never one this conversation has already passed: a clock can step back."""
@@ -711,10 +939,16 @@ class Live:
 
     def _index(self, conversation: _Conversation, chain: str) -> None:
         with self._lock:
-            if self._by_chain.get(conversation.chain) is conversation:
-                del self._by_chain[conversation.chain]
+            left = [
+                c
+                for c in self._by_chain.pop(conversation.chain, ())
+                if c is not conversation
+            ]
+            if left:
+                self._by_chain[conversation.chain] = left
             conversation.chain = chain
-            self._by_chain[chain] = conversation
+            others = [c for c in self._by_chain.pop(chain, ()) if c is not conversation]
+            self._by_chain[chain] = [*others[1 - _MOST_AT_ONE_POINT :], conversation]
             while len(self._by_chain) > self._limit:
                 self._by_chain.popitem(last=False)
 
@@ -778,19 +1012,28 @@ class Live:
         the model's calls, and `conclude` closes the turn. `thread` names the
         conversation. The request itself is left as it was.
         """
+        return self._view(path, body, thread).body
+
+    def show(self, path: str, body: Any, *, thread: str) -> Shown:
+        """The same for a host with several agents under one name: what comes back is told of its own reply."""
+        shown = self._view(path, body, thread)
+        shown.begin()
+        return shown
+
+    def _view(self, path: str, body: Any, thread: str) -> Shown:
         if not isinstance(body, dict):
-            return body
+            return Shown(self, path, body)
         dialect = wire.dialect_for(path)
         try:
             scan = dialect.scan(body)
-            turns = _segments(scan.slots)
+            turns = self._turns(scan)
             if not turns or not scan.awaiting:
-                return body
-            conversation, chains = self._conversation(thread, turns, scan)
+                return Shown(self, path, body)
+            conversation, chains = self._taken(thread, turns, scan)
         except Exception:
             self.stats["passed_through"] += 1
-            return body
-        with conversation.lock:
+            return Shown(self, path, body)
+        try:
             try:
                 call = self._prepare(
                     conversation, chains, dialect, body, scan, turns, None, asks=False
@@ -800,9 +1043,11 @@ class Live:
                     "compache: a request was passed on unchanged", exc_info=True
                 )
                 self.stats["passed_through"] += 1
-                return body
+                return Shown(self, path, body)
             self.stats["calls"] += 1
-            return call.plain
+            return Shown(self, path, call.plain, conversation, conversation.pending)
+        finally:
+            conversation.lock.release()
 
     def heard(
         self,
@@ -819,33 +1064,46 @@ class Live:
         where the host has them at hand.
         """
         conversation = self._latest.get(thread)
-        if conversation is None:
-            return
+        if conversation is not None:
+            made = [{"arguments": arguments} for arguments in calls]
+            self._told(conversation, conversation.pending, usage, model, said, made)
+
+    def _told(self, conversation, pending, usage, model, said, calls) -> None:
+        """Keep the books on a call that a host made itself."""
         with conversation.lock:
-            pending = conversation.pending
-            if pending is None:
+            if pending is None or pending is not conversation.pending:
                 return
             pending.calls += 1
+            pending.answered = True
             try:
                 self._ledger(
                     conversation, "answer", wire.Reply(usage=usage, model=model)
                 )
-                made = [{"arguments": arguments} for arguments in calls]
-                self._step(conversation, pending, said, made)
+                self._step(conversation, pending, said, calls)
+                keys = tuple(c["id"] for c in calls if c.get("id"))
+                self._register(conversation, keys)
+                pending.called = keys
                 if conversation.session is not None and pending.turn is not None:
                     conversation.session.replied(
                         pending.turn,
                         said or "",
-                        list(calls),
+                        [c.get("arguments") for c in calls],
                         at=self._now(conversation),
                         usage=usage,
                     )
             except Exception:
                 logger.warning("compache: a call was not recorded", exc_info=True)
 
-    def reopen(self, thread: str, reference: str, offset: Any = 0) -> dict:
-        """The answer to the model's `reopen` call in a conversation shown to `view`, as it is to be read."""
-        conversation = self._latest.get(thread)
+    def reopen(
+        self, thread: str, reference: str, offset: Any = 0, *, call: str | None = None
+    ) -> dict:
+        """The answer to the model's `reopen` call in a conversation shown to `view`, as it is to be read.
+
+        `call` is the ID of that call, where several conversations go by one name.
+        """
+        with self._lock:
+            made = self._by_call.get(call or "", ())
+            conversation = made[-1] if made else self._latest.get(thread)
         if conversation is None or conversation.session is None:
             return {
                 "status": "error",
@@ -873,11 +1131,11 @@ class Live:
         try:
             dialect = wire.dialect_for(path)
             scan = dialect.scan(body)
-            turns = _segments(scan.slots)
+            turns = self._turns(scan)
             if not turns or not turns[-1].outputs or dialect.waits_for_tools(body):
                 return
-            conversation, chains = self._conversation(thread, turns, scan)
-            with conversation.lock:
+            conversation, chains = self._taken(thread, turns, scan, True)
+            try:
                 now = self._now(conversation)
                 self._catch_up(conversation, chains, turns, now, scan)
                 pending = conversation.pending
@@ -885,6 +1143,8 @@ class Live:
                     self._finish(
                         conversation, _link(chains[-1], turns[-1]), turns[-1], now
                     )
+            finally:
+                conversation.lock.release()
         except Exception:
             logger.warning("compache: a turn was not recorded", exc_info=True)
 
@@ -953,64 +1213,58 @@ class Live:
                 if dialect is not None and isinstance(body, dict)
                 else None
             )
-            turns = _segments(scan.slots) if scan is not None else []
+            turns = self._turns(scan) if scan is not None else []
             if not turns or not scan.awaiting:
                 raise ValueError("nothing here to decide on")
             scan.stream = scan.stream or wire.streams(path)
             scan.model = scan.model or wire.model_of(path)
-            conversation, chains = self._conversation(thread, turns, scan)
+            conversation, chains = self._taken(thread, turns, scan)
         except Exception:
             # A shape this does not know: the application's request goes out as it is.
             self.stats["passed_through"] += 1
             return send(body)
-        with conversation.lock:
+        try:
+            conversation.when = at[0] if at is not None else None
             try:
-                conversation.when = at[0] if at is not None else None
-                try:
-                    if conversation.lifetime is not None and not wire.has_cache_mark(
-                        dialect.with_cache_mark(body)
-                    ):
-                        # Nothing in this request could ask for it.
-                        self._plan_default(conversation)
-                    call = self._prepare(
-                        conversation,
-                        chains,
-                        dialect,
-                        body,
-                        scan,
-                        turns,
-                        send,
-                        asks,
-                    )
-                except Exception:
-                    logger.warning(
-                        "compache: a request was passed on unchanged", exc_info=True
-                    )
-                    self.stats["passed_through"] += 1
-                    return send(body)
-                if at is not None:
-                    conversation.when = at[1]
-                return self._carry(call, scan)
-            finally:
-                conversation.when = None
+                if conversation.lifetime is not None and not wire.has_cache_mark(
+                    dialect.with_cache_mark(body)
+                ):
+                    # Nothing in this request could ask for it.
+                    self._plan_default(conversation)
+                call = self._prepare(
+                    conversation, chains, dialect, body, scan, turns, send, asks
+                )
+            except Exception:
+                logger.warning(
+                    "compache: a request was passed on unchanged", exc_info=True
+                )
+                self.stats["passed_through"] += 1
+                return send(body)
+            if at is not None:
+                conversation.when = at[1]
+            return self._carry(call, scan)
+        finally:
+            conversation.when = None
+            conversation.lock.release()
+
+    def _turns(self, scan) -> list[_Segment]:
+        """The turns of a request. What a harness says beside its results is a remark only to an agent."""
+        policy = self.policy
+        return _segments(scan.slots, policy is None or policy.agentic)
 
     def _prepare(
         self, conversation, chains, dialect, body, scan, turns, send, asks=True
     ) -> _Call:
         """Bring the conversation up to this request and work out what to send for it."""
         now, number, current = self._now(conversation), len(turns), turns[-1]
-        if scan.model and conversation.requested not in (None, scan.model):
-            # Another model has a cache of its own, and nothing of this conversation is in it.
-            if conversation.session is not None:
-                conversation.session.lost()
-        conversation.requested = scan.model or conversation.requested
-        conversation.system_bytes = _size(scan.system)
-        conversation.tools_bytes = _size(json.dumps(scan.tools)) if scan.tools else 0
+        conversation.system_bytes, conversation.tools_bytes = self._opens(scan)
+        conversation.superseded = False
         plain = body
         try:
             conversation.went = []
             session = conversation.session
-            warm = session is not None and session.warm(now)
+            same = not scan.model or conversation.requested in (None, scan.model)
+            warm = same and session is not None and session.warm(now)
             if session is not None and conversation.agentic:
                 session.carries(scan.thoughts)
             self._catch_up(conversation, chains, turns, now, scan)
@@ -1019,21 +1273,27 @@ class Live:
             if (
                 pending is not None
                 and pending.index == number
+                and self._several(conversation)
                 and _hashes(found[: len(pending.seen)]) != pending.seen
             ):
                 # The application rewrote what its tools had returned: start over from what it says now.
                 earlier, pending = pending, None
                 if conversation.session is not None:
-                    self._walk(conversation, chains, turns, now, scan)
+                    self._anew(conversation, chains, turns, now, scan)
             if pending is None or pending.index != number:
                 pending = self._begin(conversation, chains, current, number, now, scan)
                 if earlier is not None:
                     pending.goes_on_from(earlier)
-            elif len(found) > len(pending.seen):
-                self._feed(conversation, pending, found[len(pending.seen) :], now, scan)
+            else:
+                self._asks(conversation, scan)
+                if len(found) > len(pending.seen):
+                    late = found[len(pending.seen) :]
+                    self._feed(conversation, pending, late, now, scan)
+                # A chat may render what was found before anew.
+                pending.seen = _hashes(found[: len(pending.seen)])
             conversation.last = None
             conversation.carries = conversation.carries or bool(scan.thoughts)
-            pending.sent_at = now
+            pending.sent_at, pending.answered, pending.whole = now, False, False
             if conversation.session is not None:
                 if self.learner is not None and conversation.agentic:
                     if not warm:
@@ -1043,6 +1303,9 @@ class Live:
                         )
                     self.learner.opened(conversation.model, now)
                 plain = self._apply(conversation, dialect, body, scan, turns)
+            conversation.here = self._point(
+                conversation, conversation.chain, scan, pending
+            )
         except Exception:
             # The policy cannot be applied here. From now on this conversation is only recorded.
             logger.warning(
@@ -1053,8 +1316,7 @@ class Live:
         marked = plain
         if conversation.session is not None:
             marked = dialect.with_cache_mark(plain)
-            for place in conversation.pending.marks:
-                marked = dialect.with_boundary(marked, place)
+            marked = dialect.with_boundaries(marked, conversation.pending.marks)
             marked = self._asking(conversation, dialect, marked)
         call = _Call(
             conversation,
@@ -1101,16 +1363,26 @@ class Live:
         if result.status in _REFUSED and call.outgoing is not call.body:
             # Refused with the policy applied: send what the application wrote.
             self.stats["retried"] += 1
-            self.stats["policy_refused"] += 1
-            self._stand_down(conversation, pending.index, pending.started_at)
-            call.plain = call.marked = call.outgoing = call.body
-            call.asked, call.carrier = False, None
             result = call.send(call.body)
+            if result.status < 400:
+                # So it was the policy. What is refused either way is none of its doing.
+                self.stats["policy_refused"] += 1
+                self._stand_down(conversation, pending.index, pending.started_at)
+                call.plain = call.marked = call.outgoing = call.body
+                call.asked, call.carrier = False, None
         pending.asked = pending.asked or call.asked
         if result.status >= 400 or (result.json is None and result.events is None):
             return result
         if result.events is not None:
-            return replace(result, events=self._stream(call, result, pending))
+
+            def release():
+                with conversation.lock:
+                    pending.in_flight -= 1
+                if result.close is not None:
+                    result.close()
+
+            passing = _Passing(self._stream(call, result, pending), release)
+            return replace(result, events=passing)
         return self._settle(call, result)
 
     def _under_default(self, call: _Call, result: Result) -> Result:
@@ -1154,12 +1426,22 @@ class Live:
                 return
         self._walk(conversation, chains, turns, now, scan)
 
+    def _anew(self, conversation, chains, turns, now, scan) -> None:
+        """Take a conversation back to where its latest turn began."""
+        base, session = conversation.base, conversation.session
+        if base is None or base.session is None or base.chain != chains[-1]:
+            return self._walk(conversation, chains, turns, now, scan)
+        conversation.pending, conversation.went = None, []
+        conversation.session = base.session.copy()
+        conversation.session.follows(session)
+        conversation.inserts = list(base.inserts)
+
     def _walk(self, conversation, chains, turns, now, scan) -> None:
         """Walk the policy through a conversation that is met in the middle, up to its last question."""
         done = len(turns) - 1
         conversation.pending, conversation.turns, conversation.stale = None, 0, False
         conversation.inserts, conversation.went = [], []
-        conversation.base = conversation.quotes = None
+        conversation.base = conversation.here = conversation.quotes = None
         policy = self._start(conversation, conversation.thread_id, scan)
         if policy is not None:
             # When it was said is not known, and a process that meets a conversation in the middle
@@ -1223,17 +1505,13 @@ class Live:
     def _begin(self, conversation, chains, current, number, now, scan) -> _Pending:
         """Open the turn a request asks about."""
         session, found = conversation.session, current.retrievals
-        if conversation.left_alone or (conversation.agentic and session is not None):
-            conversation.base = (
-                chains[-1],
-                session.copy() if session is not None else None,
-                tuple(conversation.inserts),
-                conversation.reopens,
-            )
-            if number > 1:
+        conversation.base = self._point(conversation, chains[-1], scan)
+        if conversation.base is not None and number > 1:
+            with self._lock:
                 self._by_base[chains[-1]] = conversation
                 while len(self._by_base) > self._limit:
                     self._by_base.popitem(last=False)
+        self._asks(conversation, scan)
         pending = conversation.pending = _Pending(
             number, now, question=current.question, seen=_hashes(found)
         )
@@ -1241,6 +1519,14 @@ class Live:
             pending.turn = self._shown(conversation, current, now, scan)
         self._heard(conversation, number, current.question, found)
         return pending
+
+    @staticmethod
+    def _asks(conversation, scan) -> None:
+        """Take note of the model a request names. Another has a cache of its own, and nothing of this is in it."""
+        if scan.model and conversation.requested not in (None, scan.model):
+            if conversation.session is not None:
+                conversation.session.lost()
+        conversation.requested = scan.model or conversation.requested
 
     def _feed(self, conversation, pending, found, now, scan) -> None:
         """Take in what the tools of a turn have returned since its last request."""
@@ -1314,14 +1600,12 @@ class Live:
         said = dialect.said_so_far(body)
         places = self._places(conversation, turns, scan)
         conversation.inserts = [
-            insert
-            for insert in conversation.inserts
-            if insert.at <= len(said)
-            and (
-                any(conversation.session.shows_again(n) for n in insert.names)
-                if conversation.agentic
-                else insert.turn == pending.index
+            placed
+            for placed in (
+                self._placed(conversation, dialect, said, insert, pending.index)
+                for insert in conversation.inserts
             )
+            if placed is not None
         ]
         gone: list = []
         if conversation.agentic and scan.thoughts:
@@ -1361,6 +1645,28 @@ class Live:
         return out
 
     @staticmethod
+    def _placed(conversation, dialect, said, insert, turn) -> _Insert | None:
+        """An insert where its place is in a request now. None where it is out of view, or its place is gone."""
+        session = conversation.session
+        if not conversation.agentic:
+            if insert.turn != turn:
+                return None
+        elif not any(session.shows_again(name) for name in insert.names):
+            return None
+        if insert.dialect == dialect.name:
+            # A harness may leave out a message it had put in, or put in others.
+            near = range(insert.at, max(-1, insert.at - _MOVED - 1), -1)
+            for at in (*near, *range(insert.at + 1, insert.at + _MOVED + 1)):
+                if at > len(said):
+                    continue
+                behind = wire.landmark(said[at - 1]) if at else None
+                if behind == insert.behind:
+                    return replace(insert, at=at)
+        for name in insert.names if conversation.agentic else ():
+            session.dropped(name)
+        return None
+
+    @staticmethod
     def _places(conversation, turns, scan) -> list[int]:
         """Where a cut begins: the one that was made now, and the one that comes next.
 
@@ -1377,7 +1683,7 @@ class Live:
             for j, found in enumerate(segment.retrievals, 1):
                 part_id = f"{conversation.thread_id}:{k}:retrieval:{j}"
                 at[part_id, False] = found.slots[0].message
-        return sorted({at[first] for first in firsts if first in at})
+        return list(dict.fromkeys(at[first] for first in firsts if first in at))
 
     # -- notes ---------------------------------------------------------------
 
@@ -1497,6 +1803,7 @@ class Live:
         conversation, dialect = call.conversation, call.dialect
         data, sent, rounds = result.json, call.outgoing, 0
         most = _AGENT_ROUNDS if conversation.agentic else _ROUNDS
+        written = False
         try:
             reply = dialect.reply(data)
             self._ledger(conversation, kind, reply, pending=call.pending)
@@ -1512,15 +1819,20 @@ class Live:
                 sent = self._asking(
                     conversation, dialect, dialect.after_tools(sent, data, answers)
                 )
-                again = call.send(sent)
+                again, written = self._followed(call, sent)
                 if again.status >= 400 or again.json is None:
                     return again
                 result, data = again, again.json
                 reply = dialect.reply(data)
-                self._ledger(conversation, "reopen", reply, pending=call.pending)
+                how = "retry" if written else "reopen"
+                self._ledger(conversation, how, reply, pending=call.pending)
+                if written:
+                    break
             # A reply asked for a note that says nothing is asked again without the note first.
-            if self._changed(call) and (
-                rounds > most or not (call.asked or reply.text or reply.calls)
+            if (
+                not written
+                and self._changed(call)
+                and (rounds > most or not (call.asked or reply.text or reply.calls))
             ):
                 # The model goes on fetching, or says nothing: what it was shown does not do for
                 # this turn. It is asked once more, exactly as the application wrote it.
@@ -1537,6 +1849,8 @@ class Live:
                 if conversation.session is not None and len(ours) < len(reply.calls):
                     self._reopen(conversation, ours, call, data)
                 data = dialect.without_tool(data, _REOPEN)
+        except _Unsent as error:
+            raise error.__cause__ from None
         except Exception:
             logger.warning("compache: a reply was not read", exc_info=True)
         try:
@@ -1596,41 +1910,12 @@ class Live:
         tool = _REOPEN if conversation.session is not None else None
         editor = dialect.Stream(dialect, tool)
         sent, rounds, events, closers = call.outgoing, 0, result.events, [result.close]
-        kind, counted = "answer", False
-        try:
-            while True:
-                for raw, name, data in wire.sse_events(events):
-                    yield from editor.feed(raw, name, data)
-                if not editor.again or kind == "retry":
-                    break
-                rounds += 1
-                with conversation.lock:
-                    self._ledger(conversation, kind, editor, pending=pending)
-                    if rounds > most:
-                        # The model goes on fetching: it is asked as the application wrote it.
-                        again, kind = self._as_written(call), "retry"
-                    else:
-                        answers = self._reopen(
-                            conversation, editor.ours, call, editor.said
-                        )
-                        sent = self._asking(
-                            conversation,
-                            dialect,
-                            dialect.after_tools(sent, editor.said, answers),
-                        )
-                        again, kind = call.send(sent), "reopen"
-                closers.append(again.close)
-                if again.status >= 400 or again.events is None:
-                    # No further round came: the one before it is already in the books.
-                    counted = True
-                    break
-                events = again.events
-                editor.next_round()
-            yield from editor.end()
-        finally:
-            for close in closers:
-                if close is not None:
-                    close()
+        kind, counted, closed, failed = "answer", False, False, None
+
+        def close():
+            """Close the books on the reply, before the application can come back to it."""
+            nonlocal closed
+            closed = True
             with conversation.lock:
                 pending.in_flight -= 1
                 try:
@@ -1645,18 +1930,93 @@ class Live:
                         "compache: a streamed reply was not recorded", exc_info=True
                     )
 
-    def _as_written(self, call: _Call) -> Result:
+        try:
+            while True:
+                for raw, name, data in wire.sse_events(events):
+                    shown = editor.feed(raw, name, data)
+                    if editor.over and not editor.again and not closed:
+                        close()
+                    yield from shown
+                if not editor.again or kind == "retry":
+                    break
+                rounds += 1
+                with conversation.lock:
+                    self._ledger(conversation, kind, editor, pending=pending)
+                    # The round that is over is in the books, whatever comes next.
+                    counted = True
+                    if rounds > most:
+                        # The model goes on fetching: it is asked as the application wrote it.
+                        again, kind = self._as_written(call), "retry"
+                    else:
+                        answers = self._reopen(
+                            conversation, editor.ours, call, editor.said
+                        )
+                        sent = self._asking(
+                            conversation,
+                            dialect,
+                            dialect.after_tools(sent, editor.said, answers),
+                        )
+                        again, written = self._followed(call, sent)
+                        kind = "retry" if written else "reopen"
+                closers.append(again.close)
+                if again.status >= 400 or again.events is None:
+                    failed = again
+                    break
+                events, counted = again.events, False
+                editor.next_round()
+            if failed is not None:
+                yield from editor.failed(failed.status, _said_wrong(failed))
+            else:
+                yield from editor.end()
+        except _Unsent as error:
+            editor.finished = False
+            raise error.__cause__ from None
+        finally:
+            for closing in closers:
+                if closing is not None:
+                    closing()
+            if not closed:
+                if failed is not None:
+                    editor.finished = False
+                close()
+
+    def _followed(self, call: _Call, body) -> tuple[Result, bool]:
+        """What follows a fetch, and whether it had to be asked as the application wrote it.
+
+        Its answer is not in the application's request, so that goes out only
+        where this one fails.
+        """
+        again = None
+        try:
+            again = call.send(body)
+        except Exception:
+            logger.warning("compache: a fetch was not followed up", exc_info=True)
+        if again is not None and again.status < 400:
+            return again, False
+        refused = again is not None and again.status in _REFUSED
+        return self._as_written(call, refused), True
+
+    def _as_written(self, call: _Call, counts: bool = True) -> Result:
         """Send the application's own request for a turn the policy's view did not do for.
 
         A conversation that needs this twice is left alone from then on: its
-        users should not wait for fetches that lead nowhere.
+        users should not wait for fetches that lead nowhere. `counts` says
+        whether it was the policy's doing.
         """
         conversation = call.conversation
         self.stats["retried"] += 1
-        self.stats["fell_back"] += 1
-        conversation.fell_back += 1
         call.asked, call.carrier = False, None
-        result = call.send(call.body)
+        try:
+            result = call.send(call.body)
+        except Exception as error:
+            raise _Unsent() from error
+        if result.status < 400:
+            call.plain = call.marked = call.outgoing = call.body
+            if call.pending is not None:
+                call.pending.whole = True
+            if counts:
+                self.stats["fell_back"] += 1
+                conversation.fell_back += 1
         if conversation.fell_back >= 2 and conversation.session is not None:
             pending = conversation.pending
             self._stand_down(conversation, pending.index, pending.started_at)
@@ -1694,8 +2054,15 @@ class Live:
             names.append((part, answers[call["id"]]))
         if asked is not None and conversation.pending is not None:
             try:
+                heard = asked.dialect.said_so_far(asked.body)
+                at = len(heard)
+                while at and wire.instructs(heard[at - 1]):
+                    # It may be there for this one request.
+                    at -= 1
                 insert = _Insert(
-                    len(asked.dialect.said_so_far(asked.body)),
+                    at,
+                    wire.landmark(heard[at - 1]) if at else None,
+                    asked.dialect.name,
                     asked.dialect.fetched(said, answers),
                     tuple(name for name, _ in names),
                     conversation.pending.index,
@@ -1713,6 +2080,7 @@ class Live:
         if pending is None or pending is not conversation.pending:
             return
         pending.calls += 1
+        pending.answered = True
         # Where the application puts this reply, and with it what the model reasoned.
         pending.place = len(call.dialect.said_so_far(call.body)) if reasons else None
         self._step(conversation, pending, text, calls)
@@ -1756,12 +2124,8 @@ class Live:
         if not keys:
             said = call.turns[-1].question
             keys = [self._loop(conversation.chain, said, pending.seen)]
-        with self._lock:
-            for key in keys:
-                self._by_call[key] = conversation
-                self._by_call.move_to_end(key)
-            while len(self._by_call) > 8 * self._limit:
-                self._by_call.popitem(last=False)
+        self._register(conversation, keys)
+        pending.called = tuple(keys)
         if conversation.session is None or pending.turn is None:
             return
         conversation.session.replied(
@@ -1769,10 +2133,23 @@ class Live:
             text,
             [made.get("arguments") for made in calls],
             at=self._now(conversation),
-            usage=pending.last_usage,
+            # What was billed for everything says nothing of the view.
+            usage=None if pending.whole else pending.last_usage,
             place=pending.place,
         )
+        if pending.whole:
+            conversation.session.lost()
         self._plan_pings(conversation, (call.dialect, call.marked, None, call.send))
+
+    def _register(self, conversation, keys) -> None:
+        """Remember whose tool calls these are."""
+        with self._lock:
+            for key in keys:
+                others = self._by_call.pop(key, ())
+                others = [c for c in others if c is not conversation]
+                self._by_call[key] = [*others[1 - _MOST_AT_ONE_POINT :], conversation]
+            while len(self._by_call) > 8 * self._limit:
+                self._by_call.popitem(last=False)
 
     def _plan_pings(self, conversation, last: tuple) -> None:
         """Keep what a ping is built from, but only while one is planned."""
@@ -1880,6 +2257,7 @@ class Live:
                 for p in pending.turn.parts
                 if p.kind == "retrieval" and p.part_id not in pending.turn.archived_ids
             }
+            counted = counted and not (pending.whole and conversation.agentic)
             try:
                 conversation.session.complete(
                     pending.turn,
@@ -1893,6 +2271,8 @@ class Live:
                     place=pending.place if counted else None,
                     cited_part_ids=[i for i in pending.cited if i in visible],
                 )
+                if pending.whole:
+                    conversation.session.lost()
             except Exception:
                 logger.warning(
                     "compache: a turn was not taken by the policy", exc_info=True
@@ -1997,6 +2377,7 @@ class Live:
             conversation.session is not None
             and conversation.last is not None
             and not conversation.pings_off
+            and not conversation.superseded
             # Between two turns, or while the tools of an agent's turn run.
             and (
                 pending is None
