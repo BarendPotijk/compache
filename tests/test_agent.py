@@ -415,7 +415,7 @@ class PolicyTests(unittest.TestCase):
 
     def test_the_header_s_lifetime_is_said_and_can_be_dropped(self):
         rows = FitTests().prompts(900, header=20_000)
-        policy = compache.fit(rows, model="claude-sonnet-5-5")
+        policy = compache.fit(rows, model="claude-haiku-5-5")
         self.assertEqual(policy.header_lifetime, 3600)
         self.assertIn("instructions and tools", policy.describe())
         plain = policy.at_default_lifetime()
