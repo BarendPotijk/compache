@@ -598,7 +598,7 @@ class ProfileTests(unittest.TestCase):
         )
         self.assertEqual(result["calculator"]["model"], "sonnet")
         query = parse_qs(urlsplit(result["link"]).fragment)
-        self.assertEqual(query["v"], ["6"])
+        self.assertEqual(query["v"], ["7"])
         self.assertEqual(query["model"], ["sonnet"])
         self.assertEqual(json.loads(query["scenario"][0]), scenario)
         self.assertEqual(query["source"], ["4 threads, 24 turns"])

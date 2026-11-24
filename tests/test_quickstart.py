@@ -37,6 +37,31 @@ class QuickstartTests(unittest.TestCase):
         )
         self.assertEqual(summary["keep"]["retrieved"], 1)
 
+    def test_a_policy_carries_the_workload_for_the_calculator(self):
+        profiled = compache.profile(
+            SAMPLE / "threads.jsonl.gz",
+            SAMPLE / "labels.jsonl",
+            model="claude-sonnet-5-5",
+            policy=self.policy,
+        )["calculator"]
+        carried = self.policy.artifact["workload"]
+        decision = profiled["scenario"].pop("policy")
+        self.assertEqual(
+            decision,
+            {
+                "questions": 4,
+                "answers": 9,
+                "retrieved": 1,
+                "keepUnder": 0,
+                "maxPings": 1,
+            },
+        )
+        self.assertEqual(carried, profiled)
+        with self.assertRaises(compache.ContractError):
+            compache.profile(
+                SAMPLE / "threads.jsonl.gz", model="gpt-6-luna", policy=self.policy
+            )
+
     def test_the_sample_is_a_chat_log_with_simple_labels(self):
         threads = compache.load_threads(SAMPLE / "threads.jsonl.gz")
         self.assertEqual([len(t.runs) for t in threads], [10, 26, 10, 25])

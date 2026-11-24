@@ -83,6 +83,11 @@ def _parser() -> argparse.ArgumentParser:
         type=Path,
         help="Write the profile here, for the calculator's Import",
     )
+    sub.add_argument(
+        "--policy",
+        type=Path,
+        help="A fitted policy for the calculator to show and price on this workload",
+    )
 
     command("check", "Validate threads and labels and summarize them")
 
@@ -372,7 +377,13 @@ def _describe(measured) -> list[str]:
 
 
 def _profile(args):
-    result = profile(args.threads, args.labels, model=args.model, **_header(args))
+    result = profile(
+        args.threads,
+        args.labels,
+        model=args.model,
+        policy=args.policy,
+        **_header(args),
+    )
     if args.output:
         _write(args.output, result)
     lines = _describe(result["measured"]) + result["notes"]

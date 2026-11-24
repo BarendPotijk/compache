@@ -174,8 +174,8 @@ class MeasureTests(unittest.TestCase):
         whole = measure(load_threads(rows(1.0), model=spec.model_id), spec)
         self.assertGreater(whole["history_resent"], 0.95)
         # Archiving a turn's retrieved text leaves one 22-token notice for each part.
-        self.assertEqual(scenario(rows(1.0))["archivedTokens"], 22)
-        self.assertEqual(scenario(rows(1.0, pieces=4))["archivedTokens"], 88)
+        self.assertEqual(scenario(rows(1.0))["archivedTokens"], 28)
+        self.assertEqual(scenario(rows(1.0, pieces=4))["archivedTokens"], 112)
 
     def test_plain_traffic_keeps_the_plain_description(self):
         rng = random.Random(3)

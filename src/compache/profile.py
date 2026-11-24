@@ -26,11 +26,11 @@ from .record import is_record
 from .record import load as load_record
 from .threads import load_threads, read_jsonl, recorded
 
-__all__ = ["CALCULATOR_URL", "history_resent", "profile"]
+__all__ = ["CALCULATOR_URL", "history_resent", "profile", "workload"]
 
 CALCULATOR_URL = "https://barendpotijk.github.io/compache/"
 _KINDS = ("input", "retrieval", "output")
-_LINK_VERSION = "6"
+_LINK_VERSION = "7"
 # Turns after the first by which an effect of position is halfway to its long-thread value.
 _HALF_TURNS = (0.5, 1, 2, 3, 5, 8, 13, 21, 34)
 _Z95 = 1.6448536269514722
@@ -312,7 +312,7 @@ def history_resent(threads, spec) -> float | None:
 
 def _notice_tokens(spec) -> int:
     """Tokens of the notice the runtime leaves in place of one archived part."""
-    return spec.text_tokens(placeholder("thread", Source("part", "retrieval", 1, "")))
+    return spec.part_tokens(placeholder("thread", Source("part", "retrieval", 1, "")))
 
 
 def _shared_prompt_share(threads, lifetime_seconds):
@@ -447,40 +447,11 @@ def measure(threads, spec, labels=()) -> dict:
     }
 
 
-def profile(
-    threads, labels=None, *, model=None, system_prompt=None, tools=None
-) -> dict:
-    """A workload profile of `threads`, with a link that opens the calculator filled in.
-
-    Everything the fit reads by turn position has a number here: the chance of
-    another turn, the return delay and long breaks, how long answers take and
-    how many model calls a turn makes. The dependency numbers come from the
-    labels: for each labelled turn the alternative whose evidence lies nearest.
-    Without labels the calculator keeps its own defaults for what later turns
-    need, and the profile says so.
-    """
-    if labels is None and is_record(threads):
-        labels = load_record(threads)[1]
-    rows = _rows(threads)
-    found = recorded(rows)
-    if model is None:
-        model = found["model"]
-        if model is None:
-            raise ContractError(
-                "the threads do not record which model answered: name it with --model or model="
-            )
-    spec = model_spec(model)
-    if system_prompt is None:
-        system_prompt = found["system_prompt"] or ""
-    if tools is None:
-        tools = found["tools"] or ()
-    loaded = load_threads(rows, model=spec.model_id)
-    measured = measure(loaded, spec, _rows(labels))
+def workload(measured, spec, model, header_tokens, notes=None) -> tuple[str, dict]:
+    """The calculator's settings for a measured workload: a model preset and a scenario."""
     tokens, lengths = measured["tokens_per_turn"], measured["turns_per_thread"]
-    header = spec.text_tokens(system_prompt) + (
-        spec.text_tokens(json.dumps(list(tools), ensure_ascii=False)) if tools else 0
-    )
-    notes = []
+    header = header_tokens
+    notes = [] if notes is None else notes
     scenario = {
         "inputTokens": max(1, tokens["input"]["median"]),
         "outputTokens": tokens["output"]["median"],
@@ -574,6 +545,70 @@ def profile(
         notes.append(
             "Custom model: prices are relative to $1 per million input tokens."
         )
+    return preset, scenario
+
+
+def header_size(spec, system_prompt, tools) -> int:
+    """Tokens of what opens every request."""
+    return spec.text_tokens(system_prompt) + (
+        spec.text_tokens(json.dumps(list(tools), ensure_ascii=False)) if tools else 0
+    )
+
+
+def _decision(policy) -> dict:
+    """A fitted policy as the calculator takes it."""
+    recipe = policy.recipe
+    return {
+        "questions": recipe.input_runs if recipe else None,
+        "answers": recipe.output_runs if recipe else None,
+        "retrieved": recipe.retrieval_runs if recipe else None,
+        "keepUnder": recipe.keep_under_tokens if recipe else 0,
+        "maxPings": policy.max_pings,
+    }
+
+
+def profile(
+    threads, labels=None, *, model=None, system_prompt=None, tools=None, policy=None
+) -> dict:
+    """A workload profile of `threads`, with a link that opens the calculator filled in.
+
+    Everything the fit reads by turn position has a number here: the chance of
+    another turn, the return delay and long breaks, how long answers take and
+    how many model calls a turn makes. The dependency numbers come from the
+    labels: for each labelled turn the alternative whose evidence lies nearest.
+    Without labels the calculator keeps its own defaults for what later turns
+    need, and the profile says so.
+    """
+    if labels is None and is_record(threads):
+        labels = load_record(threads)[1]
+    rows = _rows(threads)
+    found = recorded(rows)
+    if model is None:
+        model = found["model"]
+        if model is None:
+            raise ContractError(
+                "the threads do not record which model answered: name it with --model or model="
+            )
+    spec = model_spec(model)
+    if system_prompt is None:
+        system_prompt = found["system_prompt"] or ""
+    if tools is None:
+        tools = found["tools"] or ()
+    loaded = load_threads(rows, model=spec.model_id)
+    measured = measure(loaded, spec, _rows(labels))
+    notes = []
+    preset, scenario = workload(
+        measured, spec, model, header_size(spec, system_prompt, tools), notes
+    )
+    if policy is not None:
+        from .api import Policy
+
+        loaded = policy if isinstance(policy, Policy) else Policy.load(policy)
+        if loaded.spec.model_id != spec.model_id:
+            raise ContractError(
+                f"the policy is for {loaded.spec.model_id}, the threads are priced as {spec.model_id}"
+            )
+        scenario["policy"] = _decision(loaded)
     source = f"{measured['threads']:,} threads, {measured['turns']:,} turns"
     query = {
         "v": _LINK_VERSION,
