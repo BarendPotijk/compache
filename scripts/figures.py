@@ -2,7 +2,7 @@
 """Draw the figures under docs/assets from the data files in docs/assets/data.
 
     python scripts/figures.py              # every figure
-    python scripts/figures.py map thread   # some of: map, thread, openclaw, live, workflow
+    python scripts/figures.py map thread   # some of: headline, requests, map, thread, openclaw, live, workflow
 
 Every figure paints its own surface and carries a light and a dark palette, so it
 reads on either GitHub theme. The palette, typeface and marks are the calculator's.
@@ -12,6 +12,8 @@ Where the data comes from:
     thread.json        python benchmarks/docchat/run.py thread --data <build> --thread <id> --recipe ... --output ...
     openclaw.json      node scripts/openclaw_comparison.mjs --json docs/assets/data/openclaw.json
     live.json          python benchmarks/live/run.py report --work <folder> --figure docs/assets/data/live.json
+    answers.json       the graded answers on benchmarks/live/README.md
+    requests.json      python scripts/request_sizes.py
 """
 
 from __future__ import annotations
@@ -68,6 +70,174 @@ def away(seconds):
     return f"{seconds} seconds" if seconds < 120 else f"{seconds // 60} minutes"
 
 
+# -- the headline -----------------------------------------------------------
+
+
+def headline(data):
+    """Two panels: what the provider billed and how many answers were right, without and with compache."""
+    answers = json.loads((DATA / "answers.json").read_text("utf-8"))
+    ways = [w for w in data["ways"] if answers["model"] in w["detail"]]
+
+    def average(arm):
+        costs = [a["cost"] for w in ways for a in w["arms"] if a["name"] == arm]
+        return sum(costs) / len(costs)
+
+    before, after = average("No policy"), average("Fitted on past traces")
+    saving = f"{1 - after / before:.0%}"
+    right = (answers["no_policy"], answers["past_traces"])
+    width, height, x0, bar, top = 880, 182, 138, 22, 92
+    panels = [
+        (
+            "Bill per 1,000 user messages",
+            x0,
+            (before, after),
+            (f"${before:.2f}", f"${after:.2f}"),
+        ),
+        (
+            f"Right answers, out of {answers['turns']}",
+            x0 + 400,
+            right,
+            (str(right[0]), str(right[1])),
+        ),
+    ]
+    body = [
+        text(24, 32, f"{saving} off the bill, with as many answers right", "big"),
+        text(
+            24,
+            51,
+            f"Live calls to {answers['model']}, billed by the provider: {answers['turns'] // len(ways)} messages "
+            f"compache had not seen, each through {len(ways)} integrations.",
+            "t2",
+        ),
+        text(x0 - 14, top + 38, "Without", "t2", "end"),
+        text(x0 - 14, top + 70, "With compache", "b", "end"),
+    ]
+    for name, left, values, labels in panels:
+        full = 260
+        body += [
+            text(left, top + 5, name, "h"),
+            f'<line class="axis" x1="{left}" x2="{left}" y1="{top + 18}" y2="{top + 80}"/>',
+        ]
+        for j, (value, label) in enumerate(zip(values, labels, strict=True)):
+            yy, length = top + 22 + j * 32, value / max(values) * full
+            body.append(
+                f'<path class="{"c" if j else "n"}" d="M{left},{yy} h{length - 4:.1f} a4,4 0 0 1 4,4 '
+                f'v{bar - 8} a4,4 0 0 1 -4,4 h-{length - 4:.1f} z"/>'
+            )
+            body.append(text(left + length + 8, yy + 15.5, label, "h" if j else "t2"))
+    return svg(
+        width,
+        height,
+        f"{saving} off the bill, with as many answers right",
+        f"Live calls to {answers['model']}. Billed per 1,000 user messages: ${before:.2f} without compache, "
+        f"${after:.2f} with. Answers graded right of {answers['turns']}: {right[0]} without, {right[1]} with.",
+        body,
+    )
+
+
+# -- what one conversation sends ----------------------------------------------
+
+
+def requests(data):
+    """One column per message: the whole history in grey, what compache sends in blue, the cache underneath."""
+    turns = data["turns"]
+    width, height = 880, 388
+    left, right, top, bottom = 58, 58, 108, 96
+    span = (width - left - right) / len(turns)
+    plot = height - top - bottom
+    step = 20_000
+    ceiling = step * -(-max(t["full"] for t in turns) // step)
+    thick = min(22, span * 0.7)
+
+    def y(value):
+        return top + plot - value / ceiling * plot
+
+    def column(cls, x0, value):
+        h = value / ceiling * plot
+        r = min(4, h)
+        return (
+            f'<path class="{cls}" d="M{x0:.1f},{top + plot:.1f} v-{h - r:.1f} a{r:.1f},{r:.1f} 0 0 1 {r:.1f},-{r:.1f} '
+            f'h{thick - 2 * r:.1f} a{r:.1f},{r:.1f} 0 0 1 {r:.1f},{r:.1f} v{h - r:.1f} z"/>'
+        )
+
+    total = sum(t["full"] for t in turns)
+    sent = sum(min(t["sent"], t["full"]) for t in turns)
+    body = [
+        text(24, 30, "What one chat sends to the model, message by message", "big"),
+        text(
+            24,
+            49,
+            f"A {len(turns)}-message chat with an HR handbook, tokens per request. "
+            f"compache sends {1 - sent / total:.0%} fewer in total.",
+            "t2",
+        ),
+        '<rect class="cell" x="24" y="64" width="10" height="10" rx="2"/>',
+        text(40, 73.5, "the whole history", "t2"),
+        '<rect class="c" x="160" y="64" width="10" height="10" rx="2"/>',
+        text(176, 73.5, "what compache sends", "t2"),
+        '<circle class="o" cx="327" cy="69" r="4.5"/>',
+        text(338, 73.5, "user away too long, cache expired: compache trims", "t2"),
+        '<path class="line cs" d="M664,69 l4,4 l7,-8"/>',
+        text(682, 73.5, "ping kept the cache warm", "t2"),
+    ]
+    for tick in range(0, ceiling + 1, step):
+        body.append(
+            f'<line class="{"axis" if tick == 0 else "grid"}" x1="{left}" x2="{width - right}" y1="{y(tick):.1f}" y2="{y(tick):.1f}"/>'
+        )
+        body.append(
+            text(
+                left - 8, y(tick) + 4, f"{tick // 1000}k" if tick else "0", "tm", "end"
+            )
+        )
+    base = top + plot
+    trims = 0
+    archived = 0
+    for i, t in enumerate(turns):
+        middle = left + (i + 0.5) * span
+        x0 = middle - thick / 2
+        shown = min(t["sent"], t["full"])
+        if shown < t["full"]:
+            body.append(column("cell", x0, t["full"]))
+        body.append(column("c", x0, shown))
+        if t["archived"] > archived:
+            trims, archived = trims + 1, t["archived"]
+        if t["cache"] == "cold":
+            body.append(
+                f'<circle class="o" cx="{middle:.1f}" cy="{base + 16}" r="4.5"/>'
+            )
+        elif t["pings_before"]:
+            body.append(
+                f'<path class="line cs" d="M{middle - 5:.1f},{base + 16} l4,4 l7,-8"/>'
+            )
+        if t["turn"] == 1 or t["turn"] % 5 == 0:
+            body.append(text(middle, base + 41, t["turn"], "tm", "middle"))
+    last = turns[-1]
+    end = left + (len(turns) - 0.5) * span + thick / 2
+    body += [
+        text(end + 8, y(last["full"]) + 9, f"{last['full'] / 1000:.0f}k", "t2"),
+        text(end + 8, y(last["sent"]) + 9, f"{last['sent'] / 1000:.0f}k", "h"),
+        text(
+            left + (width - left - right) / 2, base + 60, "User message", "t2", "middle"
+        ),
+        text(
+            24,
+            height - 14,
+            "Trimming rewrites the history, which breaks the cache. So compache trims when the cache is already gone.",
+            "t2",
+        ),
+    ]
+    cold = sum(t["cache"] == "cold" for t in turns)
+    return svg(
+        width,
+        height,
+        "What one chat sends to the model, message by message",
+        f"A {len(turns)}-message chat. Sending the whole history grows to {last['full']:,} tokens on the last message, "
+        f"compache sends {last['sent']:,} there. The cache had expired before {cold} messages and compache trimmed the history "
+        f"{trims} times, each time on one of those. Before {sum(t['pings_before'] > 0 for t in turns)} other messages a ping kept the cache warm.",
+        body,
+    )
+
+
 # -- the policy map ---------------------------------------------------------
 
 
@@ -89,19 +259,24 @@ def policy_map(data):
         return top + plot - value / ceiling * plot
 
     body = [
-        text(24, 30, "Cost per 1,000 turns of every policy the fit priced", "big"),
+        text(
+            24,
+            30,
+            "The longer your users are away, the more sending everything costs",
+            "big",
+        ),
         text(
             24,
             49,
-            f"DocChat, {clocks[0][1]['test_turns']:,} held-out turns, {data['model_name']} at list price. A point is one policy.",
+            f"Cost per 1,000 messages of every setting compache tried. Same chats, {data['model_name']} with prompt caching on.",
             "t2",
         ),
     ]
     legend = [
         ("line ns", "No keep-warm pings"),
         ("line cs", f"Up to {most} keep-warm pings"),
-        ("dot c", "The policy compache fitted"),
-        ("dot n", "Keep everything, no pings"),
+        ("dot c", "What compache picked"),
+        ("dot n", "Send everything, no pings"),
     ]
     at = 24
     for kind, label in legend:
@@ -141,7 +316,7 @@ def policy_map(data):
             )
         )
         body.append(
-            text(x0, top - 14, f"keeping everything costs {ratio:.1f}× as much", "tm")
+            text(x0, top - 14, f"sending everything costs {ratio:.1f}× as much", "tm")
         )
         for tick in range(0, int(ceiling) + 1, step):
             body.append(
@@ -186,7 +361,7 @@ def policy_map(data):
         text(
             left + (width - left - right) / 2,
             height - 12,
-            "Share of the history kept in view",
+            "Share of the history kept",
             "t2",
             "middle",
         )
@@ -194,8 +369,8 @@ def policy_map(data):
     return svg(
         width,
         height,
-        "The cheapest policy depends on how users return",
-        "Cost per 1,000 turns against the share of history kept in view, without and with keep-warm pings, "
+        "The longer users are away, the more sending everything costs",
+        "Cost per 1,000 messages against the share of the history kept, without and with keep-warm pings, "
         "for three return patterns. " + " ".join(summary),
         body,
     )
@@ -523,6 +698,8 @@ def workflow():
 
 
 FIGURES = {
+    "headline": ("headline.svg", "live.json", headline),
+    "requests": ("requests.svg", "requests.json", requests),
     "map": ("policy-map.svg", "policy-grid.json", policy_map),
     "thread": ("thread-dependencies.svg", "thread.json", thread),
     "openclaw": ("openclaw-cost.svg", "openclaw.json", openclaw),

@@ -1,31 +1,69 @@
 # compache
 
-**Cut the cost of long LLM conversations by fitting compaction and prompt caching to your own traffic.**
+**Stop paying for your whole chat history on every message.**
 
-![Cost per 1,000 turns on Claude Sonnet 5.5 at three thread lengths: OpenClaw's defaults against compache](docs/assets/openclaw-cost.svg)
+[![Tests](https://github.com/BarendPotijk/compache/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/BarendPotijk/compache/actions/workflows/tests.yml) ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-2a78d6) ![No dependencies](https://img.shields.io/badge/dependencies-none-2a78d6) [![Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-2a78d6)](LICENCE.md)
 
-Modeled with the [cost calculator](https://barendpotijk.github.io/compache/) on its default workload: 25k retrieved tokens per turn, users back after a median of four minutes. OpenClaw follows its documented defaults. Both sides fetch back any earlier source a turn needs, and that call is in the price. `compache profile` opens the calculator on your own traffic.
+compache sits between your chatbot and the model API. It learns from your own conversations which parts of the history still matter and when your users come back, then sends less and caches better. The rest of your application stays as it is.
 
-## Why fitted beats default
+![Billed per 1,000 user messages on Claude Haiku 5.5: $2.68 without compache, $1.44 with. Right answers out of 208: 125 without, 135 with](docs/assets/headline.svg)
 
-Two things drive the bill of a long thread: how much context every turn sends again, and whether the provider's cache has gone cold by the time the user returns. Each changes what the other is worth, and both depend on your traffic.
+[Get started](#get-started) · [Works with](#works-with) · [Results](#results) · [Cost calculator](https://barendpotijk.github.io/compache/) · [Docs](docs/README.md)
 
-![Cost of every policy the fit priced, for users who return after 30 seconds, 4 minutes and 30 minutes](docs/assets/policy-map.svg)
+## Why long chats get expensive
 
-- **A default is one point for every workload.** Keeping everything costs 1.8 times the fitted policy when users return within seconds and 6.6 times when they take half an hour. OpenClaw's thresholds and Headroom's profiles are fixed points too.
-- **The two dials interact.** With users back after four minutes, pings save $50 per 1,000 turns while the whole history is kept and $4 once it is cut. The right ping schedule depends on the cut, and the other way round.
-- **compache prices the map on your threads and takes the cheapest point.** Keeping everything, with and without pings, is always on the map, so the fitted policy never costs more than that default on the threads it was fitted to. On the held-out threads above it was the cheapest of the 21 policies priced in two cases and within 3% in the third.
+Models have no memory, so your app sends the whole conversation with every message: each question, each answer, each document it ever retrieved. There are two ways to pay less, and **they work against each other**:
 
-## Quickstart
+- **Prompt caching** makes repeated text cheap, until the user takes a break and the cache expires. On Claude that takes five minutes.
+- **Trimming** (compaction) sends less text, but rewriting the history throws the cache away, and the model can lose something it needs.
+
+compache is **compaction + cache**, decided together:
+
+![A 26-message chat: the whole history grows to 89k tokens, compache sends at most 25k. It trims on every message where the cache had expired, and pings keep the cache warm through other breaks](docs/assets/requests.svg)
+
+- **Trims at the right moment.** When the cache has expired, the history has to be paid for in full anyway. That is when compache trims it.
+- **Keeps the cache warm.** While a user is away for a short break, a tiny request (a ping) keeps the cache alive, if that costs less than losing it.
+- **Keeps the rest in reach.** Trimmed text leaves a short notice. When the model needs it, it can fetch it back before your app sees the reply.
+
+## Get started
 
 ```sh
-git clone https://github.com/BarendPotijk/compache && cd compache
-pip install .
+pip install git+https://github.com/BarendPotijk/compache
+```
+
+**1. Record.** One line around the client you already have. Your requests and replies do not change.
+
+```python
+import compache
+from anthropic import Anthropic
+
+client = compache.wrap(Anthropic(), record="compache-record", sample=0.1)
+```
+
+The record holds sizes, times and token usage, **never text**. For one message in ten, the model is asked afterwards which earlier parts its reply needed, which adds about 5% to the bill while you record. In our runs some 600 messages were enough.
+
+**2. Fit.** compache prices every candidate setting on your own traffic and prints what you would save, before anything in your app changes.
+
+```sh
+compache fit compache-record --model claude-haiku-5-5
+```
+
+**3. Apply.** Same line, with the result.
+
+```python
+client = compache.wrap(Anthropic(), "policy.json")
+```
+
+That is all. There are no thresholds to tune.
+
+<details>
+<summary><b>Try it now</b>, on four sample chats in two seconds, without an API key</summary>
+
+```sh
+git clone https://github.com/BarendPotijk/compache && cd compache && pip install .
 compache fit examples/quickstart/threads.jsonl.gz \
   --labels examples/quickstart/labels.jsonl --model claude-sonnet-5-5
 ```
-
-In about two seconds, on four sample handbook chats:
 
 ```text
 Fitted on 4 threads, 71 turns (71 labelled) for claude-sonnet-5-5.
@@ -38,43 +76,66 @@ $16.10 per 1,000 turns against $50.25 keeping everything: 68% less.
 Wrote policy.json
 ```
 
-Then put it where your model calls leave:
+`python examples/quickstart/apply.py` then plays one of those chats, the one in the figure above, message by message.
+</details>
 
-```python
-import compache
+<details>
+<summary><b>Already have chat logs?</b> Skip the recording</summary>
 
-client = compache.wrap(client, "policy.json")          # an OpenAI, Anthropic or Google GenAI client
-with compache.thread("conversation-17"):
-    client.messages.create(model=MODEL, messages=messages, max_tokens=1024)
+```sh
+compache pull langfuse -o threads.jsonl.gz      # or: mlflow, otel. Your own chat log works as it is
+compache fit threads.jsonl.gz --labels labels.jsonl --model claude-haiku-5-5
 ```
 
-Your application sends its whole history as before. On the way out, archived parts become a notice the model can reopen, the cache is kept warm when that pays, and the same history always gives the same request, so the cached prefix stays stable. For an agent harness or anything else with a base URL: `compache proxy --policy policy.json`. [Every way in](docs/integrations.md)
+Labels say, for a sample of messages, which earlier parts were needed. A [coding-agent skill](skills/compache-label-dependencies/SKILL.md) writes them. Without labels compache keeps the whole history and tunes the pings. [Guide](docs/guide.md)
+</details>
 
-## What it needs from you
+## Works with
 
-| You give | compache fits |
+| Your stack | What you add |
 |---|---|
-| Your chat log: each message with its role, text and time | When a keep-warm ping pays |
-| Plus labels for a sample of turns: which earlier parts the turn needed | What stays in view, separately for questions, answers and retrieved text |
+| OpenAI, Anthropic and Google GenAI SDKs, sync, async and streaming | `compache.wrap(client, "policy.json")` |
+| LangChain and LangGraph on `ChatOpenAI` | `compache.langchain.clients(...)` and `middleware()` |
+| Anything with a base URL: agent harnesses, LiteLLM, LlamaIndex, Pydantic AI, the Vercel AI SDK | `compache proxy --policy policy.json` |
+| Your own prompt assembly | `policy.session(thread_id)` |
 
-No thresholds to tune and no model to call. The log goes in as you store it, or straight from Langfuse, MLflow or an OpenTelemetry export with `compache pull`. A [coding-agent skill](skills/compache-label-dependencies/SKILL.md) writes the labels, and prices for current Claude and GPT models are built in. [Guide](docs/guide.md)
+Everything runs in your own process and talks only to your model provider. Keep-warm pings need a process that stays up; without one, fit with `ping_counts=(0,)`. A request the provider refuses after compache changed it is sent again as your app wrote it. [All integrations](docs/integrations.md)
 
-**No traces you can read?** `compache.wrap(client, record="compache-record", sample=0.1)` keeps a record as your requests pass: sizes, times and usage, never text. For one turn in ten the model is asked, once its reply is in, which earlier parts that reply needed. `compache fit compache-record` runs on that. On live calls, with every turn asked, such a policy saved what one fitted on past traces saved.
+## Why learn it from your data?
 
-![Record threads, fit a policy, apply it on every request](docs/assets/workflow.svg)
+Because every chatbot needs a different answer. Three workloads, three settings, each priced by the provider's cache rules on conversations compache had not seen, against sending everything:
 
-## On long-chat benchmarks
-
-Cost on held-out conversations against keeping the full history, across three return patterns.
-
-| Dataset | What compache chose | Saving |
+| Chatbot | What compache learned | Cost |
 |:--|:--|:-:|
-| [DocChat](benchmarks/docchat/README.md)<br><sub>document&nbsp;chats&nbsp;in&nbsp;five&nbsp;domains</sub> | Keep questions and answers, keep retrieved text for one turn, with 0 to 3 pings depending on how users return | **43%&nbsp;to&nbsp;85%** |
-| [BEAM](benchmarks/beam/README.md)<br><sub>130k&nbsp;and&nbsp;500k&nbsp;token&nbsp;chats</sub> | Keep every user message and drop earlier assistant text, with 0 to 3 pings depending on how users return | **57%&nbsp;to&nbsp;91%** |
-| LongDS<br><sub>26k&nbsp;token&nbsp;analysis&nbsp;tasks</sub> | Keep everything and tune the pings in five of six cases, and cut to the last 20 turns in one | **0%&nbsp;to&nbsp;32%** |
+| **Chat with documents** ([DocChat](benchmarks/docchat/README.md)) | Questions and answers matter for long. Retrieved text is rarely needed after one message, so it goes | **43%&nbsp;to&nbsp;85%&nbsp;less** |
+| **Long personal chats** ([BEAM](benchmarks/beam/README.md)) | What the user said matters. Earlier replies of the assistant can go | **57%&nbsp;to&nbsp;91%&nbsp;less** |
+| **Data analysis** ([LongDS](benchmarks/README.md)) | Almost every step builds on earlier ones. Keep nearly everything, and time the pings | **0%&nbsp;to&nbsp;32%&nbsp;less** |
 
-Three workloads, three different answers: that is the point of fitting. On DocChat, Claude Sonnet 5.5 answered 24 of 30 held-out turns correctly from the fitted policy's view and 25 from the full history, on a fifth of the tokens. [All results](benchmarks/README.md)
+How long users stay away matters as much. The same document chats, with three kinds of users:
 
-On [live calls](benchmarks/live/README.md), with held-out DocChat conversations played at their users' pace, the fitted policies cut what the provider billed for Claude Haiku 5.5 by 42% to 49% through all four ways in played on it, with as many answers right.
+![The same chats with users who return after 30 seconds, 4 minutes and 30 minutes: sending everything costs 1.8, 5.9 and 6.6 times what compache's setting costs](docs/assets/policy-map.svg)
 
-[Guide](docs/guide.md) · [Integrations](docs/integrations.md) · [How it works](docs/how-it-works.md) · [Calculator](https://barendpotijk.github.io/compache/) · [Other tools compared](docs/comparisons.md) · [Issues](https://github.com/BarendPotijk/compache/issues)
+A fixed rule such as "keep the last 20 messages" or "summarize at 75% of the window" is one setting for all of these.
+
+## Results
+
+| | Measured on | Cost | Right answers, without → with |
+|:--|:--|:-:|:-:|
+| **Claude Haiku 5.5**, 5-minute cache | Live calls, billed, four integrations | **42%&nbsp;to&nbsp;49%&nbsp;less** | 125 → 132 to 135 of 208 |
+| **GPT-6 Luna**, 30-minute cache | Live calls, billed, one integration | **2%&nbsp;to&nbsp;5%&nbsp;less** | 24 → 20 to 23 of 52 |
+| **Claude Sonnet 5.5** | DocChat, modeled cost, live answers | **43%&nbsp;to&nbsp;85%&nbsp;less** | 25 → 24 of 30 |
+
+**It pays off most** in long chats with a lot of retrieved or tool text, where users pause longer than the cache lasts. **It pays off least** in short chats and where the cache outlasts the breaks: on GPT-6 Luna these users were always back in time. Differences in right answers are within chance. Grading is strict: one missed fact makes an answer wrong. [Live runs](benchmarks/live/README.md) · [All benchmarks](benchmarks/README.md)
+
+**What would you save?** Put your numbers in the [cost calculator](https://barendpotijk.github.io/compache/), or let `compache profile` fill it in from your traffic.
+
+## Next to what you already use
+
+| You use | compache adds |
+|---|---|
+| Prompt caching | What to do when the cache is about to expire, and what to drop once it has |
+| Keep the last N messages, or summarize at a threshold | N learned per kind of text, cuts timed to the cache, and trimmed text the model can fetch back |
+| OpenClaw or provider compaction at fixed thresholds | A setting fitted to your traffic. Modeled on Claude Sonnet 5.5, [58% to 61% cheaper than OpenClaw's defaults](docs/comparisons.md#openclaw) |
+| Headroom | The other half: Headroom shrinks single tool results, compache decides which parts stay and when the cache is kept warm |
+
+[Guide](docs/guide.md) · [Integrations](docs/integrations.md) · [How it works](docs/how-it-works.md) · [Other tools compared](docs/comparisons.md) · [Calculator](https://barendpotijk.github.io/compache/) · [Issues](https://github.com/BarendPotijk/compache/issues) · [Apache-2.0](LICENCE.md)
