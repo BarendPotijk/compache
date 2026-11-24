@@ -53,7 +53,11 @@ def _same_lifetime(live: Live) -> None:
 
     Hermes marks the requests, so what it asks for is its own setting.
     """
-    if live.policy is None or live.policy.spec.cache_ttl_seconds not in wire.TTLS:
+    spec = live.policy.spec if live.policy is not None else None
+    if spec is None or "claude" not in spec.model_id:
+        return
+    wanted = wire.TTLS.get(spec.cache_ttl_seconds)
+    if wanted is None:
         return
     try:
         from hermes_cli.config import load_config_readonly
@@ -63,7 +67,7 @@ def _same_lifetime(live: Live) -> None:
         )
     except Exception:
         return
-    wanted = wire.TTLS[live.policy.spec.cache_ttl_seconds]
+    # Its default, "auto", moves to an hour after a conversation's first pause.
     if str(asked) != wanted:
         logger.warning(
             "compache: the policy counts on %s cache entries and Hermes asks for %s. "

@@ -1264,6 +1264,55 @@ class LifetimeTests(unittest.TestCase):
         self.assertEqual(live.stats["policy_refused"], 1)
         self.assertEqual(live.policy.cache_lifetime, 3600)
 
+    def test_an_error_that_is_no_answer_changes_no_lifetime(self):
+        live = self.live()
+        statuses = iter((400, 529))
+
+        def send(payload):
+            return Result(next(statuses), json={"error": {"message": "busy"}})
+
+        body = {
+            "model": "claude-sonnet-5-5",
+            "max_tokens": 64,
+            "messages": [{"role": "user", "content": "Question 1?"}],
+        }
+        # What the second try says goes to the application, which tries again or not.
+        reply = live.exchange("/v1/messages", body, send, thread="busy")
+        self.assertEqual(reply.status, 529)
+        self.assertEqual(live.policy.cache_lifetime, 3600)
+        self.assertEqual(live.stats["stood_down"], 0)
+
+    def test_a_note_and_a_lifetime_may_both_be_refused(self):
+        def refusing(request):
+            said = json.dumps(request["body"])
+            if '"ttl"' in said or NOTE_ASKED in said:
+                return {"status": 400, "error": "not supported here"}
+            return {"text": "Answer 2."}
+
+        body = {
+            "model": "claude-sonnet-5-5",
+            "max_tokens": 64,
+            "messages": [
+                {"role": "user", "content": "Question 1?"},
+                {"role": "assistant", "content": "Answer 1."},
+                {"role": "user", "content": "Question 2?"},
+            ],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            live = self.live(record=tmp, sample=1.0, notes="inline")
+            self.model.script = refusing
+            send = self.model.send("/v1/messages")
+            reply = live.exchange("/v1/messages", body, send, thread="both")
+        self.assertEqual(reply.status, 200)
+        # Lifetime and note, then each without the other, then neither: still the policy's request.
+        tried = [json.dumps(b) for b in self.model.bodies]
+        self.assertEqual(
+            [('"ttl"' in said, NOTE_ASKED in said) for said in tried],
+            [(True, True), (False, True), (True, False), (False, False)],
+        )
+        self.assertIsNone(live.policy.cache_lifetime)
+        self.assertEqual(live.stats["policy_refused"], 0)
+
     def test_where_a_request_cannot_ask_for_it_the_default_is_planned(self):
         # Nothing marks a request of the Responses API, so nothing in it can ask for a lifetime.
         live = self.live()

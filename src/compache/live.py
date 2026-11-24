@@ -781,25 +781,13 @@ class Live:
         """Send the request, fall back to plainer forms of it if it is refused, and read the reply."""
         conversation, pending = call.conversation, call.conversation.pending
         result = call.send(call.outgoing)
-        if result.status in _REFUSED and conversation.lifetime is not None:
-            # Perhaps refused for the lifetime it asks for: the same request under the default.
-            self.stats["retried"] += 1
-            marked = wire.without_lifetime(call.marked)
-            outgoing = (
-                marked
-                if call.outgoing is call.marked
-                else wire.without_lifetime(call.outgoing)
-            )
-            again = call.send(outgoing)
-            if again.status not in _REFUSED:
-                result, call.marked, call.outgoing = again, marked, outgoing
-                self._lifetime_refused(conversation)
+        result = self._under_default(call, result)
         if result.status in _REFUSED and call.outgoing is not call.marked:
             # Refused with the note in it: send it without.
             self._note_refused(call)
             self.stats["retried"] += 1
             call.outgoing, call.asked, call.carrier = call.marked, False, None
-            result = call.send(call.outgoing)
+            result = self._under_default(call, call.send(call.outgoing))
         if result.status in _REFUSED and call.outgoing is not call.body:
             # Refused with the policy applied: send what the application wrote.
             self.stats["retried"] += 1
@@ -815,6 +803,26 @@ class Live:
         if result.events is not None:
             return replace(result, events=self._stream(call, result))
         return self._settle(call, result)
+
+    def _under_default(self, call: _Call, result: Result) -> Result:
+        """What became of a request. One that was refused goes out again under the default lifetime.
+
+        Only that tells whether the lifetime was why: what a provider says about it differs.
+        """
+        conversation = call.conversation
+        if result.status not in _REFUSED or conversation.lifetime is None:
+            return result
+        self.stats["retried"] += 1
+        marked = wire.without_lifetime(call.marked)
+        noted = call.outgoing is not call.marked
+        outgoing = wire.without_lifetime(call.outgoing) if noted else marked
+        again = call.send(outgoing)
+        if again.status in _REFUSED:
+            return result
+        if again.status < 400:
+            call.marked, call.outgoing = marked, outgoing
+            self._lifetime_refused(conversation)
+        return again
 
     def _catch_up(self, conversation, chains, turns, now, scan) -> None:
         """Bring a conversation's state up to the turns a request shows as answered."""
