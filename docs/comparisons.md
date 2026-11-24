@@ -52,13 +52,15 @@ Anthropic's tool-result clearing and compaction, and OpenAI's compaction endpoin
 
 ## The long cache
 
-Anthropic keeps an entry for an hour at 2× the input price for a write instead of 1.25×, and OpenAI for 12 hours at 2.5×. For an app that sends everything it is the simplest saving there is. Priced by the calculator on DocChat's profiles with Claude Sonnet 5.5, per 1,000 turns, mean of six seeds:
+Anthropic keeps an entry for an hour at 2× the input price for a write instead of 1.25×, and OpenAI for 12 hours at 2.5×. For an app that sends everything it is the simplest saving there is, and the baseline to beat. DocChat's held-out threads in the package's replay, Claude Sonnet 5.5, per 1,000 turns:
 
 | Users back after | Everything, 5-minute cache | Everything, 1-hour cache | compache, 5-minute cache | compache against the 1-hour cache |
 |---|---|---|---|---|
-| 30 seconds | $25 | $27 | $17 | 39% less |
-| 4 minutes | $127 | $29 | $19 | 33% less |
-| 30 minutes | $260 | $129 | $34 | 74% less |
+| 30 seconds | $34 | $28 | $19 | 30% less |
+| 4 minutes | $143 | $39 | $24 | 38% less |
+| 30 minutes | $286 | $155 | $43 | 72% less |
+
+`python benchmarks/docchat/run.py cost` reports both. compache itself uses the standard cache, and no answers were compared on the long one.
 
 ## In the calculator
 
