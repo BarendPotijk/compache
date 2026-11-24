@@ -103,6 +103,8 @@ class Call:
     needs: frozenset | None
     # Whether the reply waits for a tool. Otherwise it waits for the user.
     tool: bool
+    # Reasoning of the reply before it that the request carries.
+    thought: int = 0
 
 
 class Talk(list):
@@ -130,6 +132,7 @@ class Flow:
         "cached",
         "cap",
         "freed",
+        "held",
         "live",
         "names",
         "notice",
@@ -157,6 +160,8 @@ class Flow:
         # enough, and what those would free.
         self.live: list[int] = []
         self.ripe = self.freed = 0
+        # Reasoning of the turn that goes on.
+        self.held: list[int] = []
         # Up to which block the tokens ahead of it were counted last, and how many there are.
         self.ahead = (0, 0)
         self.sizes: dict = {}
@@ -175,8 +180,12 @@ class Flow:
             setattr(made, name, value.copy() if held else value)
         return made
 
-    def add(self, tokens: int, name=None, *, again: bool = False) -> None:
-        """Something joined the end. `again` marks a result that was fetched back."""
+    def add(
+        self, tokens: int, name=None, *, again: bool = False, held: bool = False
+    ) -> None:
+        """Something joined the end. `again` marks what leaves no notice: a result that was fetched
+        back, and the model's reasoning, which is `held` until `release` while its turn goes on.
+        """
         self.shown.append(tokens)
         self.whole.append(tokens)
         self.names.append((name, again) if name is not None else None)
@@ -187,8 +196,25 @@ class Flow:
         self.sizes.setdefault(name, tokens)
         if again:
             self.back.add(name)
-        if again or tokens > self.notice:
+        if held:
+            self.held.append(len(self.shown) - 1)
+        elif again or tokens > self.notice:
             self.live.append(len(self.shown) - 1)
+
+    def release(self) -> None:
+        """The turn is over: its reasoning can go from here on."""
+        if self.held:
+            self.live = sorted(self.live + self.held)
+            self.held, self.ripe, self.freed, self.ahead = [], 0, 0, (0, 0)
+
+    def forget(self, i: int) -> None:
+        """Block `i` is no longer sent, and what could go is counted again."""
+        if self.shown[i] or self.whole[i]:
+            self.size -= self.shown[i]
+            self.shown[i] = self.whole[i] = 0
+            self.live = [k for k in self.live if k != i]
+            self.held = [k for k in self.held if k != i]
+            self.ripe, self.freed, self.ahead = 0, 0, (0, 0)
 
     def resize(self, i: int, tokens: int) -> None:
         """What block `i`, one of the newest round, turned out to hold."""
@@ -282,7 +308,9 @@ class Flow:
 
 
 def _steps(run, spec):
-    """The calls of a run: start, end, results seen, reply tokens that join the history, output, needs, input."""
+    """The calls of a run: start, end, results seen, reply tokens that join the history, output, needs,
+    input, and reasoning that stays.
+    """
     start, end = seconds(run.started_at), seconds(run.ended_at)
     total = len(run.retrievals)
     if run.steps:
@@ -296,6 +324,7 @@ def _steps(run, spec):
                 said if step.output_tokens is None else step.output_tokens,
                 step.needs,
                 step.input_tokens,
+                step.thought_tokens,
             )
         return
     # Where the calls were only counted, the results are taken to have come one round at a time.
@@ -307,7 +336,7 @@ def _steps(run, spec):
         seen = total if count == 1 else round(total * k / (count - 1))
         last = k + 1 == count
         said = reply if last else 0
-        yield at, done, seen, said, said, (), None
+        yield at, done, seen, said, said, (), None, 0
 
 
 def calls_of(thread, spec: ModelSpec, header_tokens: int = 0) -> Talk:
@@ -319,7 +348,7 @@ def calls_of(thread, spec: ModelSpec, header_tokens: int = 0) -> Talk:
     """
     calls = Talk()
     calls.header = said = header_tokens
-    held = known = measured = 0
+    held = known = measured = thought = 0
     for run in thread.runs:
         said += spec.part_tokens(run.input.text or "")
         sizes = [
@@ -328,13 +357,14 @@ def calls_of(thread, spec: ModelSpec, header_tokens: int = 0) -> Talk:
             if p.exposed_to_model
         ]
         steps, seen = list(_steps(run, spec)), 0
-        for k, (at, end, results, reply, output, needs, counted) in enumerate(steps):
+        for k, step in enumerate(steps):
+            at, end, results, reply, output, needs, counted, after = step
             results = max(seen, min(results, len(sizes)))
             found, seen = tuple(sizes[seen:results]), results
             fresh = {name for name, _ in found}
             ruled = said + sum(tokens for _, tokens in found)
             off = known / measured if measured else 1.0
-            grown = counted - held if counted is not None else 0
+            grown = counted - held - thought if counted is not None else 0
             if grown > 0 and found:
                 # The reply and what surrounds a result are counted too: all of it grows alike.
                 off = grown / ruled
@@ -351,7 +381,7 @@ def calls_of(thread, spec: ModelSpec, header_tokens: int = 0) -> Talk:
                         counted_said, round(header_tokens * counted_said / said)
                     )
                 said = counted_said
-            held += said + sum(tokens for _, tokens in found)
+            held += said + thought + sum(tokens for _, tokens in found)
             calls.append(
                 Call(
                     at,
@@ -363,9 +393,10 @@ def calls_of(thread, spec: ModelSpec, header_tokens: int = 0) -> Talk:
                     if needs is None
                     else frozenset(n for n in needs if n not in fresh),
                     k + 1 < len(steps),
+                    thought,
                 )
             )
-            said = reply
+            said, thought = reply, after
     return calls
 
 
@@ -408,6 +439,11 @@ def simulate(
         if opens < spec.cache_min_tokens or lasting.cache_ttl_seconds <= 0:
             opens = 0
         for i, call in enumerate(conversation):
+            if call.thought:
+                flow.add(call.thought, ("thought", i), again=True, held=True)
+            if i and not conversation[i - 1].tool:
+                # A new turn: what was reasoned in the ones before it can go.
+                flow.release()
             flow.add(call.said)
             if call.found:
                 flow.rounds += 1
@@ -795,12 +831,15 @@ class AgentEngine:
         # What tool results came to by the provider's count and by our ruler, and the ratio of the two.
         self._counted = self._ruled = 0
         self._off = 1.0
+        # Where reasoning of its replies stands: the block, by message. And whether it is counted at all.
+        self._thoughts: dict = {}
+        self._thinks = True
 
     def copy(self) -> AgentEngine:
         made = AgentEngine.__new__(AgentEngine)
         made.__dict__.update(self.__dict__)
         made.flow, made._known = self.flow.copy(), set(self._known)
-        made._fresh = list(self._fresh)
+        made._fresh, made._thoughts = list(self._fresh), dict(self._thoughts)
         return made
 
     def follows(self, other: AgentEngine) -> None:
@@ -855,6 +894,7 @@ class AgentEngine:
             header = f"{system_prompt or ''}{json.dumps(tools) if tools else ''}"
             self._joins(self.spec.text_tokens(header))
         self._spoken = 0
+        self.flow.release()
         self._arrived(request.parts)
         return self._plan(request, started_at)
 
@@ -887,11 +927,41 @@ class AgentEngine:
                 cached = 0
         self.flow.sent(self._sent_at, cached)
 
+    # -- its reasoning -----------------------------------------------------------
+
+    def thought(self, place, tokens: int) -> None:
+        """Reasoning of a reply's joined the conversation, in the message at that place."""
+        name = ("thought", place)
+        if tokens > 0 and self._thinks and name not in self._known:
+            self._known.add(name)
+            self._thoughts[place] = len(self.flow.shown)
+            self.flow.add(tokens, name, again=True, held=True)
+
+    def carries(self, places) -> None:
+        """Say which messages still hold reasoning: what an application leaves out itself is not sent."""
+        for place in [p for p in self._thoughts if p not in places]:
+            self.flow.forget(self._thoughts.pop(place))
+
+    def without(self, places) -> list:
+        """Those of the messages with reasoning whose reasoning has gone out of view."""
+        names = self.flow.back
+        return [
+            p for p in places if p in self._thoughts and ("thought", p) not in names
+        ]
+
     def _measure(self, reported: int) -> None:
         """Let what has joined hold what the provider's count of the request grew by."""
         flow, fresh = self.flow, [(i, r) for i, r in self._fresh if r]
         self._fresh = []
         hidden = reported - flow.size
+        new = [i for i in self._thoughts.values() if i in flow.held]
+        thought = sum(flow.shown[i] for i in new)
+        if thought and hidden < -thought / 2:
+            # The provider does not count it, so it takes none of the room.
+            for i in new:
+                flow.forget(i)
+            self._thinks, self._thoughts = False, {}
+            hidden = reported - flow.size
         held = sum(flow.shown[i] for i, _ in fresh)
         if not held or held + hidden <= 0:
             if hidden:
@@ -919,21 +989,35 @@ class AgentEngine:
             times = (self._sent_at + n * flow.interval for n in range(1, most + 1))
             self._due = tuple(due for due in times if due >= at)
 
-    def replied(self, plan, *, at, text="", calls=(), output_tokens=None, **counters):
+    def replied(
+        self,
+        plan,
+        *,
+        at,
+        text="",
+        calls=(),
+        output_tokens=None,
+        thought=0,
+        place=None,
+        **counters,
+    ):
         """A reply that calls tools is in. The next request comes when they are done."""
         self._seen(counters)
         said = self.spec.text_tokens(text) if text else 0
         self._spoken += said
         called = spoken("", calls)
-        if output_tokens is None:
-            output_tokens = said + (self.spec.text_tokens(called) if called else 0)
-        self.flow.add(output_tokens)
+        visible = said + (self.spec.text_tokens(called) if called else 0)
+        self.thought(place, thought)
+        self.flow.add(visible if output_tokens is None else output_tokens - thought)
         self._wait(self.recipe.tool_pings, at)
 
-    def complete(self, plan, answer, *, ended_at, **counters) -> None:
+    def complete(
+        self, plan, answer, *, ended_at, thought=0, place=None, **counters
+    ) -> None:
         """The reply that ends the turn. The next request comes from the user."""
         self._seen(counters)
         self._known.add(answer.part_id)
+        self.thought(place, thought)
         # What was said in between its tool calls has joined already.
         said = self.spec.part_tokens(answer.text) - self._spoken
         self.flow.add(round(max(0, said) * self._off))
@@ -973,7 +1057,8 @@ class AgentEngine:
     ) -> bool:
         """Take a ping's usage. One that read nothing has kept nothing warm: no more are sent."""
         read = counters.get("cached_input_tokens")
-        if not counters or (read is not None and read <= 0):
+        if not counters or (read is not None and read < self.flow.cached / 2):
+            # It read nothing, or only what opens every request: the conversation is not kept by it.
             self._due = ()
             return False
         self.flow.sent(at, self.flow.cached)

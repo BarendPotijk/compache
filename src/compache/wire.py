@@ -73,6 +73,8 @@ class Scan:
     awaiting: bool = True
     # The tool calls whose results it holds, by ID, in order.
     results: list = field(default_factory=list)
+    # The messages that hold reasoning of the model's, and its tokens at a guess.
+    thoughts: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -88,6 +90,12 @@ class Reply:
     paths: list = field(default_factory=list)
     # Whether the output limit ended it.
     cut: bool = False
+    # Whether it holds reasoning that later requests may carry.
+    reasons: bool = False
+
+
+# How many characters of enclosed reasoning stand for a token of it.
+_ENCLOSED = 7
 
 
 def get(body: Any, path: tuple) -> Any:
@@ -361,6 +369,7 @@ class TextStream:
         self.usage: dict | None = None
         self.cost: float | None = None
         self.model: str | None = None
+        self.reasons = False
         # Tool calls the application sees, and calls of our tool answered here.
         self.calls: list = []
         self.ours: list = []
@@ -386,6 +395,10 @@ class TextStream:
 
     def next_round(self) -> None:
         self.again, self.ours = False, []
+
+
+# Where a chat-completions message carries reasoning, as gateways and model makers name it.
+_REASONING = ("reasoning_details", "reasoning_content", "reasoning")
 
 
 class OpenAIChat:
@@ -416,6 +429,9 @@ class OpenAIChat:
                 Slot(kind, path, text, i, i, answers=answers) for path, text in found
             ]
             calls = message.get("tool_calls") or message.get("function_call")
+            if role == "assistant" and any(message.get(k) for k in _REASONING):
+                held = sum(len(json.dumps(message.get(k))) for k in _REASONING)
+                scan.thoughts[i] = held // _ENCLOSED
             if role == "assistant" and not calls and not any(text for _, text in found):
                 scan.slots.append(Slot("output", base, "", i, i, closes=True))
         scan.system = "\n\n".join(system)
@@ -510,6 +526,15 @@ class OpenAIChat:
     def said_so_far(body: dict) -> list:
         """The conversation, as the list that grows with every request."""
         return body["messages"]
+
+    @staticmethod
+    def without_thoughts(body: dict, places) -> tuple[dict, list]:
+        """The request without the reasoning in some messages, and the places that are gone with it."""
+        messages = list(body["messages"])
+        for i in places:
+            kept = {k: v for k, v in messages[i].items() if k not in _REASONING}
+            messages[i] = kept
+        return {**body, "messages": messages}, []
 
     @staticmethod
     def with_inserted(body: dict, at: int, extra: list) -> dict:
@@ -650,6 +675,7 @@ class OpenAIChat:
             cost=_cost(body.get("usage")),
             cut=body["choices"][0].get("finish_reason") == "length",
         )
+        reply.reasons = any(message.get(k) for k in _REASONING)
         if isinstance(message.get("content"), str):
             reply.text = message["content"]
             reply.paths = [("choices", 0, "message", "content")]
@@ -720,6 +746,7 @@ class OpenAIChat:
             choice = choices[0]
             delta = dict(choice.get("delta") or {})
             changed = False
+            self.reasons = self.reasons or any(delta.get(k) for k in _REASONING)
             fragments = delta.get("tool_calls") or ()
             for call in fragments:
                 index, function = call.get("index", 0), call.get("function") or {}
@@ -823,6 +850,12 @@ class Anthropic:
                     continue
                 kind = str(block.get("type"))
                 called = called or kind.endswith("tool_use")
+                if mine == "output" and "thinking" in kind:
+                    held = block.get("signature") or block.get("data") or ""
+                    size = max(
+                        len(held) // _ENCLOSED, len(block.get("thinking") or "") // 4
+                    )
+                    scan.thoughts[i] = scan.thoughts.get(i, 0) + size
                 if kind == "text" and isinstance(block.get("text"), str):
                     scan.slots.append(Slot(mine, (*base, j, "text"), block["text"], i))
                     said = said or bool(block["text"])
@@ -911,6 +944,21 @@ class Anthropic:
 
     said_so_far = OpenAIChat.said_so_far
     with_inserted = OpenAIChat.with_inserted
+
+    @staticmethod
+    def without_thoughts(body: dict, places) -> tuple[dict, list]:
+        messages = list(body["messages"])
+        for i in places:
+            content = messages[i].get("content")
+            kept = [
+                b
+                for b in content
+                if not (isinstance(b, dict) and "thinking" in str(b.get("type")))
+            ]
+            # A message that held nothing else has to keep something.
+            if kept:
+                messages[i] = {**messages[i], "content": kept}
+        return {**body, "messages": messages}, []
 
     @staticmethod
     def with_header_lifetime(body: dict, lifetime: float) -> dict:
@@ -1046,6 +1094,8 @@ class Anthropic:
                         "arguments": _arguments(block.get("input")),
                     }
                 )
+            elif "thinking" in str(block.get("type")):
+                reply.reasons = True
         reply.text = "\n\n".join(texts)
         return reply
 
@@ -1139,6 +1189,7 @@ class Anthropic:
             index = data.get("index")
             if kind == "content_block_start":
                 block = dict(data.get("content_block") or {})
+                self.reasons = self.reasons or "thinking" in str(block.get("type"))
                 self._blocks[index] = {
                     "block": block,
                     "json": "",
@@ -1320,6 +1371,9 @@ class OpenAIResponses:
                 kind in ("function_call", "custom_tool_call") or last != "tool"
             ):
                 last = "call"
+            elif kind == "reasoning":
+                held = item.get("encrypted_content") or json.dumps(item.get("summary"))
+                scan.thoughts[i] = len(held) // _ENCLOSED
             elif kind == "additional_tools":
                 # Codex gives its tools this way, ahead of everything that is said.
                 scan.tools += item.get("tools") or ()
@@ -1357,6 +1411,12 @@ class OpenAIResponses:
     @classmethod
     def said_so_far(cls, body: dict) -> list:
         return cls._items(body)
+
+    @classmethod
+    def without_thoughts(cls, body: dict, places) -> tuple[dict, list]:
+        gone = sorted(places)
+        kept = [item for i, item in enumerate(cls._items(body)) if i not in set(gone)]
+        return {**body, "input": kept}, gone
 
     @classmethod
     def with_inserted(cls, body: dict, at: int, extra: list) -> dict:
@@ -1469,6 +1529,8 @@ class OpenAIResponses:
                         reply.paths.append(("output", i, "content", j, "text"))
             elif item.get("type") in ("function_call", "custom_tool_call"):
                 reply.calls.append(cls._call(item))
+            elif item.get("type") == "reasoning":
+                reply.reasons = True
         reply.text = "\n\n".join(texts)
         return reply
 
@@ -1580,9 +1642,11 @@ class OpenAIResponses:
                 self._items[index] = item
                 if index in self._mine:
                     return []
-                if item.get("type") == "reasoning" and self.tool is not None:
-                    self._held.append((raw, name, data))
-                    return []
+                if item.get("type") == "reasoning":
+                    self.reasons = True
+                    if self.tool is not None:
+                        self._held.append((raw, name, data))
+                        return []
                 if item.get("type") in ("function_call", "custom_tool_call"):
                     self.calls.append(self.dialect._call(item))
             elif index in self._mine:
@@ -1707,6 +1771,11 @@ class Gemini:
     @staticmethod
     def with_header_lifetime(body: dict, lifetime: float) -> dict:
         return body
+
+    @staticmethod
+    def without_thoughts(body: dict, places) -> tuple[dict, list]:
+        # What a part carries of it has to stay with the part.
+        return body, []
 
     @staticmethod
     def said_so_far(body: dict) -> list:

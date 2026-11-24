@@ -30,6 +30,7 @@ from .threads import (
     canonical_usage,
     load_threads,
     read_jsonl,
+    reasoning_tokens,
     recorded,
     system_prompt_of,
 )
@@ -660,6 +661,11 @@ def _counters(usage) -> dict:
     }
 
 
+def _thought(usage) -> int:
+    """Tokens of reasoning in a reply, as far as the provider counts them apart."""
+    return reasoning_tokens(usage) or 0
+
+
 class Session:
     """One conversation under a policy.
 
@@ -796,13 +802,23 @@ class Session:
             action = plan.decision["action"]
         return Turn(view.parts, view.archived_ids, view.tokens, action, plan)
 
-    def replied(self, turn: Turn, text: str = "", calls=(), *, at=None, usage=None):
+    def replied(
+        self,
+        turn: Turn,
+        text: str = "",
+        calls=(),
+        *,
+        at=None,
+        usage=None,
+        place=None,
+    ):
         """Record a reply that calls tools, and so does not end `turn`. Returns when the next ping is due.
 
         `text` is what it said and `calls` the arguments of its tool calls. An
         agent's policy learns from it what the provider holds in its cache and
         when a ping is due while the tools run. Without it the policy goes by
-        its own count.
+        its own count. `place` says which message will carry the reply, where
+        that keeps the reply's reasoning in later requests.
         """
         if self._pending is None or self._pending[0] is not turn.plan.request:
             raise ContractError("no prepared turn to reply to")
@@ -815,9 +831,23 @@ class Session:
             text=text,
             calls=calls,
             output_tokens=counted.get("output"),
+            thought=_thought(usage) if place is not None else 0,
+            place=place,
             **_counters(usage),
         )
         return self.next_ping_at
+
+    def thought(self, place, tokens: int) -> None:
+        """Say that a message of the conversation holds reasoning of about that size."""
+        self._engine.thought(place, tokens)
+
+    def carries(self, places) -> None:
+        """Say which messages of the request still hold reasoning."""
+        self._engine.carries(places)
+
+    def without(self, places) -> list:
+        """Those of the messages with reasoning that go out without it."""
+        return self._engine.without(places)
 
     def reopened(self, name: str, text: str) -> None:
         """Say that fetched-back text now stands at the end of the conversation, under `name`."""
@@ -841,6 +871,7 @@ class Session:
         usage=None,
         last_usage=None,
         cited_part_ids=(),
+        place=None,
     ):
         """Record the answer to `turn`. Returns when the next ping is due, if one is.
 
@@ -879,6 +910,9 @@ class Session:
         if self.policy.agentic:
             # Its calls were told of one by one: what counts is what the last one left.
             counters = final or counters
+            counters["place"] = place
+            if place is not None:
+                counters["thought"] = _thought(last_usage or usage)
         elif counters and final:
             # The first call says what the turn found cached, the last what it leaves.
             left = final["input_tokens"]
@@ -895,7 +929,7 @@ class Session:
                 "cached_input_tokens": counters["cached_input_tokens"],
                 "reusable_input_tokens": left if cacheable else 0,
             }
-        elif not counters:
+        if not counters:
             cached = turn.tokens // spec.cache_block_tokens * spec.cache_block_tokens
             cacheable = spec.cache_ttl_seconds > 0 and cached >= spec.cache_min_tokens
             counters = {"reusable_input_tokens": cached if cacheable else 0}

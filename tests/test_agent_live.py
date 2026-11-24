@@ -148,6 +148,8 @@ class Claude(Chat):
                 block, delta = blocks[data["index"]], data["delta"]
                 if "text" in delta:
                     block["text"] += delta["text"]
+                if "signature" in delta:
+                    block["signature"] = delta["signature"]
                 block["json"] += delta.get("partial_json") or ""
         content = []
         for k in sorted(blocks):
@@ -640,6 +642,143 @@ class FetchTests(unittest.TestCase):
         self.assertEqual(live.stats["fell_back"], 1)
 
 
+def reasoning(count, tokens=200):
+    """A model that reasons before everything it says."""
+    script = worker(count)
+
+    def made(request):
+        return {**script(request), "thinking": tokens, "reasoning": "So many words."}
+
+    return made
+
+
+class ReasoningTests(unittest.TestCase):
+    """What the model reasoned stays in later requests, and goes with the results of its time."""
+
+    def held(self, body):
+        """Which replies of a request still hold their reasoning, in order."""
+        if "input" in body:
+            found, calls = [], 0
+            for item in body["input"]:
+                if item.get("type") == "reasoning":
+                    found.append(calls)
+                calls += item.get("type") == "function_call"
+            return found
+        replies = [m for m in body["messages"] if m["role"] == "assistant"]
+        return [
+            k
+            for k, m in enumerate(replies)
+            if any(b["type"] == "thinking" for b in m["content"])
+        ]
+
+    def test_that_of_a_finished_turn_goes_with_the_cut(self):
+        for shape in (Claude, Codex):
+            for stream in (False, True):
+                with self.subTest(shape=shape.__name__, stream=stream):
+                    model = FakeModel(reasoning(5))
+                    live = compache.Live(policy(rounds=2))
+                    app = Agent(live, shape(), model, stream=stream)
+                    app.run("Read five files")
+                    # While its turn went on, all of it stayed.
+                    self.assertEqual(self.held(model.bodies[-1]), list(range(5)))
+                    model.script = reasoning(9)
+                    app.run("Read four more")
+                    kept = self.held(model.bodies[-1])
+                    self.assertFalse(set(range(5)) & set(kept), kept)
+                    self.assertEqual(len(kept), 4, "that of the turn that goes on")
+                    self.assertEqual(live.stats["stood_down"], 0)
+                    (conversation,) = live._by_chain.values()
+                    flow = conversation.session._engine.flow
+                    self.assertEqual(flow.size, sum(flow.shown))
+
+    def test_what_the_policy_counts_is_what_the_provider_counts(self):
+        clock = Clock()
+        model = FakeModel(reasoning(8), clock=lambda: clock.at)
+        live = compache.Live(policy(rounds=3, ratio=1.0), clock=clock)
+        app = Agent(live, Claude(), model, clock=clock)
+        app.run("Read eight files")
+        model.script = reasoning(16)
+        app.run("Read eight more")
+        (conversation,) = live._by_chain.values()
+        flow = conversation.session._engine.flow
+        counted = tokens([model.bodies[-1]["messages"]])
+        self.assertLess(abs(flow.size - counted) / counted, 0.25)
+
+    def test_an_application_that_drops_it_itself(self):
+        model = FakeModel(reasoning(4))
+        live = compache.Live(policy(rounds=2))
+        app = Agent(live, Claude(), model)
+        app.run("Read four files")
+        for message in app.shape.said:
+            if message["role"] == "assistant":
+                message["content"] = [
+                    b for b in message["content"] if b["type"] != "thinking"
+                ]
+        model.script = reasoning(8)
+        self.assertEqual(app.run("Read four more"), "All done.")
+        self.assertEqual(live.stats["stood_down"], 0)
+        (conversation,) = live._by_chain.values()
+        flow = conversation.session._engine.flow
+        self.assertEqual(flow.size, sum(flow.shown))
+
+    def test_a_conversation_met_in_the_middle(self):
+        model = FakeModel(reasoning(5))
+        app = Agent(compache.Live(), Claude(), model)
+        app.run("Read five files")
+        app.live = compache.Live(policy(rounds=2))
+        model.script = reasoning(9)
+        app.run("Read four more")
+        kept = self.held(model.bodies[-1])
+        self.assertFalse(set(range(5)) & set(kept), kept)
+
+    def test_what_was_fetched_back_keeps_its_place_where_reasoning_is_gone(self):
+        fetched = []
+
+        def script(request):
+            made = reasoning(9)(request)
+            seen = sum("ctx:" in t for t in request["texts"])
+            if seen >= 6 and not fetched and "tool" in made:
+                handle = NOTICE.search(json.dumps(request["body"])).group()
+                fetched.append(handle)
+                made = {**made, "text": "", "tool": (REOPEN, {"reference": handle})}
+            return made
+
+        for shape in (Claude, Codex):
+            with self.subTest(shape=shape.__name__):
+                fetched.clear()
+                model = FakeModel(reasoning(5))
+                live = compache.Live(policy(rounds=2))
+                app = Agent(live, shape(), model)
+                app.run("Read five files")
+                model.script = script
+                self.assertEqual(app.run("Read four more"), "All done.")
+                self.assertEqual(len(fetched), 1)
+                self.assertEqual(live.stats["reopened"], 1)
+                for body in model.bodies:
+                    if shape is not Codex:
+                        continue
+                    # Every call is followed by its result, whatever was left out around them.
+                    open_calls = set()
+                    for item in body["input"]:
+                        if item.get("type") == "function_call":
+                            open_calls.add(item["call_id"])
+                        elif item.get("type") == "function_call_output":
+                            self.assertIn(item["call_id"], open_calls)
+                            open_calls.discard(item["call_id"])
+                    self.assertFalse(open_calls)
+
+    def test_it_is_on_record(self):
+        with tempfile.TemporaryDirectory() as folder:
+            model = FakeModel(reasoning(4))
+            live = compache.Live(record=folder)
+            Agent(live, Claude(), model).run("Read four files")
+            steps = load(folder)[0][0]["runs"][0]["steps"]
+            self.assertEqual([s["thought_tokens"] for s in steps], [200] * 5)
+            thread = compache.load_threads(load(folder)[0], model="agent-model")[0]
+            calls = agent.calls_of(thread, SPEC)
+            self.assertEqual([c.thought for c in calls], [0] + [200] * 4)
+
+
 class ParallelTests(unittest.TestCase):
     def test_agents_that_share_a_name_are_kept_apart(self):
         model = FakeModel(worker(6))
@@ -754,6 +893,29 @@ class ToolPingTests(unittest.TestCase):
                 app.shape.answer([(c, result(1)) for c, _ in calls])
                 app.call()
                 self.assertIsNotNone(live.next_ping_at(), "planned anew")
+
+    def test_after_an_answer_the_same_request_goes_out_once_more(self):
+        """A further message would have the provider leave reasoning out, and miss its own cache."""
+        clock = Clock()
+        model = FakeModel(reasoning(3), clock=lambda: clock.at)
+        live = compache.Live(policy(None, None, user_pings=2), clock=clock)
+        app = Agent(live, Claude(), model, clock=clock)
+        app.run("Read three files")
+        before = model.bodies[-1]
+        clock.at += 256
+        self.assertEqual(live.tick(), 1)
+        self.assertEqual(model.bodies[-1]["messages"], before["messages"])
+        self.assertIsNotNone(live.next_ping_at())
+
+    def test_a_ping_that_read_only_what_opens_the_request_is_the_last(self):
+        session = policy(None, None, tool_pings=3).session("t")
+        turn = session.prepare("Run the tests " * 4_000, at=0.0)
+        usage = {"input_tokens": 100, "cache_creation_input_tokens": 20_000}
+        session.replied(turn, "", [{}], at=4.0, usage={**usage, "output_tokens": 9})
+        read = {"input_tokens": 10, "cache_read_input_tokens": 4_000}
+        read["cache_creation_input_tokens"] = 16_000
+        self.assertFalse(session.ping_sent(at=256.0, usage=read))
+        self.assertIsNone(session.next_ping_at)
 
     def test_no_ping_goes_out_while_a_call_is_under_way(self):
         clock = Clock()

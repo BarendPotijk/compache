@@ -42,7 +42,7 @@ class FakeModel:
     `script(request)` returns a dict with `text`, and optionally `tool` as
     (name, arguments) for a tool call or `tools` for several, `refs` for the labels of a note, `cut`
     for a reply the output limit ended, `reasoning` for a reply of the Responses API that
-    reasons first, and `status` with `error` for a refusal. `request` has the `body`, its `texts`
+    reasons first, `thinking` for how many tokens it reasons, and `status` with `error` for a refusal. `request` has the `body`, its `texts`
     (every text of the conversation in order), the `last` text and `n`, the
     number of the call. Without a script every reply is "Answer <n>.".
     """
@@ -115,6 +115,7 @@ class FakeModel:
             else {"text": f"Answer {len(self.bodies)}."}
         )
         made.setdefault("text", "")
+        made.setdefault("thinking", 0)
         # A number of its own for every call, also where several are made at the same moment.
         made["id"] = next(self._numbers)
         made["tools"] = made.get("tools") or (
@@ -278,6 +279,13 @@ class FakeModel:
             "output_tokens": max(1, len(made["text"]) // 4),
         }
         content = [{"type": "text", "text": made["text"]}] if made["text"] else []
+        if made.get("thinking"):
+            # So many tokens of reasoning, enclosed, which later requests carry and pay for.
+            enclosed = "s" * 4 * made["thinking"]
+            block = {"type": "thinking", "thinking": "", "signature": enclosed}
+            content.insert(0, block)
+            usage["output_tokens"] += made["thinking"]
+            usage["output_tokens_details"] = {"thinking_tokens": made["thinking"]}
         stop = "max_tokens" if made.get("cut") else "end_turn"
         for k, (name, arguments) in enumerate(made["tools"]):
             content.append(
@@ -324,6 +332,13 @@ class FakeModel:
                             "delta": {"type": "text_delta", "text": piece},
                         },
                     )
+            elif block["type"] == "thinking":
+                yield event(
+                    "content_block_start",
+                    {"index": index, "content_block": {**block, "signature": ""}},
+                )
+                sign = {"type": "signature_delta", "signature": block["signature"]}
+                yield event("content_block_delta", {"index": index, "delta": sign})
             else:
                 shell = {**block, "input": {}}
                 yield event(
@@ -345,7 +360,9 @@ class FakeModel:
             "message_delta",
             {
                 "delta": {"stop_reason": reply["stop_reason"], "stop_sequence": None},
-                "usage": {"output_tokens": reply["usage"]["output_tokens"]},
+                "usage": {
+                    k: v for k, v in reply["usage"].items() if k.startswith("output")
+                },
             },
         )
         yield event("message_stop", {})
@@ -391,9 +408,11 @@ class FakeModel:
                     "type": "reasoning",
                     "id": f"rs_{n}",
                     "summary": [{"type": "summary_text", "text": made["reasoning"]}],
-                    "encrypted_content": f"enclosed-{n}",
+                    "encrypted_content": f"enclosed-{n}" + "s" * 4 * made["thinking"],
                 }
             )
+            usage["output_tokens"] += made["thinking"]
+            usage["output_tokens_details"]["reasoning_tokens"] = made["thinking"]
         if made["text"]:
             part = {"type": "output_text", "text": made["text"], "annotations": []}
             output.append(

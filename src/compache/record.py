@@ -73,14 +73,16 @@ class Recorder:
         refs=None,
         older: bool = False,
         steps=(),
+        carries: bool = False,
         cut: bool = False,
     ) -> None:
         """One answered turn. `sizes` are bytes: `input`, `retrievals`, `output`, `system`, `tools`.
 
         `asked` says the reply was asked to name what it needed, and `refs`
         are the labels it named: an empty list for none, None for no answer.
-        `steps` are the turn's calls, where it made more than one, and `cut`
-        says that a policy had taken something out of view.
+        `steps` are the turn's calls, where it made more than one, `carries`
+        says that requests hold what the model reasoned before, and `cut` that a
+        policy had taken something out of view.
         """
         row = {
             "v": _VERSION,
@@ -113,6 +115,7 @@ class Recorder:
                     step["output_tokens"],
                     None if step["needs"] is None else list(step["needs"]),
                     step["input_tokens"],
+                    step["thought_tokens"] if carries else 0,
                 ]
                 for step in steps
             ]
@@ -226,7 +229,7 @@ def _steps(name: str, rows, counts: list[int], cut: bool) -> list[dict]:
     Where a policy kept things out of view, what replies would have relied on is not known.
     """
     made, seen = [], 0
-    for started, ended, results, size, output, needs, counted in rows:
+    for started, ended, results, size, output, needs, counted, thought in rows:
         # An application may have dropped results while its turn went on.
         seen = min(max(seen, results), counts[-1])
         step = {
@@ -240,6 +243,8 @@ def _steps(name: str, rows, counts: list[int], cut: bool) -> list[dict]:
             step["output_tokens"] = output
         if counted is not None:
             step["input_tokens"] = counted
+        if thought:
+            step["thought_tokens"] = thought
         for label in () if cut or needs is None else needs:
             turn, _, item = str(label)[1:].partition(".")
             if turn.isdigit() and item.isdigit() and 1 <= int(turn) <= len(counts):

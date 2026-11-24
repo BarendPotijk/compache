@@ -70,6 +70,7 @@ _STEP_FIELDS = {
     "bytes",
     "input_tokens",
     "output_tokens",
+    "thought_tokens",
     "needs",
 }
 _GENERATION_FIELDS = {
@@ -191,6 +192,8 @@ class Step:
     needs: tuple[str, ...] | None = ()
     # What the provider counted the request at.
     input_tokens: int | None = None
+    # Reasoning of the reply's that later requests carry.
+    thought_tokens: int = 0
 
 
 @dataclass(frozen=True)
@@ -251,7 +254,7 @@ def _check_steps(run: dict, start, end, results: int) -> None:
         done = _time(step.get("ended_at"), "step.ended_at")
         if not at <= sent <= done <= end:
             raise ContractError("step timestamps outside the run or out of order")
-        for name in ("results", "bytes", "input_tokens", "output_tokens"):
+        for name in sorted(_STEP_FIELDS - {"started_at", "ended_at", "needs"}):
             value = step.get(name, 0 if name.endswith("_tokens") else None)
             if type(value) is not int or value < 0:
                 raise ContractError(f"step {name} must be a nonnegative integer")
@@ -312,6 +315,7 @@ class Thread:
                             if s.get("needs", ()) is None
                             else tuple(s.get("needs", ())),
                             s.get("input_tokens"),
+                            s.get("thought_tokens", 0),
                         )
                         for s in r.get("steps", ())
                     ),
@@ -483,6 +487,22 @@ def cache_read_reported(usage: Any) -> bool:
         if isinstance(usage.get(key), dict):
             counts.append(usage[key].get("cached_tokens"))
     return any(type(n) is int and n >= 0 for n in counts)
+
+
+def reasoning_tokens(usage: Any) -> int | None:
+    """How much of a call's output was reasoning, where the provider counts it apart."""
+    if not isinstance(usage, dict):
+        dump = getattr(usage, "model_dump", None)
+        usage = dump() if callable(dump) else None
+    if not isinstance(usage, dict):
+        return None
+    for details in ("output_tokens_details", "completion_tokens_details"):
+        found = usage.get(details)
+        for name in ("thinking_tokens", "reasoning_tokens"):
+            count = found.get(name) if isinstance(found, dict) else None
+            if type(count) is int and count >= 0:
+                return count
+    return None
 
 
 def long_writes(usage: Any) -> int:
