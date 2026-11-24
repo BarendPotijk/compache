@@ -44,6 +44,8 @@ export function migrateScenario(version, scenario) {
 // a starting point. What belongs together is dotted (`app.keepTurns=6`, `policy.questions=4`), a drawn distribution lists
 // its weights (`gapDrawn=0,2,1`), and `all` is a window without an end.
 const GROUPS = {model: DEFAULTS.model, app: RULES, policy: {questions: null, answers: null, retrieved: null, maxPings: 0, keepUnder: 0}};
+// Settings that are the median and the 95th percentile of one distribution.
+const SPREADS = [['gapMedianMinutes', 'gapP95Minutes'], ['tokenMedian', 'tokenP95'], ['plannedTurns', 'plannedTurnsP95'], ...['input', 'retrieval', 'output'].map(kind => [`${kind}DependencyTurnsBack`, `${kind}DependencyTurnsBackP95`])];
 const spell = value => value === null ? 'all' : String(value);
 // One setting as a link spells it. A name that is no setting keeps its text, and `configure` refuses it by name.
 function read(text, like, key) {
@@ -79,6 +81,9 @@ export function parseLink(hash) {
     if (name !== undefined && Object.hasOwn(GROUPS, group)) (scenario[group] ??= {})[name] = read(value, GROUPS[group][name], key);
     else scenario[key] = read(value, DEFAULTS[key], key);
   }
+  // A median named past the 95th percentile it was given with takes that along, at the same spread.
+  const given = {...DEFAULTS, ...from?.scenario};
+  for (const [median, p95] of SPREADS) if (query.has(median) && !query.has(p95) && scenario[median] > given[p95]) scenario[p95] = given[median] > 0 ? Math.ceil(scenario[median] * given[p95] / given[median]) : scenario[median];
   return {...head, scenario};
 }
 

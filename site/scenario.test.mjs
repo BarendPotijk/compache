@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
+import {readFileSync} from 'node:fs';
 import {DEFAULTS, configure, simulate} from './engine.mjs';
 import {presets, applyPreset} from './models.mjs';
 import {STARTS} from './starts.mjs';
@@ -107,6 +108,20 @@ test('a share link names only what it changes', () => {
   assert.throws(() => resolveScenario(parseLink('#v=7&model=sonnet&policy.question=1')), /policy.question is not part of a policy/);
   assert.throws(() => resolveScenario(parseLink('#model=sonnet&tokenMedian=4000&tokenP95=9000')), /version is missing/);
   assert.throws(() => resolveScenario(parseLink('#v=8&model=sonnet&somethingNew=1')), /newer version/);
+});
+test('a link written by hand may name a median alone, and the spread goes with it', () => {
+  const at = hash => resolveScenario(parseLink(hash)).config, pair = c => [c.gapMedianMinutes, c.gapP95Minutes];
+  assert.deepEqual(pair(STARTS[0].scenario), [4, 22]);
+  assert.deepEqual(pair(at('#v=7&model=sonnet&start=documents&gapMedianMinutes=30')), [30, 165]);
+  assert.deepEqual(pair(at('#v=7&model=claude-haiku-5-5&gapMedianMinutes=120')), [120, 1800]);
+  // One that fits the 95th percentile it was given with leaves it, so a shared link comes back as it was. A named one stays.
+  assert.deepEqual(pair(at('#v=7&model=sonnet&start=documents&gapMedianMinutes=20')), [20, 22]);
+  assert.throws(() => at('#v=7&model=sonnet&gapMedianMinutes=30&gapP95Minutes=20'), /gapP95Minutes must be at least gapMedianMinutes/);
+});
+test('every calculator link in the docs opens', () => {
+  const links = ['README.md', 'docs/calculator.md', 'docs/guide.md', 'docs/comparisons.md'].flatMap(file => readFileSync(new URL(`../${file}`, import.meta.url), 'utf8').match(/barendpotijk\.github\.io\/compache\/#[^\s)`"]+/g) ?? []);
+  assert.ok(links.length >= 1);
+  for (const link of links) assert.ok(simulate(resolveScenario(parseLink(link.slice(link.indexOf('#')))).config).savings, link);
 });
 test('a profile made from traces fills in the workload and keeps the preset prices', () => {
   const scenario = {inputTokens: 30, outputTokens: 132, tokenMedian: 3615, tokenP95: 4207, systemTokens: 14, lengthDistribution: 'lognormal', plannedTurns: 27, plannedTurnsP95: 87,
