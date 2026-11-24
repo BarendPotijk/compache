@@ -127,7 +127,7 @@ A fixed rule such as "keep the last 20 messages" or "summarize at 75% of the win
 
 **It pays off most** in long chats with a lot of retrieved or tool text, where users pause longer than the cache lasts. **It pays off least** in short chats and where the cache outlasts the breaks: on GPT-6 Luna these users were always back in time. Differences in right answers are within chance. Grading is strict: one missed fact makes an answer wrong. [Live runs](benchmarks/live/README.md) · [All benchmarks](benchmarks/README.md)
 
-**What would you save?** Put your numbers in the [cost calculator](https://barendpotijk.github.io/compache/), or let `compache profile` fill it in from your traffic.
+**What would you save?** Put your numbers in the [cost calculator](https://barendpotijk.github.io/compache/), or drop a chat log or a `policy.json` on it: it is read in your browser and sent nowhere. It compares with your own rules, other tools' defaults or what you pay now.
 
 ## Next to what you already use
 
@@ -135,7 +135,7 @@ A fixed rule such as "keep the last 20 messages" or "summarize at 75% of the win
 |---|---|
 | Prompt caching | What to do when the cache is about to expire, and what to drop once it has |
 | Keep the last N messages, or summarize at a threshold | N learned per kind of text, cuts timed to the cache, and trimmed text the model can fetch back |
-| OpenClaw or provider compaction at fixed thresholds | A setting fitted to your traffic. Modeled on Claude Sonnet 5.5, [58% to 61% cheaper than OpenClaw's defaults](docs/comparisons.md#openclaw) |
+| OpenClaw or provider compaction at fixed thresholds | A setting fitted to your traffic. Modeled on Claude Sonnet 5.5, [48% to 54% cheaper than OpenClaw's defaults](docs/comparisons.md#openclaw) |
 | Headroom | The other half: Headroom shrinks single tool results, compache decides which parts stay and when the cache is kept warm |
 
 [Guide](docs/guide.md) · [Integrations](docs/integrations.md) · [How it works](docs/how-it-works.md) · [Other tools compared](docs/comparisons.md) · [Calculator](https://barendpotijk.github.io/compache/) · [Issues](https://github.com/BarendPotijk/compache/issues) · [Apache-2.0](LICENCE.md)

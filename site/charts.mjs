@@ -1,10 +1,10 @@
-import {configure,theoreticalSurvival} from './engine.mjs';
+import {WINDOW,configure,needLaw,theoreticalSurvival} from './engine.mjs';
 
-// Plot the same surviving cohort in both arms at each run. Ended or failed
-// threads are not padded with zero tokens, and late-run sample sizes are exposed.
+// Plot the same surviving cohort in both arms at each turn. Ended or failed
+// threads are not padded with zero tokens, and late-turn sample sizes are exposed.
 export function contextSeries(result,threadId='average') {
   const answerRows=arm=>arm.ledger.filter(r=>r.role==='answer'&&r.admitted&&(threadId==='average'||r.thread===threadId));
-  const a=answerRows(result.compache),b=answerRows(result.openclaw),key=r=>`${r.thread}:${r.turn}`;
+  const a=answerRows(result.compache),b=answerRows(result.baseline.arm),key=r=>`${r.thread}:${r.turn}`;
   const bKeys=new Set(b.map(key)),aKeys=new Set(a.map(key));
   const matched=[a.filter(r=>bKeys.has(key(r))),b.filter(r=>aKeys.has(key(r)))];
   return matched.map(rows=>{
@@ -14,9 +14,17 @@ export function contextSeries(result,threadId='average') {
   });
 }
 
+// What one kind's window keeps of what later turns need of it, over the turns of the priced threads.
+export function coverage(result,kind) {
+  const window=result.policy[WINDOW[kind]],law=needLaw(result.config,kind,Math.max(result.config.maxTurns,...result.workload.threads.map(t=>t.turns.length)));
+  let held=0,all=0;
+  for(const t of result.workload.threads)for(let i=1;i<t.turns.length;i++){all++;held+=window===null?1:law.within(window,i);}
+  return all?held/all:1;
+}
+
 export function survivalView(config) {
   const c=configure(config),all=theoreticalSurvival(c),oneTurn=1-(all[1]?.realized??0);
-  if(c.lengthDistribution==='continuation') {
+  if(c.lengthDrawn || c.lengthDistribution==='continuation') {
     // By chance of another turn, the median and the 95th percentile of the length are read off the curve.
     const within=share=>{let turn=1;while(turn<c.maxTurns&&all[turn].realized>1-share)turn++;return turn;};
     const max=Math.min(c.maxTurns,Math.max(3,Math.ceil(within(.95)*1.15)+1));
@@ -43,5 +51,5 @@ export function pingProfile(result,threadId,turn) {
   let best=rows[0];for(const row of rows)if(row.net>best.net)best=row;
   const mean=(items,read)=>items.length?items.reduce((n,d)=>n+read(d),0)/items.length:null;
   const reasons={};for(const d of decisions)if(!eligible.includes(d)){const reason=d.planner?.reason||'no plan';reasons[reason]=(reasons[reason]||0)+1;}
-  return {rows,best,decisions:decisions.length,eligible:eligible.length,reasons,returnProbability:mean(decisions,d=>d.planner?.returnProbability||0),plannedPings:mean(decisions,d=>d.plannedPings),actualPings:mean(decisions,d=>d.actualPings),heldTokens:mean(eligible,d=>d.planner.heldTokens),coldTokens:mean(eligible,d=>d.planner.coldTokens),interval:result.config.ttlMinutes-result.config.pingLeadMinutes,ttl:result.config.ttlMinutes};
+  return {rows,best,decisions:decisions.length,eligible:eligible.length,reasons,returnProbability:mean(decisions,d=>d.planner?.returnProbability||0),plannedPings:mean(decisions,d=>d.plannedPings),actualPings:mean(decisions,d=>d.actualPings),interval:result.config.ttlMinutes-result.config.pingLeadMinutes,ttl:result.config.ttlMinutes};
 }

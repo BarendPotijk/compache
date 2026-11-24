@@ -127,7 +127,7 @@ class CommandTests(unittest.TestCase):
             out,
         )
         self.assertIn(
-            "https://barendpotijk.github.io/compache/#v=6&model=sonnet&scenario=", out
+            "https://barendpotijk.github.io/compache/#v=7&model=sonnet&scenario=", out
         )
         saved = json.loads((self.base / "profile.json").read_text())
         self.assertEqual(saved["schema_version"], "compache-profile-v1")

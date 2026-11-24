@@ -1,52 +1,72 @@
-import {DEFAULTS, ageLaw, returnCdf, warmReturnShare} from './engine.mjs';
+import {BINS, DEFAULTS, DRAWN, WINDOW, configure, describePolicy, drawnStats, lawWeights, needLaw, warmReturnShare} from './engine.mjs';
+import {RULES, comparisons, configureRules} from './baselines.mjs';
 import {presets, applyPreset} from './models.mjs';
-import {contextSeries, survivalView, pingProfile} from './charts.mjs';
+import {contextSeries, coverage} from './charts.mjs';
 import {EXPORT_SCHEMA, parseLink, parseFile, resolveScenario, shareHash} from './scenario.mjs';
+import {STARTS} from './starts.mjs';
+import {isLabel, isThread, measure, parseRows} from './traces.mjs';
+import {isPolicy, readPolicy} from './policy.mjs';
 
 const $ = id => document.getElementById(id), form = $('scenario'), tip = $('tip');
 const KINDS = [['input', 'Questions'], ['retrieval', 'Retrieved text'], ['output', 'Answers']];
-const PRICES_CHECKED = '2026-11-20', BASELINE_COMMIT = 'c49b553b85b82bc700465d4607949574f892366c';
+const PRICES_CHECKED = '2026-11-20';
 // Why the planner sends no ping after a turn, in the page's words.
-const WHY_NO_PING = {'disabled': 'keep-warm is off', 'no pings allowed': 'pings per wait is 0', 'ping interval is not positive': 'the ping lead is longer than the cache lifetime', 'answer outlasts the ping interval': 'the answer is still running when the first ping is due', 'prefix is below cache minimum': 'the request is too short to cache',
-  'prefix exceeds keep-warm ceiling': 'the next turn rewrites the request anyway', 'no modeled future return': 'no further turn is expected', 'no positive expected value': 'no ping pays for itself'};
+const WHY_NO_PING = {'disabled': 'Keep-warm is off.', 'no pings allowed': 'This policy sends none.', 'ping interval is not positive': 'The ping lead is longer than the cache lifetime.', 'answer outlasts the ping interval': 'The answer is still running when the first ping is due.', 'prefix is below cache minimum': 'The request is too short to cache.',
+  'the request leaves no room for a ping': 'The request leaves no room for one.', 'no modeled future return': 'No further turn is expected.', 'no positive expected value': 'No ping pays for itself.'};
 
 // Numbers as text.
 const fixed = digits => new Intl.NumberFormat('en-US', {maximumFractionDigits: digits});
 const num = n => Number.isFinite(n) ? fixed(1).format(n) : '—';
-const pct = n => n === null || !Number.isFinite(n) ? '—' : `${num(n * 100)}%`;
+const whole = n => Number.isFinite(n) ? fixed(0).format(n) : '—';
+const pct = (n, digits = 1) => n === null || !Number.isFinite(n) ? '—' : `${fixed(digits).format(n * 100)}%`;
 const compact = n => n >= 1e6 ? `${fixed(2).format(n / 1e6)}M` : n >= 1000 ? `${num(n / 1000)}k` : num(n);
 const usd = (n, digits) => new Intl.NumberFormat('en-US', {style: 'currency', currency: 'USD', minimumFractionDigits: digits, maximumFractionDigits: digits}).format(n);
-// Whole dollars from $10 and cents below. An amount that cents would round to nothing says so.
-const dollars = n => { if (!Number.isFinite(n)) return '—'; const a = Math.abs(n); return a > 0 && a < 0.005 ? `${n < 0 ? '−' : ''}<$0.01` : usd(n, a === 0 || a >= 10 ? 0 : 2); };
+// Whole dollars from $100, cents below. An amount that cents would round to nothing says so.
+const dollars = n => { if (!Number.isFinite(n)) return '—'; const a = Math.abs(n); return a > 0 && a < 0.005 ? `${n < 0 ? '−' : ''}<$0.01` : usd(n, a === 0 || a >= 100 ? 0 : 2); };
 const esc = text => String(text).replace(/[&<>"]/g, ch => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'})[ch]);
 const plural = (n, word) => `${num(n)} ${word}${n === 1 ? '' : 's'}`;
+const minutes = m => m < 1 ? `${num(m * 60)} s` : m < 90 ? `${num(m)} min` : m < 2880 ? `${num(m / 60)} h` : `${num(m / 1440)} d`;
 
 let current = null, baseConfig = DEFAULTS, latest = 0, timer, worker = null;
-let priorTokens = DEFAULTS.tokenMedian, priorLength = DEFAULTS.plannedTurns, retrievalSpread = DEFAULTS.tokenP95 / DEFAULTS.tokenMedian;
+let priorTokens = 0, priorLength = 0, retrievalSpread = 1.8;
 // Where the scenario came from, whether it was changed since, and a load failure that stays on screen until the next edit.
-let source = '', edited = false, loadError = '';
+let source = '', edited = false, loadError = '', startId = '';
+// What was loaded from files, the policy being tried, and which of the three is priced: fit, file or own.
+let rows = [], labelRows = [], filePolicy = null, ownPolicy = null, mode = 'fit', turnIndex = 0;
 
 // A field shown in percent stores a share. Twelve significant digits survive the trip both ways.
 const tidy = n => Number(n.toPrecision(12));
 const shown = (el, value) => el.dataset.scale ? tidy(value * Number(el.dataset.scale)) : value;
 const stored = el => el.dataset.scale ? tidy(Number(el.value) / Number(el.dataset.scale)) : Number(el.value);
-const sliders = [...form.querySelectorAll('[data-slider]')];
-const syncSliders = () => { for (const slider of sliders) slider.value = form.elements[slider.dataset.slider].value; };
+const ruleFields = [...form.querySelectorAll('[data-rule]')];
+const readField = el => el.type === 'checkbox' ? el.checked : el.tagName === 'SELECT' ? el.value : stored(el);
+const writeField = (el, value) => { if (el.type === 'checkbox') el.checked = value; else el.value = shown(el, value); };
 
 // A setting's name as the page labels it, for error messages.
 function labelOf(key) {
-  const el = key.startsWith('model.') ? form.querySelector(`[data-model="${key.slice(6)}"]`) : form.elements[key];
+  const el = key.startsWith('model.') ? form.querySelector(`[data-model="${key.slice(6)}"]`) : key.startsWith('app.') ? form.querySelector(`[data-rule="${key.slice(4)}"]`) : form.elements[key];
   const text = el?.getAttribute?.('aria-label') || el?.closest?.('label')?.firstChild?.textContent || '';
   return text.trim().replace(/\s+/g, ' ') || key;
 }
-const readable = message => message.replace(/\b(?:model\.)?[A-Za-z][A-Za-z0-9]*\b/g, word => (word !== 'model' && Object.hasOwn(DEFAULTS, word)) || (word.startsWith('model.') && Object.hasOwn(DEFAULTS.model, word.slice(6))) ? `“${labelOf(word)}”` : word);
+const readable = message => message.replace(/\b(?:(?:model|app)\.)?[A-Za-z][A-Za-z0-9]*\b/g, word => (!['model', 'app', 'policy', 'compare'].includes(word) && Object.hasOwn(DEFAULTS, word)) || (word.startsWith('model.') && Object.hasOwn(DEFAULTS.model, word.slice(6))) || (word.startsWith('app.') && Object.hasOwn(RULES, word.slice(4))) ? `“${labelOf(word)}”` : word);
 
+// The numbers beside a drawn chart are its own.
+const STATS = {tokenDrawn: ['tokenMedian', 'tokenP95'], gapDrawn: ['gapMedianMinutes', 'gapP95Minutes'], lengthDrawn: ['plannedTurns', 'plannedTurnsP95'], inputNeedDrawn: ['inputDependencyTurnsBack', 'inputDependencyTurnsBackP95'], retrievalNeedDrawn: ['retrievalDependencyTurnsBack', 'retrievalDependencyTurnsBackP95'], outputNeedDrawn: ['outputDependencyTurnsBack', 'outputDependencyTurnsBackP95']};
+// The numbers of the curve a drawing replaced, for when the curve is taken again.
+const curveOf = {};
+function remember(name) { if (!baseConfig[name]) curveOf[name] = STATS[name].map(field => form.elements[field].value); }
+function showStats(name) {
+  const weights = baseConfig[name]; if (!weights) return;
+  const {median, p95} = drawnStats(name, weights), round = v => DRAWN[name] === 'token' ? Math.round(v) : DRAWN[name] === 'gap' ? Number(v.toPrecision(3)) : Math.round(v);
+  const [low, high] = STATS[name]; form.elements[low].value = round(median); form.elements[high].value = Math.max(round(median), round(p95));
+}
 function setForm(c) {
   baseConfig = {...DEFAULTS, ...c, model: {...DEFAULTS.model, ...c.model}};
   for (const el of form.elements) {
-    if (el.name && baseConfig[el.name] !== undefined) { if (el.type === 'checkbox') el.checked = baseConfig[el.name]; else el.value = shown(el, baseConfig[el.name]); }
+    if (el.name && baseConfig[el.name] !== undefined) writeField(el, baseConfig[el.name]);
     if (el.dataset.model) el.value = baseConfig.model[el.dataset.model];
   }
+  const rules = configureRules(baseConfig.app); for (const el of ruleFields) writeField(el, rules[el.dataset.rule]);
   priorTokens = Number(form.elements.tokenMedian.value); priorLength = Number(form.elements.plannedTurns.value);
   if (priorTokens > 0) retrievalSpread = Number(form.elements.tokenP95.value) / priorTokens;
   labels();
@@ -54,52 +74,65 @@ function setForm(c) {
 function readForm() {
   const c = {...DEFAULTS, ...baseConfig, model: {...DEFAULTS.model, ...baseConfig.model}};
   for (const el of form.elements) {
-    if (el.name) c[el.name] = el.type === 'checkbox' ? el.checked : el.tagName === 'SELECT' ? el.value : stored(el);
+    if (el.name && !el.dataset.rule) c[el.name] = readField(el);
     if (el.dataset.model) c.model[el.dataset.model] = Number(el.value);
   }
+  c.app = Object.fromEntries(ruleFields.map(el => [el.dataset.rule, readField(el)]).filter(([key, value]) => value !== RULES[key]));
+  c.policy = mode === 'file' && filePolicy ? filePolicy.policy : mode === 'own' ? ownPolicy : null;
   return applyPreset(c, $('modelPreset').value);
 }
 function labels() {
-  const fields = form.elements, kind = fields.lengthDistribution.value, byChance = kind === 'continuation';
-  const noRetrieval = Number(fields.tokenMedian.value) === 0 || (fields.retrievalShare.value !== '' && Number(fields.retrievalShare.value) === 0);
-  // Thread length is set either by a law or by the chance of another turn. The inputs of the other are hidden and switched off.
+  const f = form.elements, drawn = !!baseConfig.lengthDrawn, kind = f.lengthDistribution.value, byChance = kind === 'continuation' && !drawn;
+  const noRetrieval = !baseConfig.tokenDrawn && Number(f.tokenMedian.value) === 0 || (f.retrievalShare.value !== '' && Number(f.retrievalShare.value) === 0);
   $('lengthByLaw').hidden = byChance; $('lengthByChance').hidden = !byChance;
-  for (const name of ['plannedTurns', 'continuationProbability']) fields[name].disabled = byChance;
-  for (const name of ['continueFirst', 'continueLong', 'continueHalfTurn']) fields[name].disabled = !byChance;
-  fields.plannedTurnsP95.disabled = kind !== 'lognormal';
-  $('lengthLabel').firstChild.textContent = kind === 'geometric' ? 'Mean turns' : kind === 'fixed' ? 'Turns' : 'Median turns';
-  for (const name of ['tokenP95', 'retrievalDependencyProbability', 'retrievalDependencyTurnsBack', 'retrievalDependencyTurnsBackP95']) fields[name].disabled = noRetrieval;
-  // An input that changes nothing until another is set is switched off: the share of turns that retrieve nothing,
-  // how fast the first return's delay fades when it is no different, and the length of breaks nobody takes.
-  fields.retrievalShare.disabled = Number(fields.tokenMedian.value) === 0;
-  fields.gapHalfTurn.disabled = Number(fields.gapFirstFactor.value) === 1;
-  fields.breakMedianMinutes.disabled = fields.breakShare.value !== '' && Number(fields.breakShare.value) === 0;
-  $('retrievalCaption').hidden = !noRetrieval; $('retrievalCaption').textContent = noRetrieval ? 'No retrieved text, so no later turn can need any.' : '';
-  syncSliders();
+  for (const name of ['plannedTurns']) f[name].disabled = byChance;
+  f.continuationProbability.disabled = byChance || drawn; f.lengthDistribution.disabled = drawn;
+  for (const name of ['continueFirst', 'continueLong', 'continueHalfTurn']) f[name].disabled = !byChance;
+  f.plannedTurnsP95.disabled = !drawn && kind !== 'lognormal';
+  $('lengthLabel').firstChild.textContent = drawn ? 'Median turns' : kind === 'geometric' ? 'Mean turns' : kind === 'fixed' ? 'Turns' : 'Median turns';
+  for (const name of ['retrievalDependencyProbability', 'retrievalDependencyTurnsBack', 'retrievalDependencyTurnsBackP95']) f[name].disabled = noRetrieval;
+  f.gapHalfTurn.disabled = Number(f.gapFirstFactor.value) === 1;
+  f.breakMedianMinutes.disabled = f.breakShare.value !== '' && Number(f.breakShare.value) === 0;
+  $('appSummary').textContent = summary();
+  for (const b of $('starts').children) b.setAttribute('aria-pressed', b.dataset.id === startId && !edited);
+}
+// Your app in a few words.
+function summary() {
+  const r = Object.fromEntries(ruleFields.map(el => [el.dataset.rule, readField(el)])), parts = [];
+  parts.push(r.keepTurns ? `last ${r.keepTurns} turns` : 'whole history');
+  if (r.dropRetrievedAfter >= 0) parts.push(`retrieved text dropped after ${plural(r.dropRetrievedAfter, 'turn')}`);
+  if (r.compress) parts.push(`retrieved text −${pct(r.compress, 0)}`);
+  if (r.clear) parts.push('clears tool results'); if (r.summarize) parts.push('summarizes');
+  parts.push(r.cache === 'off' ? 'no caching' : r.cache === 'long' ? 'long cache' : 'cached'); if (r.pings) parts.push(plural(r.pings, 'ping'));
+  return parts.join(' · ');
 }
 const busy = value => document.querySelectorAll('.results').forEach(el => el.setAttribute('aria-busy', value));
 function invalidate(message) {
   current = null; busy('false');
-  $('selectedPolicy').textContent = 'No policy fitted. Check the inputs.';
   $('errors').textContent = message; $('errors').hidden = false; $('status').textContent = 'Check inputs';
-  for (const id of ['compacheCost', 'openclawCost', 'savingPercent', 'compacheKept', 'openclawKept', 'compacheHit', 'openclawHit']) $(id).textContent = '—';
-  $('savingAmount').textContent = ''; $('export').disabled = true; $('share').disabled = true;
+  $('savingPercent').textContent = '—'; $('savingAmount').textContent = ''; $('savingRange').textContent = ''; $('savingFacts').innerHTML = ''; $('sides').innerHTML = '';
+  $('export').disabled = true; $('share').disabled = true;
 }
 function update() {
   clearTimeout(timer); worker?.terminate(); latest++; labels();
   if (!form.checkValidity()) {
-    const bad = Array.from(form.elements).find(e => e.validity && !e.validity.valid);
-    invalidate(`${labelOf(bad?.dataset.model ? `model.${bad.dataset.model}` : bad?.name || '') || 'Input'}: ${bad?.validationMessage || 'check this value'}`);
+    const bad = Array.from(form.elements).find(e => e.validity && !e.validity.valid); bad?.closest('details')?.setAttribute('open', '');
+    invalidate(`${labelOf(bad?.dataset.model ? `model.${bad.dataset.model}` : bad?.dataset.rule ? `app.${bad.dataset.rule}` : bad?.name || '') || 'Input'}: ${bad?.validationMessage || 'check this value'}`);
     return;
   }
   current = null; $('errors').textContent = loadError; $('errors').hidden = !loadError;
-  $('status').textContent = 'Fitting…'; $('selectedPolicy').textContent = 'Fitting the cheapest policy…';
-  busy('true'); $('export').disabled = true; $('share').disabled = true;
+  $('status').textContent = 'Fitting…'; busy('true'); $('export').disabled = true; $('share').disabled = true;
   const c = readForm();
   worker = new Worker(new URL('./worker.mjs', import.meta.url), {type: 'module'});
   worker.onmessage = ({data}) => { if (data.id !== latest) return; if (data.error) { invalidate(readable(data.error)); return; } render(data.result); };
   worker.onerror = () => invalidate('Could not load the calculator. Serve this folder over HTTP and reload.');
   worker.postMessage({id: latest, config: c});
+}
+const changed = () => { if (source) edited = true; startId = ''; };
+function soon() {
+  loadError = ''; labels(); worker?.terminate(); latest++; current = null; $('export').disabled = true; $('share').disabled = true; busy('true');
+  try { renderInputs(configure(readForm())); } catch { /* an unfinished entry: the check in update() reports it */ }
+  clearTimeout(timer); timer = setTimeout(update, 250);
 }
 
 // Chart pieces. Every colour is a class that resolves to a design token in style.css.
@@ -133,276 +166,348 @@ function showTip(anchor, title, rows) {
 }
 const hideTip = () => { tip.hidden = true; };
 
-// The small curves under the inputs: neutral ink, since they describe the workload and not either side.
-function miniLine(id, points, {label = '', xLabel = '', reference = null, referenceLabel = '', referenceLow = false, second = null} = {}) {
-  const W = 260, H = 70, L = 4, R = 4, T = 6, B = 16, xmax = Math.max(1e-9, ...points.map(p => p.x));
-  const x = v => L + v / xmax * (W - L - R), y = v => H - B - v * (H - T - B);
-  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}"><line class="g-axis" x1="${L}" y1="${H - B}" x2="${W - R}" y2="${H - B}"/>`, mark = '';
-  // The reference is named where the curve is not: at the foot of its line when the curve is high there. It is drawn
-  // on top of the curves, with a rim that keeps it readable where one passes under it.
-  if (reference !== null && reference > 0 && reference <= xmax) {
-    const far = x(reference) > W * .6, low = referenceLow || points.reduce((near, p) => Math.abs(p.x - reference) < Math.abs(near.x - reference) ? p : near).y > .6;
-    svg += `<line class="g-axis" x1="${x(reference)}" y1="${T}" x2="${x(reference)}" y2="${H - B}"/>`;
-    mark = `<text class="halo" x="${x(reference) + (far ? -4 : 4)}" y="${low ? H - B - 5 : T + 8}" text-anchor="${far ? 'end' : 'start'}">${esc(referenceLabel)}</text>`;
-  }
-  const path = series => series.map(p => `${x(p.x).toFixed(1)},${y(p.y).toFixed(1)}`).join(' ');
-  // A second curve to compare with, dotted.
-  if (second) svg += `<polyline class="line s-ink dash" points="${path(second)}"/>`;
-  svg += `<polyline class="line s-ink" points="${path(points)}"/>${mark}<text x="${L}" y="${H - 3}">0</text><text x="${W - R}" y="${H - 3}" text-anchor="end">${esc(xLabel)}</text></svg>`;
-  $(id).innerHTML = svg;
+
+// -- distributions you can draw ---------------------------------------------
+
+const DRAW_TITLE = {tokenDrawn: 'Retrieved tokens per turn', gapDrawn: 'Time until the next message', lengthDrawn: 'Turns in a thread', inputNeedDrawn: 'Turns back to a needed question', retrievalNeedDrawn: 'Turns back to needed retrieved text', outputNeedDrawn: 'Turns back to a needed answer'};
+const binLabel = {
+  token: k => `${compact(BINS.token.edges[k])} to ${compact(BINS.token.edges[k + 1])} tokens`, gap: k => `${minutes(BINS.gap.edges[k])} to ${minutes(BINS.gap.edges[k + 1])}`,
+  length: k => { const a = BINS.length.edges[k], b = BINS.length.edges[k + 1] - 1; return a === b ? plural(a, 'turn') : `${a} to ${b} turns`; }, need: k => { const a = BINS.need.edges[k], b = BINS.need.edges[k + 1] - 1; return a === b ? `${plural(a, 'turn')} back` : `${a} to ${b} turns back`; }
+};
+// Which bin edges get a label under the chart.
+const AXIS = {token: [[1, '125'], [4, '1k'], [7, '8k'], [10, '64k']], gap: [[2, '30 s'], [5, '5 min'], [8, '30 min'], [10, '2 h'], [13, '1 d']], length: [[0, '1'], [4, '5'], [7, '11'], [9, '20'], [12, '45'], [15, '110']], need: [[0, '1'], [4, '5'], [7, '11'], [9, '21'], [11, '51']]};
+// Where a value falls along the bins, in bins.
+function binAt(kind, value) {
+  const {edges} = BINS[kind]; if (value <= edges[0]) return 0; if (value >= edges.at(-1)) return edges.length - 1;
+  let k = 0; while (value >= edges[k + 1]) k++;
+  return k + Math.log(value / edges[k]) / Math.log(edges[k + 1] / edges[k]);
 }
-function renderMini(c) {
-  // Request size over the first six turns if nothing were removed.
-  const W = 260, H = 70, step = c.tokenMedian * c.retrievalShare + c.inputTokens + c.outputTokens, last = c.systemTokens + step * 6;
-  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Request size over six turns with nothing removed, reaching ${compact(last)} tokens"><line class="g-axis" x1="4" y1="54" x2="256" y2="54"/>`;
-  for (let i = 0; i < 6; i++) svg += `<path class="f-neutral" d="${bar(8 + i * 42, 24, 54, 54 - Math.max(2, (c.systemTokens + step * (i + 1)) / last * 46))}"/>`;
-  $('growthMini').innerHTML = `${svg}<text x="4" y="67">turn 1</text><text x="256" y="67" text-anchor="end">turn 6 · ${compact(last)} tokens</text></svg>`;
-
-  // Of everything later turns need, the share that lies within so many turns back.
-  const needs = KINDS.map(([kind]) => ({chance: kind === 'retrieval' && (c.tokenMedian === 0 || c.retrievalShare === 0) ? 0 : c[`${kind}DependencyProbability`], law: ageLaw(c[`${kind}DependencyTurnsBack`], c[`${kind}DependencyTurnsBackP95`], 1000), far: c[`${kind}DependencyTurnsBackP95`]})).filter(n => n.chance > 0);
-  const weight = needs.reduce((sum, n) => sum + n.chance, 0), within = age => needs.reduce((sum, n) => sum + n.chance * n.law.cdf(age), 0) / weight;
-  if (weight > 0) {
-    const reach = Math.max(2, Math.ceil(Math.max(...needs.map(n => n.far)))); let half = 1; while (half < 1000 && within(half) < .5) half++;
-    miniLine('needsMini', Array.from({length: reach + 1}, (_, age) => ({x: age, y: within(age)})), {label: 'Share of needed earlier text within so many turns back', xLabel: `${reach} turns back`});
-    $('needsCaption').textContent = `${pct(1 - needs.reduce((none, n) => none * (1 - n.chance), 1))} of turns need something earlier · half of it within ${plural(half, 'turn')}`;
-  } else { $('needsMini').innerHTML = ''; $('needsCaption').textContent = 'No turn needs anything earlier.'; }
-
-  // The median, mean or fixed length is marked, unless it lies at the left edge, where its name would sit on the curve.
-  const v = survivalView(c);
-  miniLine('survivalMini', v.points.map(p => ({x: p.turn, y: p.realized})), {label: `Share of threads that reach each turn, through turn ${v.max}`, xLabel: `${v.max} turns`, reference: v.reference >= 3 ? v.reference : null, referenceLabel: `${v.referenceLabel} ${num(v.reference)}`});
-  $('survivalCaption').textContent = c.lengthDistribution === 'continuation' ? `${pct(v.oneTurn)} of threads end after one turn · ${pct(v.tail)} reach turn ${v.max}` : `${pct(v.tail)} of threads reach turn ${v.max}`;
-
-  // The delay in a long thread, and beside it the delay after the first turn when that differs. The cache lifetime
-  // runs from when the request was sent, so the answer time comes off the wait it covers.
-  const reach = Math.max(30, c.ttlMinutes, c.gapP95Minutes), byPosition = c.gapFirstFactor !== 1;
-  const curve = turn => Array.from({length: 101}, (_, i) => ({x: i * reach / 100, y: returnCdf(i * reach / 100, c, turn)}));
-  miniLine('returnMini', curve(Infinity), {label: `Share of returning users back within so many minutes${byPosition ? ', in a long thread and after the first turn' : ''}`, xLabel: `${num(reach)} min`, reference: c.ttlMinutes - c.answerSeconds / 60, referenceLabel: 'cache expires', referenceLow: true, second: byPosition ? curve(1) : null});
-  const lifetime = `the cache lifetime of ${num(c.ttlMinutes)} min`, breaks = c.breakShare > 0 ? `${pct(c.breakShare)} after a long break` : '';
-  $('returnCaption').innerHTML = byPosition
-    ? `Back within ${lifetime}: <span class="keys"><span class="key line dash">${pct(warmReturnShare(c, 1))} after turn 1</span> <span class="key line ink">${pct(warmReturnShare(c))} in long threads</span>${breaks ? ` <span>${breaks}</span>` : ''}</span>`
-    : `${pct(warmReturnShare(c))} back within ${lifetime}${breaks ? ` · ${breaks}` : ''}`;
+let painting = null;
+function drawChart(box, c) {
+  const name = box.dataset.draw, kind = DRAWN[name], weights = lawWeights(name, c), total = weights.reduce((a, b) => a + b, 0) || 1, share = weights.map(w => w / total), off = name === 'tokenDrawn' && !c.tokenDrawn && c.tokenMedian === 0 || name.startsWith('retrieval') && !c.tokenDrawn && c.tokenMedian === 0;
+  const W = 260, H = 104, T = 8, B = 18, n = share.length, slot = W / n, top = painting?.name === name ? painting.top : Math.max(.08, ...share) * 1.18, y = v => H - B - Math.min(1, v / top) * (H - T - B);
+  let svg = `<svg viewBox="0 0 ${W} ${H}" role="group" aria-label="${DRAW_TITLE[name]}. Drag to draw, or use the arrow keys on a bar."><line class="g-axis" x1="0" y1="${H - B}" x2="${W}" y2="${H - B}"/>`;
+  share.forEach((s, k) => {
+    svg += `<rect class="hit" data-k="${k}" x="${k * slot}" y="0" width="${slot}" height="${H - B}" ${off ? '' : `tabindex="0" role="slider" aria-label="${binLabel[kind](k)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(s * 100)}" aria-valuetext="${pct(s)}"`}/>`;
+    if (!off && s > 0) svg += `<path class="mark ${c[name] ? 'f-drawn' : 'f-neutral'}" d="${bar(k * slot + 1.5, slot - 3, H - B, Math.min(H - B - 1, y(s)))}"/>`;
+  });
+  for (const [k, text] of AXIS[kind]) svg += `<text x="${BINS[kind].whole ? (k + .5) * slot : k * slot}" y="${H - 4}" text-anchor="${k === 0 && !BINS[kind].whole ? 'start' : 'middle'}">${text}</text>`;
+  // The cache lifetime among the delays, less the answer time it has already spent.
+  if (kind === 'gap') { const at = binAt('gap', Math.max(.1, c.ttlMinutes - c.answerSeconds / 60)) * slot; svg += `<line class="g-mark" x1="${at}" x2="${at}" y1="${T - 4}" y2="${H - B}"/><text class="halo t-2" x="${at + 4}" y="${T + 4}">cache expires</text>`; }
+  const caption = off ? 'No retrieved text.' : kind === 'gap' ? `${pct(warmReturnShare(c), 0)} back before the cache expires` : c[name] ? 'Drawn' : 'Drag the bars to draw your own';
+  box.innerHTML = `${svg}</svg><p class="caption"><span>${caption}</span>${c[name] ? `<button type="button" class="link" data-reset="${name}">use the curve</button>` : ''}</p>`;
+  if (off) return;
+  const el = box.firstElementChild;
+  const paint = (k, value) => { const next = [...(baseConfig[name] ?? share)]; next[k] = Math.max(0, value); if (!next.some(w => w > 0)) next[k] = 1e-6; baseConfig = {...baseConfig, [name]: next}; showStats(name); };
+  el.addEventListener('pointerdown', e => {
+    const k = e.target.dataset?.k; if (k === undefined) return;
+    e.preventDefault(); changed(); remember(name);
+    baseConfig = {...baseConfig, [name]: [...share]}; painting = {name, top, scale: 1};
+    const move = ev => { const r = box.firstElementChild.getBoundingClientRect(), x = (ev.clientX - r.left) / r.width * W, v = Math.max(0, (H - B - (ev.clientY - r.top) / r.height * H) / (H - T - B)) * top, at = Math.max(0, Math.min(n - 1, Math.floor(x / slot))); paint(at, v < top * .02 ? 0 : v); labels(); drawChartRaw(box); };
+    // While drawing, heights stay as drawn: the shares are worked out when the pointer is released.
+    const drawChartRaw = host => { const raw = baseConfig[name]; host.querySelectorAll('path.mark').forEach(p => p.remove()); const svgEl = host.firstElementChild; raw.forEach((v, i) => { if (v <= 0) return; const p = document.createElementNS('http://www.w3.org/2000/svg', 'path'); p.setAttribute('class', 'mark f-drawn'); p.setAttribute('d', bar(i * slot + 1.5, slot - 3, H - B, Math.min(H - B - 1, y(v)))); svgEl.insertBefore(p, svgEl.querySelector('text')); }); };
+    const up = () => { removeEventListener('pointermove', move); removeEventListener('pointerup', up); removeEventListener('pointercancel', up); painting = null; const sum = baseConfig[name].reduce((a, b) => a + b, 0); baseConfig = {...baseConfig, [name]: baseConfig[name].map(w => tidy(Number((w / sum).toPrecision(4))))}; showStats(name); soon(); };
+    addEventListener('pointermove', move); addEventListener('pointerup', up); addEventListener('pointercancel', up); hideTip(); move(e);
+  });
+  el.addEventListener('keydown', e => {
+    const k = Number(e.target.dataset?.k), step = {ArrowUp: .02, ArrowDown: -.02, PageUp: .1, PageDown: -.1}[e.key];
+    if (step !== undefined) { e.preventDefault(); changed(); remember(name); paint(k, (baseConfig[name] ?? share)[k] + step); soon(); box.querySelector(`[data-k="${k}"]`)?.focus(); }
+    else if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') { e.preventDefault(); box.querySelector(`[data-k="${k + (e.key === 'ArrowRight' ? 1 : -1)}"]`)?.focus(); }
+  });
+  const describe = (anchor, target) => { const k = target.dataset?.k; if (k === undefined || painting) return hideTip(); showTip(anchor, binLabel[kind](Number(k)), [['', pct(share[k]), kind === 'length' ? 'of threads' : kind === 'need' ? 'of these needs' : 'of turns']]); };
+  el.addEventListener('pointermove', e => describe(e, e.target)); el.addEventListener('pointerleave', hideTip); el.addEventListener('focusin', e => describe(e.target, e.target)); el.addEventListener('focusout', hideTip);
 }
+function renderInputs(c) {
+  for (const box of form.querySelectorAll('[data-draw]')) drawChart(box, c);
+  const none = KINDS.reduce((p, [kind]) => p * (1 - (kind === 'retrieval' && !c.tokenDrawn && c.tokenMedian === 0 ? 0 : c[`${kind}DependencyProbability`])), 1);
+  $('needsCaption').textContent = `${pct(1 - none, 0)} of turns need something earlier`;
+}
+
+// -- results ----------------------------------------------------------------
+
+const role = (arm, key, field = 'cost') => arm.byRole[key]?.[field] || 0;
+function renderLead(r) {
+  const ours = r.compache.complete ? 1000 * r.compache.totals.cost / r.workload.totalRuns : null, s = r.savings, known = s && s.percent !== null, dearer = s?.absolute < 0;
+  $('againstName').textContent = r.selected.name;
+  $('savingPercent').textContent = known ? `${dearer ? '−' : ''}${num(Math.abs(s.percent))}%` : '—';
+  $('savingAmount').className = `delta ${s ? (dearer ? 'bad' : 'good') : ''}`;
+  $('savingAmount').textContent = s ? `${dollars(ours)} instead of ${dollars(r.selected.per1000)} per 1,000 turns` : r.compache.complete ? 'No comparison: these requests do not fit the model' : 'The requests do not fit the model';
+  $('savingRange').textContent = s?.range ? `${pct(s.range.low, 0)} to ${pct(s.range.high, 0)} when the sampled threads are drawn again` : '';
+  const facts = [['Fetches trimmed text back', `${pct(role(r.compache, 'recovery', 'calls') / r.workload.totalRuns)} of turns`], ['Needed text in view before that', pct(r.compache.retention.observed, 0)]];
+  if (r.selected.missing !== null) facts.push([`Needed text ${r.selected.name} does not have`, pct(r.selected.missing, 0)]);
+  if (r.fit.pinned && r.fit.fittedHere !== null) facts.push(['The policy fitted here would cost', dollars(r.fit.fittedHere)]);
+  $('savingFacts').innerHTML = facts.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${v}</dd></div>`).join('');
+  document.querySelectorAll('[data-against]').forEach(el => { el.textContent = r.baseline.name; });
+  // Every side, cheapest first, Compache among them.
+  const list = [{id: 'compache', name: 'Compache', per1000: ours, missing: r.compache.dependencyCoverage === null ? null : 1 - r.compache.dependencyCoverage, note: describePolicy(r.policy).join(' '), complete: r.compache.complete}, ...r.sides];
+  const most = Math.max(...list.map(b => b.per1000 ?? 0)) || 1; list.sort((a, b) => (a.per1000 ?? Infinity) - (b.per1000 ?? Infinity));
+  $('sides').innerHTML = `<div class="side head"><span></span><span></span><span>cost</span><span title="What turns need and this side no longer has.">missing</span></div>` + list.map(b => {
+    const us = b.id === 'compache', picked = b.id === r.selected.id, missing = b.missing === null ? '' : b.missing < .005 ? '0%' : pct(b.missing, 0);
+    const cells = `<span class="name">${us ? '<i></i>' : ''}${esc(b.name)}</span><span class="track"><i class="${us ? 'compache' : picked ? 'picked' : ''}" style="width:${b.per1000 === null ? 0 : Math.max(.6, 100 * b.per1000 / most).toFixed(2)}%"></i></span><span class="value">${b.per1000 === null ? 'does not fit' : dollars(b.per1000)}</span><span class="value ${b.missing >= .05 ? 'bad' : 'muted'}">${missing}</span>`;
+    return us ? `<div class="side us" title="${esc(b.note)}">${cells}</div>` : `<button type="button" class="side" role="radio" aria-checked="${picked}" data-id="${b.id}" title="${esc(b.note)}${b.checked ? ` Read ${b.checked}.` : ''}">${cells}</button>`;
+  }).join('');
+}
+function renderPolicy(r) {
+  const p = r.policy, c = r.config, file = mode === 'file' && filePolicy;
+  for (const b of $('policyTabs').children) { b.setAttribute('aria-selected', b.dataset.mode === mode); if (b.dataset.mode === 'file') b.hidden = !filePolicy; }
+  $('policyText').textContent = describePolicy(p).join(' ');
+  $('policyNote').textContent = file ? `${filePolicy.model}${filePolicy.threads ? ` · fitted on ${plural(filePolicy.threads, 'thread')}, ${plural(filePolicy.turns, 'turn')}` : ''}${filePolicy.cost !== null ? ` · there ${dollars(filePolicy.cost)} against ${dollars(filePolicy.everything)} keeping everything` : ''}${filePolicy.coverage !== null ? ` · ${pct(filePolicy.coverage, 0)} of labelled needs in view` : ''}. ${filePolicy.notes.join(' ')}${filePolicy.workload ? '' : ' The file does not say what its workload was: it is priced on the one set here.'}` : mode === 'own' ? 'Drag a window, or set the pings. It is priced like any other policy.' : `The cheapest of ${r.fit.candidates.length} on ${num(r.fit.threads)} threads, priced on ${num(r.workload.threads.length)} others.`;
+  if (document.activeElement !== $('ownPings')) $('ownPings').value = p.maxPings;
+  // One lane per kind: where what later turns need lies, and how much of it the window holds.
+  const {edges} = BINS.need, n = edges.length - 1, W = Math.max(320, Math.min(620, $('windowsChart').clientWidth || 520)), narrow = W < 460, L = narrow ? 84 : 98, R = narrow ? 92 : 128, lane = 74, H = lane * 3 + 22, slot = (W - L - R) / n, longest = Math.max(...r.workload.threads.map(t => t.turns.length));
+  let svg = `<svg viewBox="0 0 ${W} ${H}" role="group" aria-label="What the policy keeps of each kind, over what later turns need">`;
+  KINDS.forEach(([kind, label], row) => {
+    const window = p[WINDOW[kind]], none = kind === 'retrieval' && !c.tokenDrawn && c.tokenMedian === 0, law = needLaw(c, kind, 160), share = Array.from({length: n}, (_, k) => law.cdf(Math.min(160, edges[k + 1] - 1)) - (k ? law.cdf(edges[k] - 1) : 0)), top = Math.max(...share, .05), base = lane * row + lane - 14, y = v => base - v / top * (lane - 30);
+    svg += `<text class="t-ink" x="0" y="${base - 20}">${label}</text><text x="0" y="${base - 5}">${none ? 'none here' : `${pct(c[`${kind}DependencyProbability`], 0)} of turns`}</text><line class="g-axis" x1="${L}" x2="${W - R}" y1="${base}" y2="${base}"/>`;
+    const reach = window === null ? n : (() => { let k = 0; while (k < n && edges[k + 1] - 1 <= window) k++; return k + (k < n && window >= edges[k] ? (window - edges[k] + 1) / (edges[k + 1] - edges[k]) : 0); })(), edge = L + reach * slot;
+    share.forEach((s, k) => {
+      if (none || s <= 0) return;
+      const x = L + k * slot + 1.5, w = slot - 3, inside = Math.max(0, Math.min(w, edge - x));
+      if (inside < w) svg += `<path class="f-neutral" d="${bar(x, w, base, Math.min(base - 1, y(s)))}"/>`;
+      if (inside > 0) svg += `<clipPath id="w${kind}${k}"><rect x="${x}" y="0" width="${inside}" height="${H}"/></clipPath><path class="f-compache" clip-path="url(#w${kind}${k})" d="${bar(x, w, base, Math.min(base - 1, y(s)))}"/>`;
+    });
+    if (!none) svg += `<rect class="hit wide" data-kind="${kind}" x="${L - slot}" y="${lane * row + 4}" width="${W - L - R + 2 * slot}" height="${lane - 12}"/><line class="g-edge" x1="${edge}" x2="${edge}" y1="${lane * row + 12}" y2="${base + 4}"/><circle class="knob" data-kind="${kind}" tabindex="0" role="slider" aria-label="${label} kept, turns" aria-valuemin="0" aria-valuemax="161" aria-valuenow="${window ?? 161}" aria-valuetext="${window === null ? 'all' : plural(window, 'turn')}" cx="${edge}" cy="${lane * row + 12}" r="5.5"/>`;
+    svg += `<text class="t-ink" x="${W - R + 12}" y="${base - 20}">${none ? '' : window === null ? 'all kept' : window === 0 ? 'none kept' : `last ${plural(window, 'turn')}`}</text><text x="${W - R + 12}" y="${base - 5}">${none ? '' : `${pct(coverage(r, kind), 0)} ${narrow ? 'in view' : 'of needs in view'}`}</text>`;
+    if (row === 2) for (const [k, text] of AXIS.need) svg += `<text x="${L + (k + .5) * slot}" y="${H - 4}" text-anchor="middle">${text}</text>`;
+  });
+  $('windowsChart').innerHTML = `${svg}<text x="${W - R + 12}" y="${H - 4}">turns back</text></svg>`;
+  const el = $('windowsChart').firstElementChild, snap = k => k <= 0 ? 0 : k >= n ? null : edges[k] - 1 || 0;
+  const set = (kind, window) => { ownPolicy = {...r.policy, ...(mode === 'own' ? ownPolicy : {}), [WINDOW[kind]]: window}; mode = 'own'; r.policy = {...ownPolicy}; renderPolicy(r); };
+  el.addEventListener('pointerdown', e => {
+    const kind = e.target.dataset?.kind; if (!kind) return; e.preventDefault();
+    // The window follows the pointer bin by bin: after bin k it holds everything up to that bin's last turn.
+    const at = ev => { const box = $('windowsChart').firstElementChild.getBoundingClientRect(), k = Math.round(((ev.clientX - box.left) / box.width * W - L) / slot); set(kind, snap(k)); };
+    const up = () => { removeEventListener('pointermove', at); removeEventListener('pointerup', up); removeEventListener('pointercancel', up); update(); };
+    addEventListener('pointermove', at); addEventListener('pointerup', up); addEventListener('pointercancel', up); at(e);
+  });
+  el.addEventListener('keydown', e => {
+    const kind = e.target.dataset?.kind, step = {ArrowRight: 1, ArrowLeft: -1}[e.key]; if (!kind || !step) return; e.preventDefault();
+    const now = r.policy[WINDOW[kind]] ?? longest, next = now + step; set(kind, next >= Math.max(longest, 1) ? null : Math.max(0, next)); $('windowsChart').querySelector(`.knob[data-kind="${kind}"]`)?.focus(); clearTimeout(timer); timer = setTimeout(update, 400);
+  });
+  renderMap(r, file);
+}
+function renderMap(r, file) {
+  const same = (a, b) => ['questions', 'answers', 'retrieved', 'maxPings', 'keepUnder'].every(k => (a[k] ?? null) === (b[k] ?? null));
+  const points = file && filePolicy.candidates.length && filePolicy.cost !== null ? filePolicy.candidates.map(x => ({...x, kept: x.coverage})) : r.fit.candidates.filter(x => x.complete).map(x => ({policy: x.policy, everything: x.everything, coverage: x.coverage, cost: 1000 * x.cost / r.fit.turns, chosen: same(x.policy, r.policy)}));
+  const usable = points.filter(x => Number.isFinite(x.cost)).map(x => ({...x, x: x.coverage ?? 1}));
+  $('searchNote').textContent = usable.length ? `Cost per 1,000 turns against the needed text that stays in view${file && filePolicy.cost !== null ? ', as the package fitted it' : ''}. ${usable.some(x => x.everything) ? '' : 'Keeping everything does not fit the model here.'}` : 'No candidate fits the model.';
+  const label = n => n === null ? 'all' : n === 0 ? 'none' : `${n}`;
+  $('policyRows').innerHTML = [...usable].sort((a, b) => a.cost - b.cost).map(x => `<tr class="${x.chosen ? 'selected' : ''}"><td>${label(x.policy.questions)}</td><td>${label(x.policy.answers)}</td><td>${label(x.policy.retrieved)}</td><td>${x.policy.maxPings}</td><td>${pct(x.coverage, 0)}</td><td>${dollars(x.cost)}</td></tr>`).join('');
+  const box = $('mapChart'), W = Math.max(300, box.clientWidth), H = box.clientHeight || 280, L = 52, R = 16, T = 24, B = 40; if (!usable.length) { box.innerHTML = ''; return; }
+  const low = Math.min(.95, Math.floor(Math.min(...usable.map(p => p.x)) * 20) / 20), ys = ticks(0, Math.max(...usable.map(p => p.cost)), 4), top = ys.values.at(-1), x = v => L + (v - low) / (1 - low || 1) * (W - L - R), y = v => H - B - v / top * (H - T - B), counts = [...new Set(usable.map(p => p.policy.maxPings))].sort((a, b) => a - b), tone = n => n === 0 ? 'baseline' : n === counts.at(-1) ? 'compache' : 'compache-soft';
+  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Cost of every candidate policy against the share of needed text it keeps in view">`;
+  for (const v of ys.values) svg += `<line class="${v ? 'g-grid' : 'g-axis'}" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/><text x="${L - 8}" y="${y(v) + 4}" text-anchor="end">${usd(v, ys.digits)}</text>`;
+  for (let v = low; v <= 1.0001; v += (1 - low) / 4) svg += `<text x="${x(v)}" y="${H - B + 17}" text-anchor="${v > .999 ? 'end' : 'middle'}">${pct(v, 0)}</text>`;
+  for (const n of counts) { const line = usable.filter(p => p.policy.maxPings === n).sort((a, b) => a.x - b.x || a.cost - b.cost); svg += `<polyline class="line thin s-${tone(n)}" points="${line.map(p => `${x(p.x).toFixed(1)},${y(p.cost).toFixed(1)}`).join(' ')}"/>`; }
+  usable.forEach((p, i) => { svg += `<circle class="hit" data-i="${i}" cx="${x(p.x)}" cy="${y(p.cost)}" r="11"/><circle class="mark dot f-${p.chosen ? 'compache' : tone(p.policy.maxPings)}" cx="${x(p.x)}" cy="${y(p.cost)}" r="${p.chosen ? 6.5 : 4}"/>`; });
+  const chosen = usable.find(p => p.chosen); if (chosen) svg += `<text class="t-ink halo" x="${x(chosen.x)}" y="${y(chosen.cost) + 22}" text-anchor="middle">${dollars(chosen.cost)}</text>`;
+  let at = L; for (const n of counts) { svg += `<circle class="f-${tone(n)}" cx="${at + 4}" cy="10" r="4"/><text class="t-2" x="${at + 13}" y="14">${n ? `up to ${plural(n, 'ping')}` : 'no pings'}</text>`; at += 92; }
+  box.innerHTML = `${svg}<text x="${(L + W - R) / 2}" y="${H - 4}" text-anchor="middle">needed text in view</text></svg>`;
+  const el = box.firstElementChild; el.addEventListener('pointermove', e => { const p = usable[e.target.dataset?.i]; if (!p) return hideTip(); showTip(e, p.everything ? 'Keep everything' : `Questions ${label(p.policy.questions)} · answers ${label(p.policy.answers)} · retrieved ${label(p.policy.retrieved)}`, [['', dollars(p.cost), 'per 1,000 turns'], ['', pct(p.coverage, 0), 'in view'], ['', String(p.policy.maxPings), 'pings at most']]); }); el.addEventListener('pointerleave', hideTip);
+}
+
+// -- one conversation --------------------------------------------------------
+
+const decisionsOf = id => current.compache.decisions.filter(d => d.thread === id && d.admitted);
+// The first turn that trims says most.
+const firstCut = () => { turnIndex = Math.max(0, decisionsOf($('threadPicker').value).findIndex(d => d.action === 'cut')); };
+function renderThread() {
+  if (!current) return;
+  const id = $('threadPicker').value, list = decisionsOf(id), box = $('threadChart'), W = Math.max(320, box.clientWidth), H = box.clientHeight || 300, L = 52, R = 16, T = 12, B = 66; if (!list.length) { box.innerHTML = ''; return; }
+  turnIndex = Math.min(turnIndex, list.length - 1);
+  const ys = ticks(0, Math.max(...list.map(d => Math.max(d.fullTokens, d.sentTokens))), 4), top = ys.values.at(-1), slot = (W - L - R) / list.length, bw = Math.max(1.5, Math.min(22, slot * .72)), x = i => L + (i + .5) * slot, y = v => H - B - v / top * (H - T - B);
+  const sent = list.reduce((n, d) => n + d.sentTokens, 0), full = list.reduce((n, d) => n + d.fullTokens, 0), cuts = list.filter(d => d.action === 'cut').length, pinged = list.filter((d, i) => i && d.cache === 'warm' && list[i - 1].actualPings > 0).length;
+  $('threadCaption').textContent = `${plural(list.length, 'turn')} · ${pct(1 - sent / full, 0)} fewer tokens sent than the whole history · trimmed ${plural(cuts, 'time')}, pings kept the cache warm ${plural(pinged, 'time')} · click a turn`;
+  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Tokens sent on each turn of one conversation, over its whole history">`;
+  for (const v of ys.values) svg += `<line class="${v ? 'g-grid' : 'g-axis'}" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/><text x="${L - 8}" y="${y(v) + 4}" text-anchor="end">${compact(v)}</text>`;
+  svg += `<text x="${L - 8}" y="${H - B + 18}" text-anchor="end">cache</text><text x="${L - 8}" y="${H - B + 34}" text-anchor="end">text</text>`;
+  list.forEach((d, i) => {
+    const left = x(i) - bw / 2, recall = d.byKind.recall || 0, own = d.sentTokens - recall;
+    svg += `<rect class="hit" tabindex="0" data-i="${i}" x="${L + i * slot}" y="${T}" width="${slot}" height="${H - T - B + 40}" aria-label="Turn ${i + 1}: ${whole(d.sentTokens)} of ${whole(d.fullTokens)} tokens sent"/>${i === turnIndex ? `<rect class="pick" x="${L + i * slot}" y="${T}" width="${slot}" height="${H - T - B + 40}"/>` : ''}`;
+    if (d.fullTokens > d.sentTokens) svg += `<path class="mark f-ghost" d="${bar(left, bw, y(0), y(d.fullTokens))}"/>`;
+    if (recall) svg += `<path class="mark f-3" d="${bar(left, bw, y(0), y(d.sentTokens))}"/>`;
+    svg += `<path class="mark f-compache" d="${bar(left, bw, y(0), Math.min(y(0) - 1, y(own)))}"/>`;
+    const cy = H - B + 14, ty = H - B + 30, small = Math.min(4, slot * .3);
+    if (d.cache === 'cold') svg += `<circle class="mark f-2" cx="${x(i)}" cy="${cy}" r="${small}"/>`;
+    else if (i && list[i - 1].actualPings > 0) svg += `<path class="mark line s-compache" d="M${x(i) - small},${cy} l${small * .8},${small * .8} l${small * 1.3},${-small * 1.6}"/>`;
+    if (d.action === 'cut') svg += `<path class="mark f-compache" d="M${x(i) - small},${ty - small} h${2 * small} l${-small},${2 * small} z"/>`;
+    if (d.fetched.length) svg += `<circle class="mark f-3" cx="${x(i) + (d.action === 'cut' ? small * 2.4 : 0)}" cy="${ty}" r="${small}"/>`;
+    const every = Math.max(1, Math.ceil(list.length / 12)); if (i % every === 0) svg += `<text x="${x(i)}" y="${H - 6}" text-anchor="middle">${i + 1}</text>`;
+  });
+  box.innerHTML = `${svg}</svg>`;
+  const el = box.firstElementChild, pick = target => { const i = target.dataset?.i; if (i !== undefined) { turnIndex = Number(i); hideTip(); renderThread(); box.querySelector(`[data-i="${i}"]`)?.focus({preventScroll: true}); } };
+  el.addEventListener('click', e => pick(e.target)); el.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(e.target); } const s = {ArrowRight: 1, ArrowLeft: -1}[e.key]; if (s) { e.preventDefault(); box.querySelector(`[data-i="${turnIndex + s}"]`) && pick(box.querySelector(`[data-i="${turnIndex + s}"]`)); } });
+  el.addEventListener('pointermove', e => { const d = list[e.target.dataset?.i]; if (!d) return hideTip(); showTip(e, `Turn ${d.turn + 1}`, [['compache', whole(d.sentTokens), 'tokens sent'], ['', whole(d.fullTokens), 'whole history'], ...(d.removedTokens ? [['', whole(d.removedTokens), 'trimmed now']] : [])]); }); el.addEventListener('pointerleave', hideTip);
+  renderTurn(list[turnIndex], list);
+}
+function renderTurn(d, list) {
+  const parts = Object.values(d.parts).join(''), archived = [...parts].filter(ch => ch === 'a' || ch === 'f').length;
+  $('turnTitle').textContent = `Turn ${d.turn + 1}`;
+  const gap = d.turn ? d.time - list[d.turn - 1].time : null;
+  $('turnWhy').textContent = d.turn === 0 ? 'The first turn: nothing to trim yet.' : `${minutes(gap)} after the turn before. The cache was ${d.cache === 'cold' ? 'gone' : list[d.turn - 1].actualPings ? `warm, after ${plural(list[d.turn - 1].actualPings, 'ping')}` : 'warm'}. ${d.action === 'cut' ? `Trimmed ${plural(d.removed, 'part')}, ${compact(d.removedTokens)} tokens.` : d.cutTokens === null ? 'Nothing was outside its window.' : 'Kept as it was: trimming now would rewrite what the cache holds.'}${d.fetched.length ? ` Fetched back ${plural(d.fetched.length, 'part')}.` : ''}`;
+  // Every earlier part, by kind and turn.
+  const n = d.turn, W = 300, L = 66, cell = Math.min(14, (W - L) / Math.max(1, n + 1)), colour = {k: 'f-compache', a: 'f-ghost', f: 'f-3'};
+  let svg = `<svg viewBox="0 0 ${W} 74" role="img" aria-label="Which earlier parts are in the request: ${parts.length - archived} kept, ${archived} archived">`;
+  KINDS.forEach(([kind, label], row) => { svg += `<text class="t-2" x="0" y="${20 + row * 20}">${label === 'Retrieved text' ? 'Retrieved' : label}</text>`; [...d.parts[kind]].forEach((ch, t) => { if (ch !== '-') svg += `<rect class="${colour[ch]}" x="${L + t * cell}" y="${10 + row * 20}" width="${Math.max(.8, cell - 1.5)}" height="12" rx="${Math.min(2, cell / 4)}"/>`; }); if (kind !== 'output') svg += `<rect class="f-neutral-strong" x="${L + n * cell}" y="${10 + row * 20}" width="${Math.max(.8, cell - 1.5)}" height="12" rx="${Math.min(2, cell / 4)}"/>`; });
+  $('turnParts').innerHTML = `${svg}</svg><p class="legend"><span class="key compache">kept</span><span class="key ghost">archived</span><span class="key s3">fetched back</span><span class="key ink">this turn</span></p>`;
+  const per = v => dollars(1000 * v), line = (k, v, cls = '') => `<tr class="${cls}"><th>${k}</th><td>${v}</td></tr>`;
+  $('turnDecisionTitle').title = 'Expected cost of this turn and the next two, per 1,000 such turns.';
+  $('turnRows').innerHTML = [line('Send as it is, three turns ahead', per(d.keepCost), d.action === 'keep' ? 'total' : ''), line('Trim now, three turns ahead', d.cutCost === null ? '—' : per(d.cutCost), d.action === 'cut' ? 'total' : ''), line('Sent', `${whole(d.sentTokens)} tokens`), line('read from cache', pct(d.cachedTokens / d.sentTokens, 0)), line('Cost of the answer call', per(d.cost)), line('Chance of another turn', pct(d.planner.returnProbability, 0))].join('');
+  // The pings of this wait.
+  const p = d.planner, box = $('pingChart'), W2 = Math.max(220, box.clientWidth), H = box.clientHeight || 160, L2 = 50, R = 8, T = 10, B = 34, data = p.rows.map(r => ({...r, net: 1000 * r.net, cost: 1000 * r.expectedCost, gain: 1000 * r.expectedGain}));
+  $('pingExplanation').textContent = p.chosen ? `Up to ${plural(p.chosen, 'ping')}, every ${num(p.interval)} min. ${d.actualPings < p.chosen ? `${d.actualPings || 'None'} sent before the user was back` : 'All sent'}.` : WHY_NO_PING[p.reason] ?? p.reason;
+  if (data.length < 2) { box.innerHTML = ''; return; }
+  const ys = ticks(Math.min(0, ...data.map(r => r.net)), Math.max(1e-9, ...data.map(r => r.net)), 3), lo = ys.values[0], hi = ys.values.at(-1), y = v => T + (hi - v) / (hi - lo || 1) * (H - T - B), slot = (W2 - L2 - R) / data.length;
+  svg = `<svg viewBox="0 0 ${W2} ${H}" role="img" aria-label="Expected net saving of 0 to ${data.length - 1} pings, per 1,000 such waits">`;
+  for (const v of ys.values) svg += `<line class="${v ? 'g-grid' : 'g-axis'}" x1="${L2}" x2="${W2 - R}" y1="${y(v)}" y2="${y(v)}"/><text x="${L2 - 6}" y="${y(v) + 4}" text-anchor="end">${usd(v, ys.digits)}</text>`;
+  data.forEach((r, i) => { const cx = L2 + (i + .5) * slot, w = Math.min(24, slot * .55); svg += `<rect class="hit" data-i="${i}" x="${L2 + i * slot}" y="${T}" width="${slot}" height="${H - T - B}"/>`; if (Math.abs(y(r.net) - y(0)) > .5) svg += `<path class="mark ${r.pings === p.chosen ? 'f-compache' : 'f-compache-soft'}" d="${bar(cx - w / 2, w, y(0), y(r.net))}"/>`; svg += `<text x="${cx}" y="${H - B + 15}" text-anchor="middle">${r.pings}</text>`; });
+  box.innerHTML = `${svg}<text x="${(L2 + W2 - R) / 2}" y="${H - 4}" text-anchor="middle">pings, expected net saving</text></svg>`;
+  box.firstElementChild.addEventListener('pointermove', e => { const r = data[e.target.dataset?.i]; if (!r) return hideTip(); showTip(e, plural(r.pings, 'ping'), [['compache', dollars(r.net), 'net per 1,000 waits'], ['', dollars(r.gain), 'saved on the next turns'], ['', dollars(r.cost), 'cost of pings']]); }); box.firstElementChild.addEventListener('pointerleave', hideTip);
+}
+
+// -- the breakdown ------------------------------------------------------------
 
 function contextChart() {
-  if (!current) return;
-  const id = $('threadPicker').value, average = id === 'average', selected = Number($('runPicker').value), c = current.config, total = current.workload.threads.length;
-  const [ours, theirs] = contextSeries(current, id), all = [...ours, ...theirs];
-  // A wide chart names the thresholds in a gutter on the right, clear of the data.
-  const box = $('contextChart'), W = Math.max(320, box.clientWidth), gutter = W >= 560, H = box.clientHeight || 280, L = 52, R = gutter ? 132 : 14, T = 14, B = 26;
-  const maxX = Math.max(2, ...all.map(p => p.turn + 1)), scale = ticks(0, Math.max(1, ...all.map(p => p.inputTokens)), 5), top = scale.values.at(-1);
-  const x = n => L + (n - 1) / (maxX - 1) * (W - L - R), y = n => H - B - n / top * (H - T - B);
-  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${average ? 'Mean input tokens per turn across threads' : `Input tokens per turn for ${esc(id)}`}, Compache and OpenClaw">`;
+  const [ours, theirs] = contextSeries(current), all = [...ours, ...theirs], box = $('contextChart'), W = Math.max(320, box.clientWidth), H = box.clientHeight || 280, L = 52, R = 16, T = 14, B = 26; if (!all.length) { box.innerHTML = ''; return; }
+  const maxX = Math.max(2, ...all.map(p => p.turn + 1)), scale = ticks(0, Math.max(1, ...all.map(p => p.inputTokens)), 4), top = scale.values.at(-1), x = n => L + (n - 1) / (maxX - 1) * (W - L - R), y = n => H - B - n / top * (H - T - B), total = current.workload.threads.length;
+  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Mean input tokens per turn, Compache and ${esc(current.baseline.name)}">`;
   for (const v of scale.values) svg += `<line class="${v ? 'g-grid' : 'g-axis'}" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/><text x="${L - 8}" y="${y(v) + 4}" text-anchor="end">${compact(v)}</text>`;
-  // Where each side starts rewriting the request, when that lies inside the plotted range.
-  const openclawAt = c.toolClearing ? Math.max(c.clearTriggerFloor, Math.floor(c.model.context * c.clearTriggerShare)) : Math.min(c.summaryTriggerShare * c.model.context, c.model.context - Math.min(c.baselineReserve, .25 * c.model.context));
-  const marks = [['compache', c.warmTrigger * c.model.context, 'compacts warm'], ['compache', (c.target + .02) * c.model.context, 'compacts cold'], ['baseline', openclawAt, c.toolClearing ? 'clears results' : 'summarizes']].filter(m => m[1] <= top).sort((m, n) => n[1] - m[1]);
-  let marksSvg = '', taken = -Infinity;
-  marks.forEach(([cls, value, text], i) => {
-    svg += `<line class="g-axis" x1="${L}" x2="${W - R}" y1="${y(value)}" y2="${y(value)}"/>`;
-    if (gutter) {
-      // Beside its line, pushed down just enough to clear the label above.
-      const base = Math.max(y(value) + 4, taken + 14); taken = base;
-      marksSvg += `<rect class="f-${cls}" x="${W - R + 8}" y="${base - 7}" width="7" height="7" rx="1.5"/><text class="t-2" x="${W - R + 19}" y="${base}">${text} · ${compact(value)}</text>`;
-    } else {
-      // Inside the plot: above its line, or below when the line above is too close for that.
-      const below = i > 0 && y(value) - y(marks[i - 1][1]) < 15, base = y(value) + (below ? 12 : -5);
-      marksSvg += `<rect class="f-${cls} halo" x="${L + 6}" y="${base - 7}" width="7" height="7" rx="1.5"/><text class="t-2 halo" x="${L + 17}" y="${base}">${text} · ${compact(value)}</text>`;
-    }
-  });
-  const xTicks = [...new Set([1, Math.round(maxX / 4), Math.round(maxX / 2), Math.round(3 * maxX / 4), maxX].filter(n => n > 0))];
-  for (const n of xTicks) svg += `<text x="${x(n)}" y="${H - B + 17}" text-anchor="middle">${n}</text>`;
-  if (ours.some(p => p.turn === selected)) svg += `<line class="g-axis" x1="${x(selected + 1)}" x2="${x(selected + 1)}" y1="${T}" y2="${H - B}"/>`;
-  const rewrites = {compache: new Set(current.compache.decisions.filter(d => d.thread === id && d.removedTokens > 0).map(d => d.turn)), baseline: new Set(current.openclaw.ledger.filter(p => p.thread === id && p.role === 'summary' && p.admitted).map(p => p.turn))};
-  for (const [cls, points] of [['baseline', theirs], ['compache', ours]]) {
-    if (points.length > 1) svg += `<polyline class="line s-${cls}" points="${points.map(p => `${x(p.turn + 1).toFixed(1)},${y(p.inputTokens).toFixed(1)}`).join(' ')}"/>`;
-    // Dots at the end of the line, at the inspected turn and, for one thread, wherever the request was rewritten.
-    for (const [i, p] of points.entries()) if (i === points.length - 1 || p.turn === selected || (!average && rewrites[cls].has(p.turn))) svg += `<circle class="dot f-${cls}" cx="${x(p.turn + 1)}" cy="${y(p.inputTokens)}" r="4"/>`;
-  }
-  svg += `${marksSvg}<line class="g-cross" id="contextCross" y1="${T}" y2="${H - B}" visibility="hidden"/><rect class="hit" x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}"/></svg>`;
-  box.innerHTML = svg;
-  const drawn = box.firstElementChild, cross = drawn.querySelector('#contextCross'), area = drawn.querySelector('.hit');
-  const turnAt = e => { const r = drawn.getBoundingClientRect(); return Math.max(1, Math.min(maxX, Math.round(1 + ((e.clientX - r.left) * W / r.width - L) / (W - L - R) * (maxX - 1)))); };
-  area.addEventListener('pointermove', e => {
-    const turn = turnAt(e), a = ours.find(p => p.turn + 1 === turn), b = theirs.find(p => p.turn + 1 === turn);
-    cross.setAttribute('x1', x(turn)); cross.setAttribute('x2', x(turn)); cross.setAttribute('visibility', 'visible');
-    showTip(e, `Turn ${turn} · input tokens${average && a ? ` · ${a.count} of ${total} threads` : ''}`, [['compache', a ? num(Math.round(a.inputTokens)) : '—', 'Compache'], ['openclaw', b ? num(Math.round(b.inputTokens)) : '—', 'OpenClaw']]);
-  });
+  for (const n of [...new Set([1, Math.round(maxX / 4), Math.round(maxX / 2), Math.round(3 * maxX / 4), maxX].filter(n => n > 0))]) svg += `<text x="${x(n)}" y="${H - B + 17}" text-anchor="middle">${n}</text>`;
+  for (const [cls, points] of [['baseline', theirs], ['compache', ours]]) { if (points.length > 1) svg += `<polyline class="line s-${cls}" points="${points.map(p => `${x(p.turn + 1).toFixed(1)},${y(p.inputTokens).toFixed(1)}`).join(' ')}"/>`; const p = points.at(-1); if (p) svg += `<circle class="dot f-${cls}" cx="${x(p.turn + 1)}" cy="${y(p.inputTokens)}" r="4"/>`; }
+  box.innerHTML = `${svg}<line class="g-cross" y1="${T}" y2="${H - B}" visibility="hidden"/><rect class="hit" x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}"/></svg>`;
+  const el = box.firstElementChild, cross = el.querySelector('.g-cross'), area = el.querySelector('.hit');
+  area.addEventListener('pointermove', e => { const r = el.getBoundingClientRect(), turn = Math.max(1, Math.min(maxX, Math.round(1 + ((e.clientX - r.left) * W / r.width - L) / (W - L - R) * (maxX - 1)))), a = ours.find(p => p.turn + 1 === turn), b = theirs.find(p => p.turn + 1 === turn); for (const k of ['x1', 'x2']) cross.setAttribute(k, x(turn)); cross.setAttribute('visibility', 'visible'); showTip(e, `Turn ${turn}${a ? ` · ${a.count} of ${total} threads` : ''}`, [['compache', a ? whole(a.inputTokens) : '—', 'Compache'], ['openclaw', b ? whole(b.inputTokens) : '—', current.baseline.name]]); });
   area.addEventListener('pointerleave', () => { cross.setAttribute('visibility', 'hidden'); hideTip(); });
-  area.addEventListener('click', e => { const turn = turnAt(e) - 1; if ([...$('runPicker').options].some(o => Number(o.value) === turn)) { $('runPicker').value = turn; hideTip(); renderPing(); } });
-  $('contextCaption').textContent = average ? 'Mean request size among the threads that reach each turn. Click a turn to inspect its ping plan.' : 'Request size at each turn. Dots mark a rewritten request. Click a turn to inspect its ping plan.';
-
-  $('threadCountPanel').hidden = !average;
-  if (!average) return;
-  const CH = $('threadCountChart').clientHeight || 150, CT = 8, CB = 30, counts = ticks(0, Math.max(1, total), 4), cy = n => CH - CB - n / counts.values.at(-1) * (CH - CT - CB);
-  const slot = (W - L - R) / (maxX - 1), bw = Math.max(1, Math.min(20, slot * .65));
-  let bars = `<svg viewBox="0 0 ${W} ${CH}" role="img" aria-label="Number of threads that reach each turn, out of ${total}">`;
-  for (const n of counts.values) bars += `<line class="${n ? 'g-grid' : 'g-axis'}" x1="${L}" x2="${W - R}" y1="${cy(n)}" y2="${cy(n)}"/><text x="${L - 8}" y="${cy(n) + 4}" text-anchor="end">${num(n)}</text>`;
-  for (const [i, p] of ours.entries()) bars += `<rect class="hit" data-i="${i}" x="${x(p.turn + 1) - slot / 2}" y="${CT}" width="${slot}" height="${CH - CT - CB}"/><path class="mark ${p.turn === selected ? 'f-neutral-strong' : 'f-neutral'}" d="${bar(x(p.turn + 1) - bw / 2, bw, cy(0), cy(p.count))}"/>`;
-  for (const n of xTicks) bars += `<text x="${x(n)}" y="${CH - 13}" text-anchor="middle">${n}</text>`;
-  $('threadCountChart').innerHTML = `${bars}<text x="${W - R}" y="${CH - 1}" text-anchor="end">turn</text></svg>`;
-  const countSvg = $('threadCountChart').firstElementChild;
-  countSvg.addEventListener('pointermove', e => { const p = ours[e.target.dataset?.i]; if (p) showTip(e, `Turn ${p.turn + 1}`, [['', `${num(p.count)} of ${num(total)}`, `threads · ${pct(p.count / total)}`]]); else hideTip(); });
-  countSvg.addEventListener('pointerleave', hideTip);
-  const picked = ours.find(p => p.turn === selected);
-  $('threadCountNote').textContent = picked ? `Turn ${selected + 1}: ${picked.count} of ${total} threads · ${pct(picked.count / total)}` : 'No thread reaches this turn';
 }
-function chooseThread() {
-  if (!current) return;
-  const id = $('threadPicker').value, previous = Number($('runPicker').value);
-  const turns = [...new Set(current.compache.decisions.filter(d => id === 'average' || d.thread === id).map(d => d.turn))].sort((a, b) => a - b);
-  $('runPicker').replaceChildren(...turns.map(turn => { const o = document.createElement('option'); o.value = turn; o.textContent = `Turn ${turn + 1}`; return o; }));
-  $('runPicker').value = turns.includes(previous) ? previous : turns[0] ?? '';
-  renderPing();
-}
-function renderPing() {
-  if (!current) return;
-  contextChart();
-  const id = $('threadPicker').value, average = id === 'average', turn = Number($('runPicker').value), p = pingProfile(current, id, turn);
-  // Amounts are per 1,000 waits after this turn, the page's unit for cost.
-  const rows = p.rows.map(r => ({pings: r.pings, gain: 1000 * r.expectedGain, cost: 1000 * r.expectedCost, net: 1000 * r.net}));
-  $('pingScope').textContent = average ? `Average of ${p.eligible} of ${p.decisions} threads at this turn` : id;
-  $('pingChoiceLabel').textContent = average ? 'Best average plan' : 'Plan';
-  $('pingChoice').textContent = p.eligible ? plural(p.best.pings, 'ping') : 'No ping possible';
-  $('pingValue').textContent = p.eligible ? dollars(1000 * p.best.net) : '—';
-  $('pingTiming').textContent = p.eligible ? (p.best.pings ? `every ${fixed(2).format(p.interval)} min` : 'no ping pays for itself') : '';
-  $('pingReturn').textContent = `${pct(p.returnProbability)} chance of another turn`;
-  $('pingActual').textContent = p.decisions ? `${num(p.plannedPings)} → ${num(p.actualPings)}` : '—';
-  const reasons = Object.entries(p.reasons).map(([reason, n]) => `${plural(n, 'thread')}: ${WHY_NO_PING[reason] || reason}`).join(' · ');
-  $('pingExplanation').hidden = !reasons && p.decisions > 0; $('pingExplanation').textContent = p.decisions ? (reasons ? `No ping for ${reasons}.` : '') : 'No completed turn to inspect.';
-
-  const box = $('pingChart'), W = Math.max(320, box.clientWidth), H = box.clientHeight || 260, L = 56, R = 14, T = 14, B = 40;
-  if (rows.length < 2) { box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="No ping plan to chart"><text class="t-2" x="${W / 2}" y="${H / 2}" text-anchor="middle">No ping plan to chart at this turn</text></svg>`; return; }
-  const scale = ticks(Math.min(0, ...rows.map(r => r.net)), Math.max(1e-9, ...rows.flatMap(r => [r.gain, r.cost, r.net])), 4), low = scale.values[0], high = scale.values.at(-1);
-  const y = v => T + (high - v) / (high - low) * (H - T - B), slot = (W - L - R) / rows.length, x = i => L + (i + .5) * slot, bw = Math.min(24, slot * .55);
-  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Net saving, saving from a warm return and cost of pings for zero to ${rows.at(-1).pings} pings, per 1,000 waits">`;
-  for (const v of scale.values) svg += `<line class="${v ? 'g-grid' : 'g-axis'}" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/><text x="${L - 8}" y="${y(v) + 4}" text-anchor="end">${usd(v, scale.digits)}</text>`;
-  rows.forEach((r, i) => {
-    svg += `<rect class="hit" tabindex="0" data-i="${i}" x="${L + i * slot}" y="${T}" width="${slot}" height="${H - T - B}" aria-label="${plural(r.pings, 'ping')}: net ${dollars(r.net)}, saving ${dollars(r.gain)}, cost ${dollars(r.cost)}"/>`;
-    if (Math.abs(y(r.net) - y(0)) >= .5) svg += `<path class="mark ${r.pings === p.best.pings ? 'f-compache' : 'f-compache-soft'}" d="${bar(x(i) - bw / 2, bw, y(0), y(r.net))}"/>`;
-    svg += `<text x="${x(i)}" y="${H - B + 17}" text-anchor="middle">${r.pings}</text>`;
-  });
-  for (const [key, cls] of [['gain', '2'], ['cost', '3']]) svg += `<polyline class="line s-${cls}" points="${rows.map((r, i) => `${x(i).toFixed(1)},${y(r[key]).toFixed(1)}`).join(' ')}"/><circle class="dot f-${cls}" cx="${x(rows.length - 1)}" cy="${y(rows.at(-1)[key])}" r="4"/>`;
-  box.innerHTML = `${svg}<text x="${(L + W - R) / 2}" y="${H - 4}" text-anchor="middle">pings while waiting</text></svg>`;
-  const drawn = box.firstElementChild, describe = (anchor, target) => { const r = rows[target.dataset?.i]; if (!r) return hideTip(); showTip(anchor, plural(r.pings, 'ping'), [['compache', dollars(r.net), 'Net saving'], ['s2', dollars(r.gain), 'Saving from a warm return'], ['s3', dollars(r.cost), 'Cost of pings']]); };
-  drawn.addEventListener('pointermove', e => describe(e, e.target)); drawn.addEventListener('pointerleave', hideTip);
-  drawn.addEventListener('focusin', e => describe(e.target, e.target)); drawn.addEventListener('focusout', hideTip);
-}
-function renderCache() {
+function renderBreakdown(r) {
+  const a = r.compache, b = r.baseline.arm, c = r.config, den = r.workload.totalRuns, per = x => 1000 * x / den, full = a.complete && b.complete;
+  const cells = (format, x, y) => `<td>${a.complete ? format(x) : '—'}</td><td>${b.complete ? format(y) : '—'}</td>`, group = title => `<tr class="group"><th colspan="3">${title}</th></tr>`, line = (label, format, x, y, cls = '') => `<tr class="${cls}"><th>${label}</th>${cells(format, x, y)}</tr>`, millions = x => num(x / 1e6);
+  const further = (label, format, field) => c.callsPerTurn > 1 ? [line(label, format, per(role(a, 'further', field)), per(role(b, 'further', field)))] : [];
+  $('ledgerRows').innerHTML = [group('Cost'),
+    line('Answers', dollars, per(role(a, 'answer')), per(role(b, 'answer'))), ...further('Further calls of a turn', dollars, 'cost'), line('Keep-warm pings', dollars, per(role(a, 'ping')), per(role(b, 'ping'))),
+    line('Fetching text back', dollars, per(role(a, 'recovery')), per(role(b, 'recovery'))), line('Summaries and flushes', dollars, 0, per(role(b, 'summary') + role(b, 'flush'))), line('Total', dollars, per(a.totals.cost), per(b.totals.cost), 'total'),
+    group('Calls'), line('Answers', num, per(role(a, 'answer', 'calls')), per(role(b, 'answer', 'calls'))), ...further('Further calls of a turn', num, 'calls'), line('Keep-warm pings', num, per(a.pings), per(b.pings)), line('Fetch-backs', num, per(role(a, 'recovery', 'calls')), per(role(b, 'recovery', 'calls'))), line('Context rewrites', num, per(a.compactions), per(b.compactions + b.clearings)),
+    group('Tokens'), line('Input, millions', millions, per(a.totals.inputTokens), per(b.totals.inputTokens)), line('read from cache, millions', millions, per(a.totals.cachedTokens), per(b.totals.cachedTokens)), line('Output, millions', millions, per(a.totals.outputTokens), per(b.totals.outputTokens)), line('Mean answer request', compact, role(a, 'answer', 'inputTokens') / Math.max(1, role(a, 'answer', 'calls')), role(b, 'answer', 'inputTokens') / Math.max(1, role(b, 'answer', 'calls'))),
+    group('Needed text in view, before fetching back'), ...KINDS.map(([kind, label]) => line(label, x => pct(x, 0), a.retention.byKind[kind].observed, b.retention.byKind[kind].observed)), line('Missing in the end', x => pct(x, 0), a.dependencyCoverage === null ? null : 1 - a.dependencyCoverage, b.dependencyCoverage === null ? null : 1 - b.dependencyCoverage)].join('');
   // Why answer input was, or was not, read from the cache. Each column sums to 100%.
-  const rows = [['cached', 'Read from cache', 'Input that matched a live cache entry.'], ['newContext', 'New this turn', 'Text no request of the thread had carried before: the new question and what was retrieved for it.'], ['firstRequest', 'First turn of a thread', 'Nothing of the thread is cached yet.'], ['expiredPrefix', 'Cache expired', 'It would have matched, but the entry had expired when the user returned.'], ['changedPrefix', 'Request changed', 'Sent before, but no longer at the same place in the request: a rewrite moved or removed what came before it.']];
-  if (current.config.cacheHitShare < 1) rows.push(['missed', 'Live entry not read', 'A live entry matched, but the request did not read it.']);
-  const share = (arm, key) => { const mix = arm.cacheBreakdown || {}, total = Object.values(mix).reduce((n, v) => n + v, 0); return total ? (mix[key] || 0) / total : null; };
-  const cell = (cls, value) => `<td>${pct(value)}<i class="${cls}" style="--share:${(100 * (value || 0)).toFixed(2)}%"></i></td>`;
-  $('cacheRows').innerHTML = rows.map(([key, label, title]) => `<tr><th title="${esc(title)}">${label}</th>${cell('compache', share(current.compache, key))}${cell('openclaw', share(current.openclaw, key))}</tr>`).join('');
+  const why = [['cached', 'Read from cache', 'Input that matched a live cache entry.'], ['newContext', 'New this turn', 'Text no request of the thread had carried before.'], ['firstRequest', 'First turn of a thread', 'Nothing of the thread is cached yet.'], ['expiredPrefix', 'Cache expired', 'It would have matched, but the entry had expired when the user returned.'], ['changedPrefix', 'Request changed', 'Sent before, but a rewrite moved or removed what came before it.']];
+  if (c.cacheHitShare < 1) why.push(['missed', 'Live entry not read', 'A live entry matched, but the request did not read it.']);
+  const share = (arm, key) => { const mix = arm.cacheBreakdown || {}, sum = Object.values(mix).reduce((n, v) => n + v, 0); return sum ? (mix[key] || 0) / sum : null; }, cell = (cls, v) => `<td>${pct(v, 0)}<i class="${cls}" style="--share:${(100 * (v || 0)).toFixed(2)}%"></i></td>`;
+  $('cacheRows').innerHTML = why.map(([key, label, title]) => `<tr><th title="${esc(title)}">${label}</th>${cell('compache', share(a, key))}${cell('openclaw', share(b, key))}</tr>`).join('');
+  $('warnings').hidden = full;
+  $('warnings').textContent = full ? '' : `Some requests do not fit the model's context window: ${[!a.complete && `Compache finished ${a.completedRuns} of ${den} turns`, !b.complete && `${r.baseline.name} ${b.completedRuns}`].filter(Boolean).join(', ')}.`;
 }
 const sourceLabel = () => source ? `${source}${edited && !source.endsWith('(edited)') ? ' (edited)' : ''}` : '';
 function render(r) {
   current = r; busy('false'); $('export').disabled = false; $('share').disabled = false;
-  const a = r.compache, b = r.openclaw, c = r.config, opt = r.optimization, den = r.workload.totalRuns, full = a.complete && b.complete && opt.feasible, preset = presets[$('modelPreset').value];
-  const per1000 = x => 1000 * x / den, role = (arm, key, field = 'cost') => arm.byRole[key]?.[field] || 0;
+  const c = r.config, preset = presets[$('modelPreset').value];
   $('status').textContent = `Seed ${c.seed} · updated`;
-  $('modelWindow').textContent = `${compact(c.model.context)} context · ${compact(c.model.maxInput)} max input`;
-  $('cacheDefault').textContent = `cache lifetime ${num(c.ttlMinutes)} min`;
-  $('sourceNote').hidden = !source; $('sourceNote').textContent = source ? `From your traces: ${sourceLabel()}` : '';
-  $('workloadNote').textContent = `${preset?.name || 'Custom prices'} · ${num(c.threads)} threads · ${num(den)} turns · policy fitted on ${num(opt.fittedThreads)} other threads`;
-  $('baselineNote').textContent = c.toolClearing ? `OpenClaw: tool results cleared above ${pct(c.clearTriggerShare)} of the window, newest ${c.clearKeepResults} kept · no keep-warm` : `OpenClaw: summary at ${pct(c.summaryTriggerShare)} of the window, ${compact(c.tailTokens)} tail · no keep-warm`;
-
-  $('compacheCost').textContent = full ? dollars(per1000(a.totals.cost)) : '—'; $('openclawCost').textContent = full ? dollars(per1000(b.totals.cost)) : '—';
-  $('compacheKept').textContent = full ? pct(a.retention.observed) : '—'; $('openclawKept').textContent = full ? pct(b.retention.observed) : '—';
-  const hit = arm => arm.byRole.answer?.inputTokens ? arm.byRole.answer.cachedTokens / arm.byRole.answer.inputTokens : null;
-  $('compacheHit').textContent = full ? pct(hit(a)) : '—'; $('openclawHit').textContent = full ? pct(hit(b)) : '—';
-  const dearer = r.savings?.absolute < 0, known = r.savings && r.savings.percent !== null;
-  $('savingPercent').textContent = known ? `${dearer ? '−' : ''}${num(Math.abs(r.savings.percent))}%` : '—';
-  $('savingAmount').className = `delta ${r.savings ? (dearer ? 'bad' : 'good') : ''}`;
-  $('savingAmount').textContent = r.savings ? `${dearer ? '↑' : '↓'} ${dollars(per1000(Math.abs(r.savings.absolute)))} ${dearer ? 'more' : 'less'} per 1,000 turns` : 'No comparison for these inputs';
-  $('warnings').hidden = full;
-  $('warnings').textContent = full ? '' : !opt.feasible ? 'No candidate policy keeps that much in view within the input limit. Lower the minimum, the turns back or the context per turn.' : `Some requests did not fit the model: Compache finished ${a.completedRuns} of ${den} turns and OpenClaw ${b.completedRuns}. There is no comparable cost.`;
-
-  const cells = (format, x, y) => `<td>${full ? format(x) : '—'}</td><td>${full ? format(y) : '—'}</td>`, group = title => `<tr class="group"><th colspan="3">${title}</th></tr>`;
-  const line = (label, format, x, y, cls = '') => `<tr class="${cls}"><th>${label}</th>${cells(format, x, y)}</tr>`, millions = x => num(x / 1e6);
-  // A turn's model calls after its first, shown only when a turn makes more than one.
-  const further = (label, format, field) => c.callsPerTurn > 1 ? [line(label, format, per1000(role(a, 'further', field)), per1000(role(b, 'further', field)))] : [];
-  $('ledgerRows').innerHTML = [group('Cost'),
-    line('Answers', dollars, per1000(role(a, 'answer')), per1000(role(b, 'answer'))), ...further('Further calls of a turn', dollars, 'cost'), line('Keep-warm pings', dollars, per1000(role(a, 'ping')), per1000(role(b, 'ping'))),
-    line('Fetching sources back', dollars, per1000(role(a, 'recovery')), per1000(role(b, 'recovery'))), line('Summaries and flushes', dollars, per1000(role(a, 'summary') + role(a, 'flush')), per1000(role(b, 'summary') + role(b, 'flush'))),
-    line('Total', dollars, per1000(a.totals.cost), per1000(b.totals.cost), 'total'),
-    group('Calls'),
-    line('Answers', num, per1000(role(a, 'answer', 'calls')), per1000(role(b, 'answer', 'calls'))), ...further('Further calls of a turn', num, 'calls'), line('Keep-warm pings', num, per1000(a.pings), per1000(b.pings)),
-    line('Fetch-backs', num, per1000(role(a, 'recovery', 'calls')), per1000(role(b, 'recovery', 'calls'))), line('Context rewrites', num, per1000(a.compactions), per1000(b.compactions + b.clearings)),
-    group('Tokens'),
-    line('Input, millions', millions, per1000(a.totals.inputTokens), per1000(b.totals.inputTokens)), line('read from cache, millions', millions, per1000(a.totals.cachedTokens), per1000(b.totals.cachedTokens)),
-    line('written at full price, millions', millions, per1000(a.totals.freshTokens), per1000(b.totals.freshTokens)), line('Output, millions', millions, per1000(a.totals.outputTokens), per1000(b.totals.outputTokens)),
-    line('Mean answer request', compact, role(a, 'answer', 'inputTokens') / Math.max(1, role(a, 'answer', 'calls')), role(b, 'answer', 'inputTokens') / Math.max(1, role(b, 'answer', 'calls')))].join('');
-
-  $('selectedPolicy').classList.toggle('infeasible', !opt.feasible);
-  $('selectedPolicy').textContent = opt.feasible ? `Fitted policy · compact to ${pct(c.target)} when cold · at ${pct(c.warmTrigger)} when warm · always keep ${plural(c.retrievalRetentionRuns, 'turn')}${opt.retention === null ? '' : ` · expected in view ${pct(opt.fittedRetention)} fitted, ${pct(opt.retention)} here`}` : 'No candidate policy meets the minimum.';
-  $('searchNote').textContent = `Cheapest of ${opt.candidateCount} on the ${num(opt.fittedThreads)} fitted threads · cost per 1,000 turns`;
-  const candidates = opt.candidates.filter(t => t.feasible).sort((x, y) => x.cost - y.cost).slice(0, 8), isChosen = t => t.target === c.target && t.warmTrigger === c.warmTrigger && t.retrievalRetentionRuns === c.retrievalRetentionRuns;
-  $('policyRows').innerHTML = candidates.length ? candidates.map(t => `<tr class="${isChosen(t) ? 'selected' : ''}"><td>${pct(t.target)}</td><td>${pct(t.warmTrigger)}</td><td>${t.retrievalRetentionRuns}</td><td>${pct(t.retention)}</td><td>${dollars(1000 * t.cost / opt.fittedRuns)}</td></tr>`).join('') : '<tr><td colspan="5">No candidate meets the minimum</td></tr>';
-  const fetched = arm => role(arm, 'recovery', 'calls') / den, gone = arm => arm.rawSourceAvailability === null ? null : 1 - arm.rawSourceAvailability;
-  $('retentionRows').innerHTML = [group('Before fetching back'), ...KINDS.map(([kind, label]) => line(label, pct, a.retention.byKind[kind].observed, b.retention.byKind[kind].observed)), line('All', pct, a.retention.observed, b.retention.observed, 'total'),
-    group('Fetching back'), line('Turns with a fetch', pct, fetched(a), fetched(b)), line('Still not in view', pct, gone(a), gone(b))].join('');
-
-  const picker = $('threadPicker'), previous = picker.value, everything = document.createElement('option'); everything.value = 'average'; everything.textContent = 'Average across threads';
-  picker.replaceChildren(everything, ...r.workload.threads.map(t => { const o = document.createElement('option'); o.value = t.id; o.textContent = `${t.id} · ${plural(t.turns.length, 'turn')}`; return o; }));
-  picker.value = previous === 'average' || r.workload.threads.some(t => t.id === previous) ? previous : 'average';
-  renderMini(c); chooseThread(); renderCache();
+  $('modelWindow').textContent = `${compact(c.model.context)} context · ${compact(c.model.maxInput)} max input`; $('cacheDefault').textContent = `cache lifetime ${num(c.ttlMinutes)} min`;
+  $('sourceNote').textContent = source ? `From your data: ${sourceLabel()}` : STARTS.find(s => s.id === startId)?.from ?? '';
+  $('workloadNote').textContent = `${preset?.name || 'Custom prices'} · ${num(c.threads)} threads · ${num(r.workload.totalRuns)} turns · modeled, nothing is run`;
+  $('baselineNote').textContent = r.selected.note;
+  renderLead(r); renderInputs(c); renderPolicy(r); renderBreakdown(r);
+  const picker = $('threadPicker'), previous = picker.value;
+  picker.replaceChildren(...r.workload.threads.map(t => { const o = document.createElement('option'); o.value = t.id; o.textContent = `${t.id} · ${plural(t.turns.length, 'turn')}`; return o; }));
+  // A thread long enough to show something and short enough to read.
+  const readable = [...r.workload.threads].filter(t => t.turns.length <= 30).sort((x, y) => y.turns.length - x.turns.length)[0] ?? r.workload.threads[0];
+  picker.value = r.workload.threads.some(t => t.id === previous) ? previous : readable.id; if (picker.value !== previous) firstCut();
+  renderThread(); contextChart();
   $('priceNote').textContent = `${preset?.name || 'Custom'}: $${c.model.inputRate} input / $${c.model.cachedRate} cache read / $${c.model.outputRate} output per 1M tokens. A cache write costs ${c.model.writeMultiplier}× input.${c.model.longThreshold > 0 ? ` Above ${compact(c.model.longThreshold)} input: ${c.model.longInputMultiplier}× input and cache, ${c.model.longOutputMultiplier}× output.` : ''}`;
   $('modelSource').href = preset?.url || 'https://platform.claude.com/docs/en/about-claude/pricing';
 }
 
-// Editing.
+// -- editing --------------------------------------------------------------------
+
 form.addEventListener('submit', e => { e.preventDefault(); update(); });
 form.addEventListener('input', e => {
-  const el = e.target, fields = form.elements, name = el.dataset.slider || el.name;
-  if (el.dataset.slider) fields[name].value = el.value;
+  const el = e.target, f = form.elements, name = el.name;
+  if (el.id === 'modelPreset' || el.id === 'appFrom') return;
   // A price or cache rule typed by hand is no longer the preset's.
   if (el.hasAttribute('data-preset')) $('modelPreset').value = 'custom';
-  if (name === 'tokenMedian' && fields.tokenMedian.value !== '') {
-    const next = Number(fields.tokenMedian.value);
-    if (priorTokens > 0) retrievalSpread = Math.max(1, Number(fields.tokenP95.value) / priorTokens);
-    fields.tokenP95.value = next === 0 ? 0 : Math.min(1000000, Math.max(next, Number((next * retrievalSpread).toPrecision(3))));
-    priorTokens = next;
+  // A number typed over a drawn chart takes the curve again.
+  for (const [drawn, fields] of Object.entries(STATS)) if (fields.includes(name) && baseConfig[drawn]) baseConfig = {...baseConfig, [drawn]: null};
+  if (name === 'tokenMedian' && f.tokenMedian.value !== '') {
+    const next = Number(f.tokenMedian.value); if (priorTokens > 0) retrievalSpread = Math.max(1, Number(f.tokenP95.value) / priorTokens);
+    f.tokenP95.value = next === 0 ? 0 : Math.min(1000000, Math.max(next, Number((next * retrievalSpread).toPrecision(3)))); priorTokens = next;
   }
-  if (name === 'plannedTurns' && fields.lengthDistribution.value === 'lognormal' && Number(fields.plannedTurns.value) > 0) {
-    const next = Number(fields.plannedTurns.value), ratio = Math.max(1, Number(fields.plannedTurnsP95.value) / Math.max(1, priorLength));
-    fields.plannedTurnsP95.value = Math.min(320, Math.max(next, Math.round(next * ratio))); priorLength = next;
+  if (name === 'plannedTurns' && f.lengthDistribution.value === 'lognormal' && Number(f.plannedTurns.value) > 0) {
+    const next = Number(f.plannedTurns.value), ratio = Math.max(1, Number(f.plannedTurnsP95.value) / Math.max(1, priorLength)); f.plannedTurnsP95.value = Math.min(320, Math.max(next, Math.round(next * ratio))); priorLength = next;
   }
-  if (source) edited = true;
-  loadError = ''; labels(); worker?.terminate(); latest++; current = null; $('export').disabled = true; $('share').disabled = true; busy('true');
-  try { renderMini(readForm()); } catch { /* an unfinished entry: the check in update() reports it */ }
-  clearTimeout(timer); timer = setTimeout(update, 250);
+  // The rules of your app, or what you pay, are what to compare with once they are touched.
+  if (el.dataset.rule) { baseConfig = {...baseConfig, compare: 'app'}; $('appFrom').value = ''; }
+  if (name === 'measuredCost') baseConfig = {...baseConfig, compare: Number(el.value) > 0 ? 'measured' : baseConfig.compare === 'measured' ? 'app' : baseConfig.compare};
+  changed(); soon();
 });
-$('modelPreset').addEventListener('change', () => { if (presets[$('modelPreset').value]) { setForm(applyPreset(readForm(), $('modelPreset').value)); update(); } });
-$('threadPicker').addEventListener('change', chooseThread);
-$('runPicker').addEventListener('change', renderPing);
+form.addEventListener('click', e => { const name = e.target.dataset?.reset; if (name) { baseConfig = {...baseConfig, [name]: null}; STATS[name].forEach((field, i) => { if (curveOf[name]) form.elements[field].value = curveOf[name][i]; }); delete curveOf[name]; changed(); soon(); } });
+$('modelPreset').addEventListener('change', () => { if (presets[$('modelPreset').value]) { setForm(applyPreset(readForm(), $('modelPreset').value)); fillFrom(); update(); } });
+$('needTabs').addEventListener('click', e => { const kind = e.target.dataset?.kind; if (!kind) return; for (const b of $('needTabs').children) b.setAttribute('aria-selected', b.dataset.kind === kind); for (const box of form.querySelectorAll('.need')) box.hidden = box.dataset.kind !== kind; });
+$('sides').addEventListener('click', e => { const id = e.target.closest('[data-id]')?.dataset.id; if (!id) return; baseConfig = {...baseConfig, compare: id}; if (id === 'app') $('appSettings').open = true; update(); });
+$('policyTabs').addEventListener('click', e => { const next = e.target.dataset?.mode; if (!next || next === mode) return; if (next === 'own') ownPolicy = {...(current?.policy ?? {questions: null, answers: null, retrieved: null, maxPings: 0, keepUnder: 0})}; mode = next; update(); });
+$('ownPings').addEventListener('change', e => { const n = Math.max(0, Math.min(60, Math.round(Number(e.target.value) || 0))); ownPolicy = {...(current?.policy ?? {}), maxPings: n}; mode = 'own'; update(); });
+$('threadPicker').addEventListener('change', () => { firstCut(); renderThread(); });
+function fillFrom() { const list = comparisons(configure(applyPreset({}, $('modelPreset').value))); $('appFrom').replaceChildren(new Option('Rules below', ''), ...list.filter(b => b.id !== 'app').map(b => new Option(b.name, b.id))); }
+$('appFrom').addEventListener('change', e => { const b = comparisons(configure(readForm())).find(x => x.id === e.target.value); if (!b) return; for (const el of ruleFields) writeField(el, b.rules[el.dataset.rule]); baseConfig = {...baseConfig, compare: 'app'}; changed(); update(); });
 
-// Loading a scenario: defaults, a link, or a file.
+// -- loading a scenario: a start, a link, or files ---------------------------------
+
 function note(text) { $('actionStatus').textContent = text; }
+// What the workload is compared with stays when the workload changes.
+function compared() { try { const {app, compare, measuredCost} = readForm(); return {app, compare, measuredCost}; } catch { return {}; } }
+function adopt(config) { mode = 'fit'; ownPolicy = null; if (config.policy) { mode = 'own'; ownPolicy = {...config.policy}; } }
 function load(carried, origin) {
   const {preset, config, source: label, legacy} = resolveScenario(carried);
-  $('modelPreset').value = preset; source = label; edited = false; loadError = '';
-  setForm(config);
-  note(legacy ? 'Made with an earlier version of the calculator. Its numbers were computed differently.' : origin === 'file' ? 'Imported.' : '');
-  update();
+  $('modelPreset').value = preset; source = label; edited = false; loadError = ''; startId = ''; adopt(config); setForm(config); fillFrom();
+  note(legacy ? 'Made with an earlier version of the calculator. Its numbers were computed differently.' : origin === 'file' ? 'Imported.' : ''); update();
 }
-function defaults() { $('modelPreset').value = 'sonnet'; source = ''; edited = false; setForm(applyPreset(DEFAULTS, 'sonnet')); }
+function begin(id) {
+  const start = STARTS.find(s => s.id === id) ?? STARTS[0], preset = $('modelPreset').value;
+  startId = start.id; source = ''; edited = false; loadError = ''; filePolicy = null; rows = []; labelRows = []; mode = 'fit'; ownPolicy = null; turnIndex = 0; $('threadPicker').replaceChildren();
+  const keep = {...compared(), ...(start.compare && compared().compare === 'everything' ? {compare: start.compare} : {})};
+  setForm(applyPreset({...DEFAULTS, ...start.scenario, ...keep}, presets[preset] ? preset : 'sonnet')); if (!presets[preset]) $('modelPreset').value = 'sonnet'; fillFrom(); update();
+}
 function start() {
   try { const carried = parseLink(location.hash); if (carried) { load(carried, 'link'); return; } }
-  catch (error) { loadError = `This link was not loaded: ${readable(error.message)}. The defaults are shown instead.`; }
-  defaults(); update();
+  catch (error) { loadError = `This link was not loaded: ${readable(error.message)}. A starting point is shown instead.`; }
+  const kept = loadError; setForm(applyPreset(DEFAULTS, 'sonnet')); begin('documents'); loadError = kept; if (kept) { $('errors').textContent = kept; $('errors').hidden = false; }
 }
-async function importFile(file) {
+async function textOf(file) {
+  if (!/\.gz$/i.test(file.name)) return file.text();
+  return new Response(file.stream().pipeThrough(new DecompressionStream('gzip'))).text();
+}
+async function importFiles(files) {
   try {
-    let data; try { data = JSON.parse(await file.text()); } catch { throw new Error('it is not valid JSON'); }
-    load(parseFile(data), 'file'); history.replaceState(null, '', location.pathname);
-  } catch (error) { loadError = `${file.name} was not imported: ${readable(error.message)}.`; $('errors').textContent = loadError; $('errors').hidden = false; note(''); }
+    const threads = [], labelsIn = []; let policy = null, scenario = null;
+    for (const file of files) {
+      let data; try { data = parseRows(await textOf(file)); } catch (e) { throw new Error(`${file.name}: ${e.message}`); }
+      for (const row of data) {
+        if (isPolicy(row)) policy = readPolicy(row); else if (isLabel(row)) labelsIn.push(row); else if (isThread(row)) threads.push(row);
+        else if (row?.schema_version === 'compache-profile-v1' || row?.schemaVersion) scenario = parseFile(row); else throw new Error(`${file.name}: not a chat log, labels, a policy, a profile or an export`);
+      }
+    }
+    if (threads.length) { rows = threads; labelRows = labelsIn; } else if (labelsIn.length) { if (!rows.length) throw new Error('labels need the chat log they belong to: open both'); labelRows = labelsIn; }
+    const told = [];
+    if (scenario) load(scenario, 'file');
+    if (threads.length || labelsIn.length) {
+      const m = measure(rows, labelRows), preset = policy?.preset ?? (m.model && Object.keys(presets).find(k => presets[k].id === m.model)) ?? $('modelPreset').value;
+      const config = configure(applyPreset({...DEFAULTS, ...m.scenario, ...compared(), ...(presets[preset] ? {} : {model: baseConfig.model, ttlMinutes: baseConfig.ttlMinutes, cacheMinTokens: baseConfig.cacheMinTokens, cacheBlockTokens: baseConfig.cacheBlockTokens})}, preset));
+      $('modelPreset').value = preset; source = m.source; edited = false; loadError = ''; startId = ''; mode = 'fit'; filePolicy = null; setForm(config); fillFrom();
+      told.push(`Measured ${m.source}.`, m.assessed ? `${m.assessed} labelled turns, ${m.needing} need something earlier.` : 'No labels: what later turns need keeps its defaults.');
+    }
+    if (policy) {
+      if (!threads.length && policy.workload) { const w = resolveScenario({version: 7, model: policy.workload.model ?? policy.preset, scenario: policy.workload.scenario, source: policy.workload.source ?? ''}); $('modelPreset').value = w.preset; source = w.source; edited = false; startId = ''; setForm({...w.config, ...compared()}); fillFrom(); }
+      else if (policy.preset) { $('modelPreset').value = policy.preset; setForm(applyPreset(readForm(), policy.preset)); }
+      filePolicy = policy; mode = 'file'; told.push('Showing the policy from the file.');
+    }
+    history.replaceState(null, '', location.pathname); turnIndex = 0; $('threadPicker').replaceChildren(); note(told.join(' ')); if (!scenario || told.length) update();
+  } catch (error) { loadError = `Not loaded. ${readable(error.message)}.`; $('errors').textContent = loadError; $('errors').hidden = false; note(''); }
 }
-$('reset').addEventListener('click', () => { $('threadPicker').value = 'average'; $('runPicker').value = '0'; loadError = ''; defaults(); history.replaceState(null, '', location.pathname); note(''); update(); });
+$('starts').replaceChildren(...STARTS.map(s => { const b = document.createElement('button'); b.type = 'button'; b.dataset.id = s.id; b.textContent = s.name; b.title = s.from; b.addEventListener('click', () => { history.replaceState(null, '', location.pathname); note(''); begin(s.id); }); return b; }));
+$('reset').addEventListener('click', () => { current = null; setForm(applyPreset(DEFAULTS, 'sonnet')); $('modelPreset').value = 'sonnet'; history.replaceState(null, '', location.pathname); note(''); begin('documents'); });
 $('import').addEventListener('click', () => $('importFile').click());
-$('importFile').addEventListener('change', e => { const file = e.target.files[0]; e.target.value = ''; if (file) importFile(file); });
+$('importFile').addEventListener('change', e => { const files = [...e.target.files]; e.target.value = ''; if (files.length) importFiles(files); });
 document.addEventListener('dragover', e => { if (e.dataTransfer?.types.includes('Files')) e.preventDefault(); });
-document.addEventListener('drop', e => { const file = e.dataTransfer?.files[0]; if (file) { e.preventDefault(); importFile(file); } });
+document.addEventListener('drop', e => { const files = [...e.dataTransfer?.files ?? []]; if (files.length) { e.preventDefault(); importFiles(files); } });
 $('share').addEventListener('click', async () => {
   if (!current) return;
   const url = new URL(location.href); url.hash = shareHash(current.config, $('modelPreset').value, sourceLabel()); history.replaceState(null, '', url);
@@ -410,10 +515,9 @@ $('share').addEventListener('click', async () => {
 });
 $('export').addEventListener('click', () => {
   if (!current) return;
-  const blob = new Blob([JSON.stringify({schemaVersion: EXPORT_SCHEMA, sourceDate: PRICES_CHECKED, baselineCommit: BASELINE_COMMIT, modelPreset: $('modelPreset').value, source: sourceLabel(), ...current}, null, 2)], {type: 'application/json'});
-  const url = URL.createObjectURL(blob), a = document.createElement('a'); a.href = url; a.download = `compache-scenario-${current.config.seed}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
-  note('Exported settings, workload and cost ledger.');
+  const blob = new Blob([JSON.stringify({schemaVersion: EXPORT_SCHEMA, sourceDate: PRICES_CHECKED, modelPreset: $('modelPreset').value, source: sourceLabel(), ...current}, null, 2)], {type: 'application/json'});
+  const url = URL.createObjectURL(blob), a = document.createElement('a'); a.href = url; a.download = `compache-scenario-${current.config.seed}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); note('Exported settings, workload and cost ledger.');
 });
-window.addEventListener('hashchange', start);
-let resizeTimer; window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (current) renderPing(); }, 100); });
+addEventListener('hashchange', start);
+let resizeTimer; addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (current) { renderPolicy(current); renderMap(current, mode === 'file' && filePolicy); renderThread(); contextChart(); } }, 100); });
 start();

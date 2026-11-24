@@ -20,6 +20,7 @@ from .optimizer.replay import arm_costs, replay_workload
 from .optimizer.retention import RetentionRecipe
 from .optimizer.session import WorkloadPolicy, WorkloadSession
 from .optimizer.solve import solve_workload
+from .profile import header_size, measure, workload
 from .record import SIZES_ONLY, is_record
 from .record import load as load_record
 from .threads import (
@@ -152,6 +153,18 @@ def fit(
         "share_headers": options.get("share_headers", True),
     }
     artifact["pricing"] = pricing(model)
+    # The measured workload, so that the calculator can show the policy at work on it.
+    preset, scenario = workload(
+        measure(threads, spec, labels),
+        spec,
+        model,
+        header_size(spec, system_prompt, tools),
+    )
+    artifact["workload"] = {
+        "model": preset,
+        "scenario": scenario,
+        "source": f"{len(threads):,} threads, {artifact['fitted']['turns']:,} turns",
+    }
     return Policy(artifact)
 
 

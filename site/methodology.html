@@ -13,8 +13,8 @@
 <header class="top"><a class="brand" href="./"><i></i>compache</a><a href="./">Calculator</a></header>
 
 <h1>How the calculator works</h1>
-<p>The calculator prices one chat workload twice from token counts and list prices: once with a Compache policy fitted to that workload, and once with OpenClaw's documented defaults. It runs in the browser from <code>site/</code>, with no dependencies, keys, telemetry or provider requests.</p>
-<p>It is a model. No model is called, neither product is executed and answer quality is not measured. The Compache side is a simplified projection of the package's policy. The <a href="https://github.com/BarendPotijk/compache/tree/main/benchmarks/docchat">DocChat benchmark</a> runs the package itself.</p>
+<p>The calculator prices one chat workload from token counts and list prices: under a Compache policy fitted to it, under your own rules, and under the documented defaults of other tools. It runs in the browser from <code>site/</code>, with no dependencies, keys, telemetry or provider requests.</p>
+<p>It is a model. No model is called, no product is executed and answer quality is not measured. The <a href="https://github.com/BarendPotijk/compache/tree/main/benchmarks/docchat">DocChat benchmark</a> runs the package itself.</p>
 
 <h2>Run it</h2>
 <pre><code>python3 -m http.server 8765 --bind 127.0.0.1 --directory site   # then open http://127.0.0.1:8765/
@@ -22,12 +22,12 @@ node --test site/*.test.mjs</code></pre>
 <ul>
 <li><strong>Share</strong> copies a link that carries every setting. Links made by earlier versions still open, with a note that their numbers were computed differently.</li>
 <li><strong>Export</strong> downloads the settings, the sampled threads, every priced call, every candidate policy and the limits below.</li>
-<li><strong>Import</strong> reads a profile made from your traces or a file exported here. You can also drop the file on the page.</li>
+<li><strong>Your data</strong> opens a chat log, its labels, a <code>policy.json</code>, a profile or a file exported here, several at once if you like. You can also drop them on the page. They are read in the browser and sent nowhere.</li>
 <li>A setting that is unknown or out of range is reported on the page. Nothing falls back to a default unnoticed.</li>
 </ul>
 
 <h2>From your traces</h2>
-<p>The package's <code>compache profile</code> command reads recorded threads and prints a link that opens this page with the workload filled in. It can write the same profile to a file for Import. The page then shows where the numbers came from.</p>
+<p>The package's <code>compache profile</code> command reads recorded threads and prints a link that opens this page with the workload filled in. It can write the same profile to a file. With <code>--policy</code> it carries a fitted policy too. A chat log dropped on the page is measured the same way, with the observed distributions. The page then shows where the numbers came from.</p>
 <div class="table-scroll"><table>
 <tr><th>Filled in from traces</th><th>Settings</th></tr>
 <tr><td>Tokens per turn</td><td>Question, answer and retrieved tokens (median and 95th percentile), the share of turns that retrieve, reasoning tokens, system prompt and tools</td></tr>
@@ -91,49 +91,35 @@ cost  = fresh  × input_rate × cache_write × long_input  / 1,000,000
 <p>A cache write costs 1.25× the input price for every preset. Claude presets use a 1,000,000-token window. OpenAI presets use a 1,050,000-token window with at most 922,000 input tokens. Editing a price or a cache rule switches the model to custom prices. Prices exclude tax, regional premiums and batch discounts.</p>
 
 <h2>The Compache side</h2>
-<p>Questions and answers always stay in the request. Only old retrieved text is archived, and each turn's archived text leaves a notice in its place (22 tokens by default, what the package leaves for one part). A policy is three numbers:</p>
-<div class="table-scroll"><table>
-<tr><th>Number</th><th>Meaning</th><th>Candidates</th></tr>
-<tr><td>Compact to</td><td>At a cold return, a request more than two points above this share of the window is compacted down to it, oldest retrieved text first</td><td>1%, 3%, 5%, 10%, 20%, 45%</td></tr>
-<tr><td>Warm at</td><td>While the cache is warm, compaction waits until the request reaches this share of the window</td><td>5%, 10%, 25%, 50%, 60%</td></tr>
-<tr><td>Keep turns</td><td>Retrieved text from the latest turns is never archived</td><td>None, or enough turns to cover 25%, 50%, 75%, 90%, 95% or 99% of the retrieved text later turns need</td></tr>
-</table></div>
+<p>A policy is what <code>compache fit</code> writes: how many turns of questions, of answers and of retrieved text stay, and the most pings while a user is away. A part outside its window is archived when a cut is made, and leaves a notice (28 tokens for a part). A part no larger than its notice stays.</p>
 <ul>
-<li>With the default workload that is 147 candidates: 21 pairs of the first two numbers, each with seven horizons. A run in which the warm trigger never decided anything is shared by every higher trigger, which changes no result.</li>
-<li><strong>The floor.</strong> A candidate must finish every turn and leave at least the chosen share of what later turns need in the request, before anything is fetched back. That share is an expectation over the configured chances and distances, taken on the fitted threads. With no needs at all there is no constraint.</li>
-<li><strong>The choice.</strong> The cheapest candidate on the fitted threads wins. Among equally cheap ones, the one that removes least. Both sides are then costed on the second set of threads.</li>
-<li><strong>Fetching back.</strong> A turn that needs an archived source pays one extra call that reads the request and returns a short reply (32 tokens by default). The answer call then carries the source again.</li>
-<li><strong>Admission.</strong> A request must fit the model's input limit and leave the reserve free (32,000 tokens by default). A thread that does not fit is reported, and no saving is shown.</li>
+<li><strong>Candidates.</strong> Windows of 0, 1, 2, 5, 10 and so on turns, all turns, and the look-backs that cover 80% to 97.5% of a kind's needs. Every combination is scored by what it leaves in view and how much of the history it keeps. At most six on the frontier are priced, each keeping at least a point more in view than every smaller one and at least the chosen floor, with 0, 1 and 3 pings. Keeping everything is always priced too.</li>
+<li><strong>Before a request</strong> it compares sending the history as it is with cutting it now: the expected cost of this turn and the next two, over the chance and the delay of a return at that position, with the mean size of a turn. A later cut is allowed for when the history is kept.</li>
+<li><strong>After an answer</strong> it compares 0 to the policy's most pings in the same way, every ping paid for until the expected return.</li>
+<li><strong>Fetching back.</strong> A turn that needs an archived part pays one extra call that reads the request and returns a short reply (32 tokens by default). The answer call then carries the part. It is not kept afterwards.</li>
+<li><strong>The choice.</strong> The cheapest candidate on the fitted threads. Among equally cheap ones, the one with more in view, then with fewer pings. Every side is costed on the second set of threads.</li>
+<li><strong>Admission.</strong> A request must fit the model's input limit and leave the reserve free (32,000 tokens by default). A side that does not fit has no cost.</li>
 </ul>
-<p><strong>Keep-warm pings.</strong> After each answer the planner weighs, for one to twelve pings, the chance that the user returns in the extra time the pings buy times the cost a warm return avoids, against every ping sent while waiting. It uses the configured chance of another turn and return delay at that turn's position, never the sampled future. Pings go out a set lead before the cache would expire and stop when the user returns. They are charged when the user never does. No ping is sent for a request that the next warm turn would compact anyway, for one too short to cache, or when the answer is still running as the first ping falls due.</p>
-<p>With <em>F</em> the share of returning users back within a delay at that position, <em>d</em> the answer time and the interval one lifetime less the lead, both counted from when the request was sent:</p>
-<pre><code>back before ping n   = F(n × interval - d)
-bridged by n pings   = F(n × interval + lifetime - d) - F(lifetime - d)</code></pre>
-
-<h2>The OpenClaw baseline</h2>
-<p>The baseline follows OpenClaw's documented defaults at revision <a href="https://github.com/openclaw/openclaw/commit/c49b553b85b82bc700465d4607949574f892366c"><code>c49b553</code></a>, as far as token counts can price them. Every constant is a setting under <em>OpenClaw baseline</em>.</p>
-<div class="table-scroll"><table>
-<tr><th>Behaviour</th><th>In the calculator</th><th>Default</th></tr>
-<tr><td>Clearing old tool results</td><td>On for Claude presets, as OpenClaw's Anthropic provider sets it. Off for OpenAI presets</td><td>Starts at <code>max(50,000, 30% of the window)</code>. Keeps the newest three results. Clears only if that frees <code>max(12,500, 5% of the window)</code>. A cleared result becomes a 12-token placeholder</td></tr>
-<tr><td>Summary</td><td>Older turns are summarized before the next answer</td><td>At <code>min(75% of the window, window − reserve)</code>. The newest 20,000 tokens of turns stay verbatim</td></tr>
-<tr><td>Summary call</td><td>Reads the older turns, with each tool result cut short</td><td>At most 40,000 tokens, 500 per tool result, 2,048 system tokens. Returns 4,000 tokens</td></tr>
-<tr><td>Record and flush</td><td>A fixed record follows each summary. A memory flush precedes it</td><td>1,500 tokens. 256 output tokens</td></tr>
-<tr><td>Reserve</td><td>Context an answer must leave free</td><td><code>min(20,000, 25% of the window)</code></td></tr>
-<tr><td>Fetching back</td><td>A cleared result that a turn needs is fetched again, with the same extra call as on the Compache side. A summarized source is not</td><td></td></tr>
-<tr><td>Keep-warm</td><td>None. OpenClaw's defaults send no request to keep a cache entry alive</td><td></td></tr>
-</table></div>
-<p>For OpenAI models OpenClaw's own default calls OpenAI's compaction endpoint at the same 75% mark. What that keeps and costs is not published in a form this page can price, so the client-side summary stands in for it. Whether a summary still carries a fact is not evaluated: a summarized source counts as no longer in view.</p>
-
+<p>With F the share of returning users back within a delay at that position, d the answer time and the interval one lifetime less the lead, both counted from when the request was sent:</p>
+<pre>back before ping n       = F(n × interval - d)
+cache alive with n pings = F(n × interval + lifetime - d)</pre>
+<p>Not modeled: keeping retrieved text that matches the question, cited sources, and what the package learns from a ping's own usage.</p>
+<h2>The comparisons</h2>
+<p>Every comparison is a set of the same rules, and any of them can be copied into <em>Your app today</em> and edited: the cache lifetime (standard, long or none), the earlier turns sent, retrieved text dropped after some turns or shrunk on arrival, old tool results cleared, older turns summarized, and pings after every answer.</p>
+<ul>
+<li>Dropped and cleared text is fetched again with one extra call only where the tool would do so. Otherwise a turn that needs it goes without: the “missing” column. A summary may still carry a fact. That is not evaluated, so summarized text counts as missing.</li>
+<li>A summary call reads the request from the cache, or a bounded digest of the older turns. OpenClaw's uses a digest of at most 40,000 tokens with 500 per tool result, writes 4,000 tokens after a 256-token flush and appends a 1,500-token record.</li>
+<li>OpenClaw follows its documented defaults at revision <code>c49b553</code>. opencode, Anthropic's context editing and compaction, and Headroom follow their documentation, read on 24 November 2026. The sources and what is assumed are listed under <a href="https://github.com/BarendPotijk/compache/blob/main/docs/comparisons.md">other tools compared</a>.</li>
+<li>OpenAI's compaction has no documented default threshold and is not modeled. OpenClaw's own default for OpenAI models calls it. The client-side summary stands in.</li>
+<li><strong>What you pay now</strong> is the number you enter, compared as it is.</li>
+</ul>
 <h2>Reading the page</h2>
 <ul>
-<li><strong>Cost per 1,000 turns</strong> is the cost of every answer, further call, ping, fetch-back, summary and flush call on the costed threads, divided by their turns.</li>
-<li><strong>Needed sources in view</strong> is, of everything turns needed, the share that was in the request before anything was fetched back.</li>
-<li><strong>Input read from cache</strong> counts the input tokens of answer calls only.</li>
-<li><strong>Tokens per turn</strong> averages the request size over the threads that reach each turn on both sides. The bars below it show how many that is.</li>
-<li><strong>Keep-warm pings</strong> shows the planner's amounts after one turn, per 1,000 waits. In the average view it averages the same plan over the threads that can be pinged at that turn.</li>
-<li><strong>Input tokens of answers</strong> splits answer input into what was read from the cache and why the rest was not: new this turn, the first turn of a thread, an expired entry, a request that changed before that point, or a live entry that was not read.</li>
+<li><strong>The saving</strong> is against the side you pick. The range draws the sampled threads again and takes the 5th and 95th percentile. It does not cover what the model leaves out.</li>
+<li><strong>Drawing.</strong> Each input chart shows the distribution in force. Dragging its bars replaces the curve by the drawn weights. Inside a bin, values spread evenly on a log scale. Typing a median or a 95th percentile takes the curve again.</li>
+<li><strong>The policy</strong> shows each kind's window over where later turns need that kind. Drag an edge to price a policy of your own.</li>
+<li><strong>One conversation</strong> shows a sampled thread. The costs of a turn's choices are per 1,000 such turns, over the turn and the next two.</li>
 </ul>
-
 <h2>Limits</h2>
 <ul>
 <li>Token counts and list prices are assumptions. A cache entry is taken to live exactly its configured lifetime. Providers may keep it longer or evict it sooner.</li>
