@@ -92,12 +92,12 @@ Labels say, for a sample of messages, which earlier parts were needed. A [coding
 ## Coding agents
 
 ```sh
-compache wrap claude          # or codex, opencode, gemini, aider, goose, or any command after --
+compache wrap claude          # or codex, opencode, gemini, copilot, goose, or any command after --
 ```
 
 An agent sends every tool result again with every call. compache keeps the newest ones in view, lets older ones go when that is cheap, keeps the cache through long tool runs and breaks, and fetches a result back when the model asks for it. It starts from what 174 public runs taught and goes on from your own sessions. There is nothing to set. [Agents](docs/agents.md)
 
-![Cost per 1,000 model calls on Claude Sonnet 5.5: one task at a stretch 5% less, a few steps with 4-minute breaks 30% less, three tasks with 4-minute breaks 27% less](docs/assets/agents-cost.svg)
+![Cost per 1,000 model calls on Claude Sonnet 5.5: one task at a stretch 5% less, a few steps with 4-minute breaks 29% less, three tasks with 4-minute breaks 23% less](docs/assets/agents-cost.svg)
 
 `compache stats` says what it saved. In your own agent it is one argument: `compache.wrap(client, learn="compache-record")`.
 
@@ -105,7 +105,7 @@ An agent sends every tool result again with every call. compache keeps the newes
 
 | Your stack | What you add |
 |---|---|
-| Claude Code, Codex, OpenCode, Gemini CLI, Aider, Goose and other agents on the command line | `compache wrap <agent>` |
+| Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code, Copilot CLI, Aider, Goose, Crush, Kilo, pi and other agents on the command line | `compache wrap <agent>` |
 | OpenAI, Anthropic and Google GenAI SDKs, sync, async and streaming | `compache.wrap(client, "policy.json")` |
 | LangChain and LangGraph, any chat model | `compache.langchain.middleware(...)` |
 | OpenAI Agents SDK, Pydantic AI, LlamaIndex, Agno, AutoGen, Strands, Haystack, Langfuse's OpenAI drop-in | The wrapped client, [one line each](docs/integrations.md#python-frameworks) |
@@ -141,7 +141,7 @@ A fixed rule such as "keep the last 20 messages" or "summarize at 75% of the win
 | **GPT-6 Luna**, against the 30-minute cache | Live calls, billed, one integration | **2%&nbsp;to&nbsp;5%&nbsp;less** |
 | **Claude Sonnet 5.5**, against the 5-minute cache | DocChat, modeled cost | **43%&nbsp;to&nbsp;89%&nbsp;less** |
 | **Claude Sonnet 5.5**, against the 1-hour cache | DocChat, modeled cost | **30%&nbsp;to&nbsp;79%&nbsp;less** |
-| **Coding agents on Claude Sonnet 5.5**, against the 5-minute cache | 174 public runs, modeled cost | **5%&nbsp;to&nbsp;45%&nbsp;less** |
+| **Coding agents on Claude Sonnet 5.5**, against the 5-minute cache | 174 public runs, modeled cost | **5%&nbsp;to&nbsp;43%&nbsp;less** |
 
 **It pays off most** in long chats with a lot of retrieved or tool text, where users pause longer than the cache lasts. **It pays off least** in short chats and where the cache outlasts the breaks: on GPT-6 Luna these users were always back in time, so there was little to save. If your app already uses Claude's 1-hour cache, the 1-hour row is yours: its writes cost more and its entries last longer, so there is less left to save, most of all in short chats. [The long cache](docs/comparisons.md#the-long-cache)
 

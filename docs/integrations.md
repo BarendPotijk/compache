@@ -6,7 +6,7 @@ compache goes in at two places: where your model calls leave, and where your tra
 
 | Your stack | compache goes in with |
 |---|---|
-| Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code, Aider, Goose, or any other agent on the command line | `compache wrap claude`, see [Agents](agents.md) |
+| Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code, Copilot CLI, Aider, Goose, Crush, Kilo, pi, or any other agent on the command line | `compache wrap claude`, see [Agents](agents.md) |
 | OpenAI SDK (Chat Completions, Responses), Anthropic SDK, Google GenAI SDK, sync or async | `client = compache.wrap(client, "policy.json")` |
 | A Python framework on one of these SDKs: OpenAI Agents SDK, Pydantic AI, LlamaIndex, Agno, AutoGen, Strands, Haystack, Instructor, Langfuse's OpenAI drop-in | The wrapped client, or an HTTP client: [one line each](#python-frameworks) |
 | LangChain and LangGraph, any chat model | `create_agent(..., middleware=[compache.langchain.middleware(live)])` |
@@ -26,7 +26,7 @@ All of them run the same code on the JSON that goes over the wire, so a request 
 | Record | Sizes, times and usage of every turn go to a folder, without any text. See [the guide](guide.md#without-past-traces) |
 | Notes | For a sampled share of turns the model is asked, once its reply is in, which earlier parts the reply needed. That request is compache's own, and the application never sees it |
 | A restart | A process that meets a conversation in the middle, as after a deploy, in a function or on the command line, takes the cache to have expired and trims at once. No state has to be kept. Behind a load balancer, keep a conversation on one worker, or each that takes it up trims it again |
-| Anything else | A request shape compache does not know passes through untouched. A request the provider refuses after it was changed is sent again as the application wrote it. Where it refuses one-hour entries, the request goes out under its default and everything after is planned on that |
+| Anything else | A request shape compache does not know passes through untouched. A request the provider refuses after it was changed, and a reply that cannot go on after something was fetched back, is asked again as the application wrote it. What is wrong then is passed on as the provider says it. Where it refuses one-hour entries, the request goes out under its default and everything after is planned on that |
 
 ### SDK clients
 
@@ -121,7 +121,8 @@ It serves `/v1/chat/completions`, `/v1/responses`, `/v1/messages` and Gemini's `
 
 | Harness | Setting |
 |---|---|
-| Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code, Aider, Goose | `compache wrap <agent>` starts the proxy and sets this for one run. `compache wrap --print <agent>` shows it, to set it yourself |
+| The agents that `wrap` knows, in an editor or always on | `compache wrap --print <agent>` shows what to set. Claude Code: `"env": {"ANTHROPIC_BASE_URL": "http://127.0.0.1:8787", "ENABLE_TOOL_SEARCH": "true"}` in `~/.claude/settings.json`, which its editor extensions read too |
+| Cline | `cline auth -p openai -b http://127.0.0.1:8787/v1 -m <model>`, or the base URL of an OpenAI Compatible or Anthropic provider in its settings |
 | CrewAI | `LLM(model="openai/...", base_url="http://127.0.0.1:8787/v1")`, or `OPENAI_BASE_URL` |
 | OpenClaw | In `~/.openclaw/openclaw.json`, a provider under `models.providers` with `baseUrl: "http://127.0.0.1:8787/v1"` and `api: "openai-completions"`, or `baseUrl: "http://127.0.0.1:8787"` and `api: "anthropic-messages"`. Add `compat: { sendSessionAffinityHeaders: true }` to its models so that sessions are named |
 | Hermes | In `~/.hermes/config.yaml`, an entry under `providers` with `api: http://127.0.0.1:8787/v1` and `session_affinity_header: x-compache-thread`, selected by `model.provider: custom:<name>` |
@@ -158,4 +159,4 @@ In order: `compache.thread(...)` around the call, the header `x-compache-thread`
 | Claude Code 2.1, Codex 0.172, OpenCode 1.19 | Started with `compache wrap`, on Claude Haiku 5.5 and GPT-6 Luna: a small repository repaired by each. [Sessions of real issues](../benchmarks/agents/README.md) with Claude Code and Codex |
 | OpenClaw 2026.11.7, Aider 0.86, CrewAI 1.15 | The released harness through the proxy with a local model, with the settings above. OpenClaw names its sessions itself |
 | LangChain 1.5 | An agent on a scripted chat model with the middleware, on every test run: results trimmed, one fetched back, sync and async |
-| Gemini CLI, Qwen Code, Goose, Cline | Taken from each one's documentation. Not run here |
+| Qwen Code 0.28, Goose 1.60, Crush 0.102, Copilot CLI 1.0, Kilo 7.8, pi 0.73, Cline 3.0 | The released agent in a loop of file reads, under `compache wrap` and Cline through the proxy, against the stand-in. Gemini CLI 0.71: one answer |

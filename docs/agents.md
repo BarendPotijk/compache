@@ -11,16 +11,16 @@ An agent makes dozens of model calls per message, and every call sends every too
 
 | | |
 |---|---|
-| `compache wrap claude` | Claude Code. Also `codex`, `opencode`, `gemini`, `qwen`, `aider`, `goose` |
+| `compache wrap claude` | Claude Code. Also `codex`, `opencode`, `gemini`, `qwen`, `aider`, `goose`, `crush`, `copilot`, `kilo`, `pi` |
 | `compache wrap codex -- exec "fix the failing test"` | With arguments of its own |
 | `compache wrap -- my-agent` | Any other command. It is told by the variables that SDKs read |
 | `compache wrap --watch claude` | Record only, and change nothing |
-| `compache wrap --print claude` | Show the proxy to start and what to set, to do it yourself |
+| `compache wrap --print claude` | Show the proxy to start and what to set, for an agent in an editor or one that is always on |
 | `compache learn claude --from claude` | Start from the sessions Claude Code keeps on this machine. Also `codex` |
 | `compache stats` | What was saved, per agent and model |
 | `compache doctor` | Whether it works here, and what it can be used with |
 
-`wrap` starts a proxy on a free local port, starts the agent with its base URL set to it, and says at the end what the session cost and what it would have cost. No file of the agent's is changed. A base URL that is set already, such as a gateway's, is where requests go on to. Credentials pass through. On a subscription nothing is billed by the token: what is saved there is room in the window and in the plan's limits.
+`wrap` starts a proxy on a free local port, starts the agent with its base URL set to it, and says at the end what the session cost and what it would have cost. No file of the agent's is changed. Where the agent's own settings name a base URL, such as a gateway's, requests go on to that. Credentials pass through, and go nowhere else. On a subscription nothing is billed by the token: what is saved there is room in the window and in the plan's limits.
 
 ## What it does
 
@@ -81,16 +81,16 @@ Modeled on the public runs, fitted on half of them and priced on the other half,
 
 | | Claude Sonnet 5.5 | Claude Haiku 5.5 | GPT-6 Luna |
 |:--|:-:|:-:|:-:|
-| One task at a stretch, 64 calls | 5% | 15% | 9% |
-| Prompts of eight calls, back after 30 seconds | 8% | 16% | 10% |
-| Prompts of eight calls, back after 4 minutes | 30% | 31% | 11% |
-| Prompts of eight calls, back after 15 minutes | 45% | 42% | 19% |
-| Three tasks in a session, back after 4 minutes | 27% | 80% | 31% |
-| Three tasks in a session, back after 30 minutes | 32% | 81% | 33% |
+| One task at a stretch, 64 calls | 5% | 17% | 8% |
+| Prompts of eight calls, back after 30 seconds | 7% | 20% | 9% |
+| Prompts of eight calls, back after 4 minutes | 29% | 32% | 10% |
+| Prompts of eight calls, back after 15 minutes | 43% | 44% | 18% |
+| Three tasks in a session, back after 4 minutes | 23% | 80% | 28% |
+| Three tasks in a session, back after 30 minutes | 30% | 81% | 30% |
 
-- **Breaks are where most of it is.** Part of that is caching alone: pings and the right lifetimes save 26% of the 30% in the third row on Sonnet. Trimming is the other part, and grows with the length of a session.
+- **Breaks are where most of it is.** Part of that is caching alone: pings and the right lifetimes save 25% of the 29% in the third row on Sonnet. Trimming is the other part, and grows with the length of a session.
 - **Long sessions on Haiku** pass 100,000 tokens, where its list price is five times higher. A cut keeps them below.
 - **Short sessions save nothing.** A task that is done in ten calls has nothing to trim, and compache's tool costs it 1%.
-- **About 1 call in 80** fetches something back.
+- **About 1 call in 85** fetches something back.
 
 [Agent benchmarks](../benchmarks/agents/README.md): these numbers, and real sessions with Claude Code and Codex next to Headroom and Kompressor.
