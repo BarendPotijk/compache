@@ -397,9 +397,23 @@ function renderBreakdown(r) {
   $('warnings').hidden = full;
   $('warnings').textContent = full ? '' : `Some requests do not fit the model's context window: ${[!a.complete && `Compache finished ${a.completedRuns} of ${den} turns`, !b.complete && `${r.baseline.name} ${b.completedRuns}`].filter(Boolean).join(', ')}.`;
 }
+// The address bar always holds the scenario on screen, so copying it is sharing it. What the page opens with needs no fragment.
+const OPENS_WITH = shareHash(configure(applyPreset({...STARTS[0].scenario}, 'sonnet')), 'sonnet', '', STARTS[0].id);
+function showAddress() {
+  if (loadError) return;
+  // Named from whichever is nearest: the defaults, or one of the starting points.
+  const url = new URL(location.href), config = configure(readForm()), hash = ['', ...STARTS.map(s => s.id)].map(id => shareHash(config, $('modelPreset').value, sourceLabel(), id)).reduce((a, b) => b.length < a.length ? b : a);
+  url.hash = hash === OPENS_WITH ? '' : hash; history.replaceState(null, '', url);
+}
+// The result in one line of text, to send along with the link.
+function resultLine(r) {
+  const c = r.config, ours = dollars(1000 * r.compache.totals.cost / r.workload.totalRuns), retrieves = c.tokenDrawn || c.tokenMedian > 0;
+  const workload = [presets[$('modelPreset').value]?.name || 'Custom prices', retrieves ? `${c.tokenDrawn ? 'drawn' : compact(c.tokenMedian)} retrieved tokens per turn` : 'no retrieval', `users back after ${c.gapDrawn ? 'drawn times' : minutes(c.gapMedianMinutes)}`].join(', ');
+  return r.savings ? `Modeled chat cost per 1,000 turns: Compache ${ours}, ${r.selected.name} ${dollars(r.selected.per1000)}. ${num(Math.abs(r.savings.percent))}% ${r.savings.absolute < 0 ? 'more' : 'less'}. (${workload})` : `Chat cost calculator (${workload})`;
+}
 const sourceLabel = () => source ? `${source}${edited && !source.endsWith('(edited)') ? ' (edited)' : ''}` : '';
 function render(r) {
-  current = r; busy('false'); $('export').disabled = false; $('share').disabled = false;
+  current = r; busy('false'); $('export').disabled = false; $('share').disabled = false; showAddress();
   const c = r.config, preset = presets[$('modelPreset').value];
   $('status').textContent = `Seed ${c.seed} · updated`;
   $('modelWindow').textContent = `${compact(c.model.context)} context · ${compact(c.model.maxInput)} max input`; $('cacheDefault').textContent = `cache lifetime ${num(c.ttlMinutes)} min`;
@@ -510,8 +524,10 @@ document.addEventListener('dragover', e => { if (e.dataTransfer?.types.includes(
 document.addEventListener('drop', e => { const files = [...e.dataTransfer?.files ?? []]; if (files.length) { e.preventDefault(); importFiles(files); } });
 $('share').addEventListener('click', async () => {
   if (!current) return;
-  const url = new URL(location.href); url.hash = shareHash(current.config, $('modelPreset').value, sourceLabel()); history.replaceState(null, '', url);
-  try { await navigator.clipboard.writeText(url.href); note('Scenario link copied.'); } catch { note('Scenario saved in the address bar. Copy the URL to share.'); }
+  const text = resultLine(current), url = location.href;
+  // A phone or tablet has a share sheet. Elsewhere the result and its link go to the clipboard.
+  if (navigator.share && matchMedia('(pointer: coarse)').matches) { try { await navigator.share({title: document.title, text, url}); } catch { /* closed without sharing */ } return; }
+  try { await navigator.clipboard.writeText(`${text}\n${url}`); note('Result and link copied.'); } catch { note('Copy the address bar to share this scenario.'); }
 });
 $('export').addEventListener('click', () => {
   if (!current) return;

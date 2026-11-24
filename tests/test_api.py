@@ -600,8 +600,12 @@ class ProfileTests(unittest.TestCase):
         query = parse_qs(urlsplit(result["link"]).fragment)
         self.assertEqual(query["v"], ["7"])
         self.assertEqual(query["model"], ["sonnet"])
-        self.assertEqual(json.loads(query["scenario"][0]), scenario)
         self.assertEqual(query["source"], ["4 threads, 24 turns"])
+        # Every measured setting by name, and nothing else.
+        named = set(query) - {"v", "model", "source"}
+        self.assertEqual(named, set(scenario))
+        for key, value in scenario.items():
+            self.assertEqual(query[key], [str(value)], key)
 
     def test_profile_without_labels_or_price_sheet(self):
         result = compache.profile(threads(count=2), model=SPEC)
@@ -611,6 +615,11 @@ class ProfileTests(unittest.TestCase):
         self.assertEqual(scenario["model"]["cachedRate"], SPEC.read_multiplier)
         self.assertEqual(scenario["ttlMinutes"], 5)
         self.assertEqual(len(result["notes"]), 2)
+        query = parse_qs(urlsplit(result["link"]).fragment)
+        self.assertEqual(
+            query["model.cachedRate"], [str(scenario["model"]["cachedRate"])]
+        )
+        self.assertNotIn("scenario", query)
 
     def test_profile_reads_files(self):
         sample = threads(count=2)

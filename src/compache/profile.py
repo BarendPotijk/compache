@@ -567,6 +567,22 @@ def _decision(policy) -> dict:
     }
 
 
+def _named(scenario) -> dict:
+    """A scenario as the calculator's links spell it: each setting by name, what belongs together dotted."""
+    named = {}
+    for key, value in scenario.items():
+        inside = value.items() if isinstance(value, dict) else [(None, value)]
+        for name, each in inside:
+            named[key if name is None else f"{key}.{name}"] = (
+                "all"
+                if each is None
+                else str(each).lower()
+                if isinstance(each, bool)
+                else each
+            )
+    return named
+
+
 def profile(
     threads, labels=None, *, model=None, system_prompt=None, tools=None, policy=None
 ) -> dict:
@@ -610,12 +626,7 @@ def profile(
             )
         scenario["policy"] = _decision(loaded)
     source = f"{measured['threads']:,} threads, {measured['turns']:,} turns"
-    query = {
-        "v": _LINK_VERSION,
-        "model": preset,
-        "scenario": json.dumps(scenario, separators=(",", ":")),
-        "source": source,
-    }
+    query = {"v": _LINK_VERSION, "model": preset, **_named(scenario), "source": source}
     return {
         "schema_version": "compache-profile-v1",
         "source": {

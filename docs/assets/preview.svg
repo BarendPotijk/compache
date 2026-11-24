@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="t">
+<title id="t">compache cost calculator: Claude Sonnet 5.5, 8-turn threads, OpenClaw $208, compache $108 per 1,000 turns</title>
+<style>text{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;fill:#0b0b0b}.two{fill:#52514e}.c{fill:#2a78d6}.n{fill:#898781}</style>
+<rect width="1200" height="630" fill="#f9f9f7"/>
+<rect class="c" x="80" y="66" width="30" height="30" rx="8"/>
+<text x="126" y="94" font-size="36" font-weight="650">compache</text>
+<text x="80" y="186" font-size="58" font-weight="650">What would your long chats cost?</text>
+<text x="80" y="238" font-size="28" font-weight="400" class="two">Claude Sonnet 5.5 · 8-turn threads · 25k retrieved tokens per turn</text>
+<text x="80" y="296" font-size="24" font-weight="400" class="two">OpenClaw’s defaults</text>
+<rect class="n" x="80" y="306" width="820.0" height="74" rx="8"/>
+<text x="922" y="358" font-size="44" font-weight="650">$208</text>
+<text x="80" y="414" font-size="24" font-weight="400" class="two">compache</text>
+<rect class="c" x="80" y="424" width="426.1" height="74" rx="8"/>
+<text x="528" y="476" font-size="44" font-weight="650">$108</text>
+<text x="80" y="568" font-size="32" font-weight="650">48% less per 1,000 turns, modeled.</text>
+<text x="642" y="568" font-size="32" font-weight="400" class="two">Put in your own numbers.</text>
+</svg>

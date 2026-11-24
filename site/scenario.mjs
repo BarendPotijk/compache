@@ -2,6 +2,7 @@
 import {DEFAULTS, configure} from './engine.mjs';
 import {RULES, OPENCLAW_RULES} from './baselines.mjs';
 import {applyPreset, presetKey} from './models.mjs';
+import {STARTS} from './starts.mjs';
 
 export const LINK_VERSION = 7;
 export const EXPORT_SCHEMA = `compache-cost-explorer-v${LINK_VERSION}`;
@@ -38,15 +39,47 @@ export function migrateScenario(version, scenario) {
   return known;
 }
 
-// The scenario in a link's fragment, or null when the fragment carries none.
+// -- links -------------------------------------------------------------------
+// A link names each setting it changes (`v=7&model=haiku&start=documents&gapMedianMinutes=30`), from the defaults or from
+// a starting point. What belongs together is dotted (`app.keepTurns=6`, `policy.questions=4`), a drawn distribution lists
+// its weights (`gapDrawn=0,2,1`), and `all` is a window without an end.
+const GROUPS = {model: DEFAULTS.model, app: RULES, policy: {questions: null, answers: null, retrieved: null, maxPings: 0, keepUnder: 0}};
+const spell = value => value === null ? 'all' : String(value);
+// One setting as a link spells it. A name that is no setting keeps its text, and `configure` refuses it by name.
+function read(text, like, key) {
+  if (like === undefined || typeof like === 'string') return text;
+  if (typeof like === 'boolean') {
+    if (text !== 'true' && text !== 'false') throw new Error(`${key} must be true or false`);
+    return text === 'true';
+  }
+  if (like === null && text === 'all') return null;
+  const number = part => {
+    if (part.trim() === '' || !Number.isFinite(Number(part))) throw new Error(`${key} must be a number`);
+    return Number(part);
+  };
+  return key.endsWith('Drawn') ? text.split(',').map(number) : number(text);
+}
+
+// The scenario in a link's fragment, or null when the fragment carries none. Earlier links carry it as JSON.
 export function parseLink(hash) {
   const text = hash.replace(/^#/, '');
   if (text.length > 20000) throw new Error('the link is too long');
   const query = new URLSearchParams(text);
-  if (!query.has('scenario')) return null;
-  let scenario;
-  try { scenario = JSON.parse(query.get('scenario')); } catch { throw new Error('the scenario in the link is not valid JSON'); }
-  return {version: query.get('v'), model: query.get('model') ?? 'custom', scenario, source: query.get('source') ?? ''};
+  if (!query.has('scenario') && !query.has('model')) return null;
+  const head = {version: query.get('v'), model: query.get('model') ?? 'custom', source: query.get('source') ?? ''};
+  if (query.has('scenario')) {
+    try { return {...head, scenario: JSON.parse(query.get('scenario'))}; } catch { throw new Error('the scenario in the link is not valid JSON'); }
+  }
+  const start = query.get('start') ?? '', from = STARTS.find(s => s.id === start);
+  if (start && !from) throw new Error(`${start} is not a starting point`);
+  const scenario = {...from?.scenario};
+  for (const [key, value] of query) {
+    if (['v', 'model', 'start', 'source'].includes(key)) continue;
+    const [group, name] = key.split('.');
+    if (name !== undefined && Object.hasOwn(GROUPS, group)) (scenario[group] ??= {})[name] = read(value, GROUPS[group][name], key);
+    else scenario[key] = read(value, DEFAULTS[key], key);
+  }
+  return {...head, scenario};
 }
 
 // The scenario in a profile made from traces or in a file this page exported.
@@ -75,5 +108,16 @@ export function resolveScenario({version, model, scenario, source = ''}) {
   return {preset, config: configure(applyPreset(settings, preset)), source: String(source).slice(0, 120), legacy};
 }
 
-export const shareHash = (config, preset, source = '') =>
-  new URLSearchParams({v: String(LINK_VERSION), model: preset, scenario: JSON.stringify(config), ...(source ? {source} : {})}).toString();
+// The fragment of a link to this scenario. It leaves out what is at the default of its version, model and starting
+// point, so one that changes needs a new LINK_VERSION, with the old one filled in by migrateScenario.
+export function shareHash(config, preset, source = '', start = '') {
+  const from = STARTS.find(s => s.id === start), base = configure(applyPreset({...from?.scenario}, preset));
+  const query = new URLSearchParams({v: String(LINK_VERSION), model: preset, ...(from ? {start} : {})});
+  for (const key of Object.keys(DEFAULTS)) if (!Object.hasOwn(GROUPS, key) && config[key] !== base[key]) query.set(key, spell(config[key]));
+  // Prices travel whole, and only when they are no preset's. Rules and a policy name what is not at its default.
+  if (preset === 'custom') for (const [key, value] of Object.entries(config.model)) query.set(`model.${key}`, spell(value));
+  for (const group of ['app', 'policy']) for (const [key, value] of Object.entries(config[group] ?? {}))
+    if (value !== GROUPS[group][key] || (group === 'policy' && key === 'maxPings')) query.set(`${group}.${key}`, spell(value));
+  if (source) query.set('source', source);
+  return query.toString().replaceAll('%2C', ',');
+}

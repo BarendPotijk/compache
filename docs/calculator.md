@@ -18,6 +18,14 @@ compache profile threads.jsonl --labels labels.jsonl --model claude-sonnet-5-5 -
 
 prints a link with the workload and the policy filled in. `compache fit` also writes the measured workload into `policy.json`, so that file alone is enough.
 
+## Share it
+
+The address bar always holds the scenario on screen, and **Share** copies the result with its link. A link names only what it changes, so it can be written by hand:
+
+```text
+https://barendpotijk.github.io/compache/#v=7&model=haiku&start=documents&gapMedianMinutes=30&app.keepTurns=10&compare=app
+```
+
 ## What it shows
 
 | Part | Shows |

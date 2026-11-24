@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
 import {DEFAULTS, configure, simulate} from './engine.mjs';
 import {presets, applyPreset} from './models.mjs';
+import {STARTS} from './starts.mjs';
 import {LINK_VERSION, EXPORT_SCHEMA, migrateScenario, parseLink, parseFile, resolveScenario, shareHash} from './scenario.mjs';
 
 // The full settings a version 5 link carried: the calculator's defaults of that version.
@@ -57,6 +59,55 @@ test('a share link carries every setting and the source label back unchanged', (
   assert.equal(parseLink(''), null); assert.equal(parseLink('#section'), null);
   assert.equal(resolveScenario(parseLink(`#${shareHash(config, 'sonnet')}`)).source, '');
 });
+// The defaults a version 7 link counts on for every setting it leaves out. When one changes, raise LINK_VERSION and
+// let migrateScenario fill in the old one, or the links people have shared will say something else.
+const V7 = {
+  seed: 42, threads: 100, maxTurns: 160, lengthDistribution: 'lognormal', plannedTurns: 8, plannedTurnsP95: 20, continuationProbability: 0.99,
+  continueFirst: 0.6, continueLong: 0.95, continueHalfTurn: 3, tokenMedian: 25000, tokenP95: 45000, retrievalShare: 1, inputTokens: 200, outputTokens: 500,
+  reasoningTokens: 0, systemTokens: 2048, gapMedianMinutes: 4, gapP95Minutes: 60, gapFirstFactor: 1, gapHalfTurn: 3, breakShare: 0, breakMedianMinutes: 1440,
+  answerSeconds: 0, callsPerTurn: 1, sharedPrefixWarm: 0, inputDependencyProbability: 0.15, inputDependencyTurnsBack: 1, inputDependencyTurnsBackP95: 20,
+  retrievalDependencyProbability: 0.15, retrievalDependencyTurnsBack: 3, retrievalDependencyTurnsBackP95: 30, outputDependencyProbability: 0.2,
+  outputDependencyTurnsBack: 1, outputDependencyTurnsBackP95: 35, tokenDrawn: null, gapDrawn: null, lengthDrawn: null, inputNeedDrawn: null,
+  retrievalNeedDrawn: null, outputNeedDrawn: null, ttlMinutes: 30, cacheMinTokens: 1024, cacheBlockTokens: 1, cacheHitShare: 1, longTtlMinutes: 720,
+  longWriteMultiplier: 2.5, anthropic: false, retentionRequirement: 0.8, keepWarm: true, maxPings: 3, pingLeadMinutes: 0.75, pingOutputTokens: 16,
+  recoveryOutputTokens: 32, safetyReserve: 32000, archivedTokens: 28, policy: null, compare: 'everything', app: {}, measuredCost: 0,
+  model: {context: 1050000, maxInput: 922000, inputRate: 0.1, cachedRate: 0.01, outputRate: 0.5, writeMultiplier: 1.25, longThreshold: 272000, longInputMultiplier: 2, longOutputMultiplier: 1.5}};
+const V7_STARTS = '80729d006b86cf64';
+test('a share link names only what it changes', () => {
+  assert.equal(LINK_VERSION, 7); assert.deepEqual(JSON.parse(JSON.stringify(DEFAULTS)), V7);
+  assert.equal(shareHash(configure(applyPreset({}, 'sonnet')), 'sonnet'), 'v=7&model=sonnet');
+  const config = configure(applyPreset({gapMedianMinutes: 30, gapP95Minutes: 240, keepWarm: false}, 'haiku'));
+  assert.equal(shareHash(config, 'haiku'), 'v=7&model=haiku&gapMedianMinutes=30&gapP95Minutes=240&keepWarm=false');
+  assert.deepEqual(resolveScenario(parseLink('#v=7&model=claude-haiku-5-5&gapMedianMinutes=30&gapP95Minutes=240&keepWarm=false')), {preset: 'haiku', config, source: '', legacy: false});
+  // From a starting point, only what differs from it. Its numbers are part of what a link counts on, as the defaults are.
+  assert.equal(createHash('sha256').update(JSON.stringify(STARTS.map(s => [s.id, s.scenario]))).digest('hex').slice(0, 16), V7_STARTS);
+  const chat = configure(applyPreset({...STARTS[0].scenario, gapMedianMinutes: 30, gapP95Minutes: 240}, 'sonnet'));
+  assert.equal(shareHash(chat, 'sonnet', '', 'documents'), 'v=7&model=sonnet&start=documents&gapMedianMinutes=30&gapP95Minutes=240');
+  assert.deepEqual(resolveScenario(parseLink('#v=7&model=sonnet&start=documents&gapMedianMinutes=30&gapP95Minutes=240')).config, chat);
+  assert.throws(() => parseLink('#v=7&model=sonnet&start=somewhere'), /somewhere is not a starting point/);
+  // Your own rules, a policy and a drawn distribution, each by name.
+  const own = configure(applyPreset({app: {keepTurns: 6, cache: 'long', clear: true}, compare: 'app', policy: {questions: 4, retrieved: 1}, gapDrawn: [0, 0, 2, 1, ...new Array(10).fill(0)]}, 'sonnet'));
+  assert.equal(shareHash(own, 'sonnet'), 'v=7&model=sonnet&gapDrawn=0,0,2,1,0,0,0,0,0,0,0,0,0,0&compare=app&app.cache=long&app.keepTurns=6&app.clear=true&policy.questions=4&policy.retrieved=1&policy.maxPings=0');
+  assert.deepEqual(resolveScenario(parseLink(`#${shareHash(own, 'sonnet')}`)).config, own);
+  // A policy that keeps everything is still a policy, and a window without an end can be written out.
+  const all = configure(applyPreset({policy: {}}, 'sonnet'));
+  assert.equal(shareHash(all, 'sonnet'), 'v=7&model=sonnet&policy.maxPings=0');
+  assert.deepEqual(resolveScenario(parseLink('#v=7&model=sonnet&policy.maxPings=0&policy.answers=all')).config, all);
+  // Custom prices travel whole.
+  const prices = configure({ttlMinutes: 60, model: {context: 400000, maxInput: 380000, inputRate: 3, cachedRate: 0.3, outputRate: 15, writeMultiplier: 2, longThreshold: 0, longInputMultiplier: 1, longOutputMultiplier: 1}});
+  assert.deepEqual(resolveScenario(parseLink(`#${shareHash(prices, 'custom')}`)).config, prices);
+  // What cannot be read is named.
+  assert.throws(() => parseLink('#v=7&model=sonnet&tokenMedian=lots'), /tokenMedian must be a number/);
+  assert.throws(() => parseLink('#v=7&model=sonnet&tokenMedian='), /tokenMedian must be a number/);
+  assert.throws(() => parseLink('#v=7&model=sonnet&gapDrawn=1,,2'), /gapDrawn must be a number/);
+  assert.throws(() => parseLink('#v=7&model=sonnet&keepWarm=maybe'), /keepWarm must be true or false/);
+  assert.throws(() => parseLink('#v=7&model=custom&model.inputRate=cheap'), /model.inputRate must be a number/);
+  assert.throws(() => resolveScenario(parseLink('#v=7&model=sonnet&tokenMedain=1')), /tokenMedain is not a setting/);
+  assert.throws(() => resolveScenario(parseLink('#v=7&model=sonnet&app.keepTurn=1')), /app.keepTurn is not a rule/);
+  assert.throws(() => resolveScenario(parseLink('#v=7&model=sonnet&policy.question=1')), /policy.question is not part of a policy/);
+  assert.throws(() => resolveScenario(parseLink('#model=sonnet&tokenMedian=4000&tokenP95=9000')), /version is missing/);
+  assert.throws(() => resolveScenario(parseLink('#v=8&model=sonnet&somethingNew=1')), /newer version/);
+});
 test('a profile made from traces fills in the workload and keeps the preset prices', () => {
   const scenario = {inputTokens: 30, outputTokens: 132, tokenMedian: 3615, tokenP95: 4207, systemTokens: 14, lengthDistribution: 'lognormal', plannedTurns: 27, plannedTurnsP95: 87,
     continuationProbability: 1, gapMedianMinutes: 4.18, gapP95Minutes: 31.3, inputDependencyProbability: 0.166, inputDependencyTurnsBack: 1, inputDependencyTurnsBackP95: 22,
@@ -69,8 +120,9 @@ test('a profile made from traces fills in the workload and keeps the preset pric
   assert.deepEqual(config.model, presets.sonnet.model); assert.equal(config.ttlMinutes, 5); assert.equal(config.anthropic, true);
   // The package's model ID names the same preset as the calculator's key.
   assert.deepEqual(resolveScenario(parseFile({...profile, calculator: {...profile.calculator, model: 'claude-sonnet-5-5'}})), {preset: 'sonnet', config, source, legacy});
-  // The same profile through a link, as `compache profile` prints it.
-  assert.deepEqual(resolveScenario(parseLink(link(LINK_VERSION, 'sonnet', scenario, '30 threads, 1,227 turns'))).config, config);
+  // The same profile through a link, as `compache profile` prints it, and as it printed it before.
+  const named = new URLSearchParams({v: String(LINK_VERSION), model: 'sonnet', ...scenario, source: '30 threads, 1,227 turns'});
+  for (const made of [`#${named}`, link(LINK_VERSION, 'sonnet', scenario, '30 threads, 1,227 turns')]) assert.deepEqual(resolveScenario(parseLink(made)).config, config);
   // It runs: the workload and both arms complete.
   const r = simulate({...config, threads: 6});
   assert.ok(r.compache.complete && r.baseline.arm.complete && r.savings);
