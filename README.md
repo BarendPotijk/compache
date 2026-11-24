@@ -6,7 +6,7 @@
 
 compache sits between your chatbot and the model API. It learns from your own conversations which parts of the history still matter and when your users come back, then sends less and caches better. The rest of your application stays as it is.
 
-![Billed per 1,000 user messages on Claude Haiku 5.5: $2.68 without compache, $1.44 with. Right answers out of 208: 125 without, 135 with](docs/assets/headline.svg)
+![Billed per 1,000 user messages on Claude Haiku 5.5: $2.68 without compache, $1.45 with. Right answers out of 208: 125 without, 135 with](docs/assets/headline.svg)
 
 [Get started](#get-started) · [Works with](#works-with) · [Results](#results) · [Cost calculator](https://barendpotijk.github.io/compache/) · [Docs](docs/README.md)
 

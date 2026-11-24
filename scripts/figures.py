@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import sys
+from decimal import ROUND_HALF_UP, Decimal
 from html import escape
 from pathlib import Path
 
@@ -79,10 +80,14 @@ def headline(data):
     ways = [w for w in data["ways"] if answers["model"] in w["detail"]]
 
     def average(arm):
-        costs = [a["cost"] for w in ways for a in w["arms"] if a["name"] == arm]
-        return sum(costs) / len(costs)
+        # In decimals: a float mean lands on either side of half a cent, by Python version.
+        costs = [
+            Decimal(str(a["cost"])) for w in ways for a in w["arms"] if a["name"] == arm
+        ]
+        mean = sum(costs) / len(costs)
+        return mean, f"${mean.quantize(Decimal('0.01'), ROUND_HALF_UP)}"
 
-    before, after = average("No policy"), average("Fitted on past traces")
+    (before, was), (after, now) = average("No policy"), average("Fitted on past traces")
     saving = f"{1 - after / before:.0%}"
     right = (answers["no_policy"], answers["past_traces"])
     width, height, x0, bar, top = 880, 182, 138, 22, 92
@@ -91,7 +96,7 @@ def headline(data):
             "Bill per 1,000 user messages",
             x0,
             (before, after),
-            (f"${before:.2f}", f"${after:.2f}"),
+            (was, now),
         ),
         (
             f"Right answers, out of {answers['turns']}",
@@ -119,7 +124,7 @@ def headline(data):
             f'<line class="axis" x1="{left}" x2="{left}" y1="{top + 18}" y2="{top + 80}"/>',
         ]
         for j, (value, label) in enumerate(zip(values, labels, strict=True)):
-            yy, length = top + 22 + j * 32, value / max(values) * full
+            yy, length = top + 22 + j * 32, float(value / max(values)) * full
             body.append(
                 f'<path class="{"c" if j else "n"}" d="M{left},{yy} h{length - 4:.1f} a4,4 0 0 1 4,4 '
                 f'v{bar - 8} a4,4 0 0 1 -4,4 h-{length - 4:.1f} z"/>'
@@ -129,8 +134,8 @@ def headline(data):
         width,
         height,
         f"{saving} off the bill, with as many answers right",
-        f"Live calls to {answers['model']}. Billed per 1,000 user messages: ${before:.2f} without compache, "
-        f"${after:.2f} with. Answers graded right of {answers['turns']}: {right[0]} without, {right[1]} with.",
+        f"Live calls to {answers['model']}. Billed per 1,000 user messages: {was} without compache, "
+        f"{now} with. Answers graded right of {answers['turns']}: {right[0]} without, {right[1]} with.",
         body,
     )
 

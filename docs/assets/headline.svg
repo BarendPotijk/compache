@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="880" height="182" viewBox="0 0 880 182" role="img" aria-labelledby="t d">
 <title id="t">46% off the bill, with as many answers right</title>
-<desc id="d">Live calls to Claude Haiku 5.5. Billed per 1,000 user messages: $2.68 without compache, $1.44 with. Answers graded right of 208: 125 without, 135 with.</desc>
+<desc id="d">Live calls to Claude Haiku 5.5. Billed per 1,000 user messages: $2.68 without compache, $1.45 with. Answers graded right of 208: 125 without, 135 with.</desc>
 <style>
 text{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;font-size:12px;fill:#0b0b0b}
 .surface{fill:#fcfcfb;stroke:rgba(11,11,11,.1)}
@@ -26,7 +26,7 @@ text{fill:#f0efec}.surface{fill:#1a1a19;stroke:rgba(255,255,255,.1)}.t2{fill:#c3
 <path class="n" d="M138,114 h256.0 a4,4 0 0 1 4,4 v14 a4,4 0 0 1 -4,4 h-256.0 z"/>
 <text x="406.0" y="129.5" class="t2">$2.68</text>
 <path class="c" d="M138,146 h136.4 a4,4 0 0 1 4,4 v14 a4,4 0 0 1 -4,4 h-136.4 z"/>
-<text x="286.4" y="161.5" class="h">$1.44</text>
+<text x="286.4" y="161.5" class="h">$1.45</text>
 <text x="538.0" y="97.0" class="h">Right answers, out of 208</text>
 <line class="axis" x1="538" x2="538" y1="110" y2="172"/>
 <path class="n" d="M538,114 h236.7 a4,4 0 0 1 4,4 v14 a4,4 0 0 1 -4,4 h-236.7 z"/>
