@@ -115,6 +115,8 @@ Hermes sends the requests, so the engine sends no keep-warm pings and asks no no
 compache proxy --policy policy.json --record compache-record --sample 0.1 --port 8787
 ```
 
+As a container, it learns in a volume: `docker build -t compache . && docker run -p 8787:8787 -v compache:/data compache`. Arguments of its own replace that, such as `--policy`.
+
 It serves `/v1/chat/completions`, `/v1/responses`, `/v1/messages` and Gemini's `:generateContent` on the provider's own paths, forwards the caller's credentials, and passes everything else through. `--upstream URL` sends all of it to one gateway.
 
 | Harness | Setting |

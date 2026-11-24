@@ -63,7 +63,7 @@ A turn of an agent is a loop of many calls, so there the unit is the call. `comp
 
 | | |
 |---|---|
-| What is decided | The newest rounds of tool results stay in full. Older ones become a notice at the next call where that is cheaper at once (the cache has expired, or a long request is billed dearer), or where what goes is so many times as large as what would be written again behind it |
+| What is decided | The newest rounds of tool results stay in full. Older ones become a notice, and the reasoning of finished turns goes with them, at the next call where that is cheaper at once (the cache has expired, or a long request is billed dearer), or where what goes is so many times as large as what would be written again behind it |
 | What is fitted | How many rounds, how many times, keep-warm pings while a tool runs and while a user is away, the cache lifetime, and whether instructions and tools get a longer one. Some 250 candidates, each priced on every recorded call by the provider's cache rules |
 | What has to stay | At least 85% of the calls that rely on an earlier result find it in view. A call relies on a result where its reply repeats a line that only this tool returned. A call that does not find it is priced as fetching it back: one more call, and the result again |
 | Sizes | The provider's own count. What a request grew by belongs to the results that joined it, so text that is dense in tokens counts as dense |
