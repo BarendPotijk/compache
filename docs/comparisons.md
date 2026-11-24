@@ -4,14 +4,14 @@ Tools for this bill come in two kinds. **Cache tools** keep the whole history an
 
 ![Cost per 1,000 turns of document chats for users back after 30 seconds, 4 minutes and 30 minutes: whole history, Headroom, Kompressor, whole history with the cache kept warm, and compache](assets/compare-cost.svg)
 
-- **Against the best a cache tool can do,** compache costs 30%, 35% and 60% less. That bar is the cheapest of ten settings, five-minute or one-hour entries with up to eight pings, picked on the very chats it is priced on.
-- **Against a compressor,** 19% to 78% less than Headroom and 33% to 71% less than Kompressor. Retrieved prose compresses little: by a third at Headroom's setting for documents, by 3% in Kompressor.
-- **They combine.** Headroom's smaller passages under compache's policy would cost 13% to 24% less than compache alone.
-- **Cost only.** No answers were compared. compache keeps 92%, 85% and 76% of what these turns need in view and pays for fetching back the rest. Headroom's third is words taken out of the passages.
+- **Against the best a cache tool can do,** compache costs 30%, 35% and 70% less. That bar is the cheapest of ten settings, five-minute or one-hour entries with up to eight pings, picked on the very chats it is priced on.
+- **Against a compressor,** 19% to 84% less than Headroom and 33% to 79% less than Kompressor. Retrieved prose compresses little: by a third at Headroom's setting for documents, by 3% in Kompressor.
+- **They combine.** Headroom's smaller passages under compache's policy would cost 18% to 24% less than compache alone.
+- **Cost only.** No answers were compared. compache keeps 92%, 85% and 88% of what these turns need in view and pays for fetching back the rest. Headroom's third is words taken out of the passages.
 
 | Tool | What it does | While a user is away | Fitted to traffic | Compared how |
 |---|---|---|---|---|
-| compache | Keeps in view what later turns need, trims when the cache has expired, fetches back | Pings while they pay | What stays, and the pings | |
+| compache | Keeps in view what later turns need, trims when the cache has expired, fetches back | Pings while they pay, or one-hour entries | What stays, the pings and the entries' lifetime | |
 | caching.ai | Keeps every token, and the provider's cache warm | Pings, or one-hour entries | The entries' lifetime | Modeled: the cheapest cache setting |
 | OptScale Kompressor | Shrinks tool output for coding agents | One-hour entries after a first long pause. Its pings are for running tools | The lifetime | Run on the text, its cache rule modeled |
 | Headroom | Compresses the content of new tool output, keeps every message | Nothing | No | Run on the text |
@@ -27,7 +27,7 @@ Read on 2026-11-24 from [its site](https://caching.ai) and [documentation](https
 - **What it does.** A proxy behind a base-URL change. It adds cache marks where a request has none, sends one-token pings on Anthropic where that is switched on, and Auto-Tune picks five-minute or one-hour entries from how far apart calls come. It changes nothing a request holds.
 - **What it reports.** 67% saved on support-style traffic with pauses longer than the cache lifetime, pings included, against calling the provider directly. The cloud costs 20% of net savings.
 - **Not run.** Its site calls the core open source, but the repository it links could not be opened. The chart has what a cache tool can reach at best instead.
-- **Its best idea is the one-hour entry,** which costs twice the input price to write instead of one and a quarter times. Alone it takes these chats from $143 to $39 for users back after four minutes. compache's policies use the provider's default lifetime. With one-hour entries the same cut would cost $32 instead of $43 for users back after half an hour, and more than it does now in the other two cases.
+- **Its best idea is the one-hour entry,** which costs twice the input price to write instead of one and a quarter times. Alone it takes these chats from $143 to $39 for users back after four minutes. compache fits the lifetime as well: it asks for one-hour entries where users take half an hour, and five minutes with pings is cheaper in the other two cases.
 
 ## OptScale
 
@@ -84,7 +84,7 @@ Defaults as documented at revision [`c49b553`](https://github.com/openclaw/openc
 
 Anthropic's tool-result clearing and compaction, and OpenAI's compaction endpoint, act at a context-size threshold. They do not know how your users return or which earlier parts later turns need, and they send no keep-warm request. The calculator models Anthropic's clearing as OpenClaw configures it.
 
-OpenAI's counterpart to Anthropic's one-hour entry is a 12-hour one at 2.5× the input price for a write, in the Responses API only.
+OpenAI's counterpart to Anthropic's one-hour entry is a 12-hour one at 2.5× the input price for a write, in the Responses API only. compache does not fit that one.
 
 ## In the calculator
 

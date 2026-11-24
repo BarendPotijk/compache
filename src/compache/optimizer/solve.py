@@ -1,4 +1,6 @@
-"""Choose the cut and the ping count by replayed cost on the caller's own threads."""
+"""Choose the cut, the ping count and the cache lifetime by replayed cost on the caller's own threads."""
+
+from dataclasses import replace
 
 from compache.errors import ContractError
 from compache.labels import label_index
@@ -44,11 +46,22 @@ def _frontier(rows, limit):
     return kept
 
 
+def _worth_pricing(threads, spec, other, pings):
+    """Whether any return could find the longer lifetime alive, up to `pings` pings long, and the shorter one gone."""
+    sent = [[seconds(r.generation.started_at) for r in t.runs] for t in threads]
+    return any(
+        spec.cache_ttl_seconds <= after - before < other.cache_ttl_seconds * (1 + pings)
+        for times in sent
+        for before, after in zip(times, times[1:])
+    )
+
+
 def solve_workload(
     threads,
     labels,
     spec,
     *,
+    lifetimes=(),
     observation_end,
     system_prompt,
     default_tools,
@@ -72,7 +85,7 @@ def solve_workload(
     salt="compache-solve-v1",
     **planner_options,
 ):
-    """Fit a policy and pick its cut and ping count by cost on these threads.
+    """Fit a policy and pick its cut, ping count and cache lifetime by cost on these threads.
 
     Token counts cannot rank policies, because what a cut or a ping is worth
     depends on how often the cache is still warm when the user returns. So each
@@ -83,6 +96,11 @@ def solve_workload(
     without it. A cut also pays for what it loses: every lost requirement is
     one more request that reads the cached view, writes the reopened sources
     and emits a tool call, at the rate seen on labelled turns.
+
+    `lifetimes` are the same model under other cache lifetimes its provider can
+    be asked for, each with its price of a write. Every candidate is priced
+    under those that could pay on these threads. A policy that won under one of
+    them carries it in `model_spec` and the provider's default in `standard_spec`.
 
     `calls_per_run` maps run IDs to the model calls that turn made. A call after
     the first re-sends the turn's request and reads it from the cache, in the
@@ -100,6 +118,16 @@ def solve_workload(
     threads = list(threads)
     if len(threads) < 2:
         raise ContractError("solving needs at least two threads")
+    for other in lifetimes:
+        same = replace(
+            other,
+            cache_ttl_seconds=spec.cache_ttl_seconds,
+            write_multiplier=spec.write_multiplier,
+        )
+        if same != spec:
+            raise ContractError(
+                "a lifetime changes how long the cache lives and what a write costs, nothing else"
+            )
     number(folds, "folds", 2, integer=True)
     number(max_cuts, "max_cuts", 2, integer=True)
     ping_counts = sorted(set(ping_counts))
@@ -175,8 +203,12 @@ def solve_workload(
         fold_of = {
             t.thread_id: i % min(folds, len(threads)) for i, t in enumerate(ranked)
         }
-    candidates = [(None, n) for n in ping_counts] + [
-        (row, n) for row in cuts for n in ping_counts
+    # The provider's default lifetime comes first, and first of all keeping everything under it.
+    specs = [spec] + [
+        o for o in lifetimes if _worth_pricing(threads, spec, o, ping_counts[-1])
+    ]
+    candidates = [
+        (asked, row, n) for asked in specs for row in (None, *cuts) for n in ping_counts
     ]
     demand = fit_distribution(
         threads,
@@ -214,11 +246,11 @@ def solve_workload(
         )
         turns += sum(len(t.runs) for t in inside)
         read_estimate = measure_cache_reads(outside, spec, overlap)
-        for i, (row, pings) in enumerate(candidates):
+        for i, (asked, row, pings) in enumerate(candidates):
             policy = WorkloadPolicy(
                 {
                     "schema_version": "compache-workload-planner-v1",
-                    "model_spec": spec.to_dict(),
+                    "model_spec": asked.to_dict(),
                     "demand": fold_demand,
                     "cache_reads": read_estimate,
                     "recipes": [{"recipe": row["recipe"], "eligible": True}]
@@ -244,7 +276,7 @@ def solve_workload(
 
     keep_coverage = 1.0 if rows and rows[0]["historical_required"] else None
     report = []
-    for i, (row, pings) in enumerate(candidates):
+    for i, (asked, row, pings) in enumerate(candidates):
         recovery = 0.0
         if labelled_counts[i]:
             recovery = recovery_totals[i] * turns / labelled_counts[i]
@@ -254,7 +286,7 @@ def solve_workload(
             lost = row["historical_required"] - row["historical_retained"]
             share = full_cache_reads["share"]
             share = 1.0 if share is None else share
-            view_rate = spec.read_multiplier * share + spec.write_multiplier * (
+            view_rate = asked.read_multiplier * share + asked.write_multiplier * (
                 1 - share
             )
             recovery = (
@@ -262,14 +294,15 @@ def solve_workload(
                 / labeled
                 * (
                     view_rate * row["recovery_view_tokens"]
-                    + spec.write_multiplier * row["recovery_restored_tokens"]
-                    + spec.output_multiplier * spec.expansion_output_tokens * lost
+                    + asked.write_multiplier * row["recovery_restored_tokens"]
+                    + asked.output_multiplier * asked.expansion_output_tokens * lost
                 )
             )
         report.append(
             {
                 "recipe": row["recipe"] if row else None,
                 "max_pings": pings,
+                "cache_ttl_seconds": asked.cache_ttl_seconds,
                 "coverage": row["coverage"] if row else keep_coverage,
                 "min_thread_coverage": row["min_thread_coverage"]
                 if row
@@ -285,10 +318,23 @@ def solve_workload(
         raise ContractError(
             "no candidate policy fits the context window on these threads"
         )
-    chosen = min(
-        usable, key=lambda r: (r["expected_cost"], -_rank_coverage(r), r["max_pings"])
-    )
+
+    def cheapest(rows):
+        return min(
+            rows,
+            key=lambda r: (
+                r["expected_cost"],
+                -_rank_coverage(r),
+                r["cache_ttl_seconds"],
+                r["max_pings"],
+            ),
+        )
+
+    chosen = cheapest(usable)
+    asked = next(s for s in specs if s.cache_ttl_seconds == chosen["cache_ttl_seconds"])
     keep = report[ping_counts.index(0)] if 0 in ping_counts else None
+    # What caching alone can reach: everything kept, at the cheapest pings and lifetime.
+    kept_whole = [r for r in usable if r["recipe"] is None]
     priced = {id(row) for row in cuts}
     for row in rows:
         if row["recipe"] == chosen["recipe"]:
@@ -313,7 +359,8 @@ def solve_workload(
         "schema_version": "compache-workload-planner-v1",
         "header_traffic": None,
         "cache_reads": full_cache_reads,
-        "model_spec": spec.to_dict(),
+        "model_spec": asked.to_dict(),
+        **({} if asked is spec else {"standard_spec": spec.to_dict()}),
         "demand": demand,
         "recipes": rows,
         "retention_floor": retention_floor,
@@ -335,6 +382,7 @@ def solve_workload(
             "saving_fraction": 1 - chosen["expected_cost"] / keep["replayed_cost"]
             if keep and keep["complete"] and keep["replayed_cost"]
             else None,
+            "caching_alone": cheapest(kept_whole) if kept_whole else None,
             "candidates": report,
         },
         "training_threads": sorted(digest(t.thread_id) for t in threads),

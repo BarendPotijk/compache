@@ -71,8 +71,12 @@ test('a fitted policy file gives its decision, its candidates and its costs', ()
   const data = {schema_version: 'compache-workload-planner-v1', model_spec: {model_id: 'claude-sonnet-5-5'}, recipes: [{eligible: false, recipe: {}}, {eligible: true, recipe}], planner_options: {max_pings: 3}, training_threads: ['a', 'b'], pricing: {preset: 'sonnet', input_price_per_million: 2},
     solve: {turns: 10, keep_everything_cost: 100000, saving_fraction: .5, chosen: {coverage: .9, expected_cost: 50000}, candidates: [{recipe: null, max_pings: 0, coverage: 1, expected_cost: 100000, complete: true}, {recipe, max_pings: 3, coverage: .9, expected_cost: 50000, complete: true}, {recipe, max_pings: 0, expected_cost: 1, complete: false}]}};
   const p = readPolicy(data);
-  assert.deepEqual({...p.policy}, {questions: 4, answers: null, retrieved: 1, maxPings: 3, keepUnder: 0}); assert.equal(p.preset, 'sonnet'); near(p.cost, 10, 1e-9); near(p.everything, 20, 1e-9);
+  assert.deepEqual({...p.policy}, {questions: 4, answers: null, retrieved: 1, maxPings: 3, keepUnder: 0, long: false}); assert.equal(p.preset, 'sonnet'); near(p.cost, 10, 1e-9); near(p.everything, 20, 1e-9);
   assert.deepEqual(p.candidates.map(c => c.chosen), [false, true]); assert.equal(p.notes.length, 1);
+  // A policy that asks for a longer cache carries the provider's default beside it, and each candidate its own.
+  const lasting = readPolicy({...data, model_spec: {model_id: 'claude-sonnet-5-5', cache_ttl_seconds: 3600}, standard_spec: {model_id: 'claude-sonnet-5-5', cache_ttl_seconds: 300},
+    solve: {...data.solve, candidates: [300, 3600].map(seconds => ({recipe, max_pings: 3, cache_ttl_seconds: seconds, coverage: .9, expected_cost: 50000, complete: true}))}});
+  assert.equal(lasting.policy.long, true); assert.deepEqual(lasting.candidates.map(c => [c.policy.long, c.chosen]), [[false, false], [true, true]]);
   assert.throws(() => readPolicy({}), /not a policy/);
 });
 test('every comparison is a valid set of rules for every model, and your app starts as sending everything', () => {

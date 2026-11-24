@@ -1,4 +1,4 @@
-import {BINS, DEFAULTS, DRAWN, WINDOW, configure, describePolicy, drawnStats, lawWeights, needLaw, warmReturnShare} from './engine.mjs';
+import {BINS, DEFAULTS, DRAWN, WINDOW, configure, describePolicy, drawnStats, longAvailable, lawWeights, needLaw, warmReturnShare} from './engine.mjs';
 import {RULES, comparisons, configureRules} from './baselines.mjs';
 import {presets, applyPreset} from './models.mjs';
 import {contextSeries, coverage} from './charts.mjs';
@@ -253,6 +253,7 @@ function renderPolicy(r) {
   $('policyText').textContent = describePolicy(p).join(' ');
   $('policyNote').textContent = file ? `${filePolicy.model}${filePolicy.threads ? ` · fitted on ${plural(filePolicy.threads, 'thread')}, ${plural(filePolicy.turns, 'turn')}` : ''}${filePolicy.cost !== null ? ` · there ${dollars(filePolicy.cost)} against ${dollars(filePolicy.everything)} keeping everything` : ''}${filePolicy.coverage !== null ? ` · ${pct(filePolicy.coverage, 0)} of labelled needs in view` : ''}. ${filePolicy.notes.join(' ')}${filePolicy.workload ? '' : ' The file does not say what its workload was: it is priced on the one set here.'}` : mode === 'own' ? 'Drag a window, or set the pings. It is priced like any other policy.' : `The cheapest of ${r.fit.candidates.length} on ${num(r.fit.threads)} threads, priced on ${num(r.workload.threads.length)} others.`;
   if (document.activeElement !== $('ownPings')) $('ownPings').value = p.maxPings;
+  $('ownLongRow').hidden = !longAvailable(c); $('ownLong').checked = p.long;
   // One lane per kind: where what later turns need lies, and how much of it the window holds.
   const {edges} = BINS.need, n = edges.length - 1, W = Math.max(320, Math.min(620, $('windowsChart').clientWidth || 520)), narrow = W < 460, L = narrow ? 84 : 98, R = narrow ? 92 : 128, lane = 74, H = lane * 3 + 22, slot = (W - L - R) / n, longest = Math.max(...r.workload.threads.map(t => t.turns.length));
   let svg = `<svg viewBox="0 0 ${W} ${H}" role="group" aria-label="What the policy keeps of each kind, over what later turns need">`;
@@ -287,23 +288,23 @@ function renderPolicy(r) {
   renderMap(r, file);
 }
 function renderMap(r, file) {
-  const same = (a, b) => ['questions', 'answers', 'retrieved', 'maxPings', 'keepUnder'].every(k => (a[k] ?? null) === (b[k] ?? null));
+  const same = (a, b) => ['questions', 'answers', 'retrieved', 'maxPings', 'keepUnder', 'long'].every(k => (a[k] ?? null) === (b[k] ?? null));
   const points = file && filePolicy.candidates.length && filePolicy.cost !== null ? filePolicy.candidates.map(x => ({...x, kept: x.coverage})) : r.fit.candidates.filter(x => x.complete).map(x => ({policy: x.policy, everything: x.everything, coverage: x.coverage, cost: 1000 * x.cost / r.fit.turns, chosen: same(x.policy, r.policy)}));
   const usable = points.filter(x => Number.isFinite(x.cost)).map(x => ({...x, x: x.coverage ?? 1}));
-  $('searchNote').textContent = usable.length ? `Cost per 1,000 turns against the needed text that stays in view${file && filePolicy.cost !== null ? ', as the package fitted it' : ''}. ${usable.some(x => x.everything) ? '' : 'Keeping everything does not fit the model here.'}` : 'No candidate fits the model.';
-  const label = n => n === null ? 'all' : n === 0 ? 'none' : `${n}`;
-  $('policyRows').innerHTML = [...usable].sort((a, b) => a.cost - b.cost).map(x => `<tr class="${x.chosen ? 'selected' : ''}"><td>${label(x.policy.questions)}</td><td>${label(x.policy.answers)}</td><td>${label(x.policy.retrieved)}</td><td>${x.policy.maxPings}</td><td>${pct(x.coverage, 0)}</td><td>${dollars(x.cost)}</td></tr>`).join('');
+  const label = n => n === null ? 'all' : n === 0 ? 'none' : `${n}`, cache = long => minutes(long ? r.config.longTtlMinutes : r.config.ttlMinutes), lasting = usable.some(p => p.policy.long);
+  $('searchNote').textContent = usable.length ? `Cost per 1,000 turns against the needed text that stays in view${file && filePolicy.cost !== null ? ', as the package fitted it' : ''}.${lasting ? ` Dashed: the ${cache(true)} cache.` : ''} ${usable.some(x => x.everything) ? '' : 'Keeping everything does not fit the model here.'}` : 'No candidate fits the model.';
+  $('policyRows').innerHTML = [...usable].sort((a, b) => a.cost - b.cost).map(x => `<tr class="${x.chosen ? 'selected' : ''}"><td>${label(x.policy.questions)}</td><td>${label(x.policy.answers)}</td><td>${label(x.policy.retrieved)}</td><td>${x.policy.maxPings}</td><td>${cache(x.policy.long)}</td><td>${pct(x.coverage, 0)}</td><td>${dollars(x.cost)}</td></tr>`).join('');
   const box = $('mapChart'), W = Math.max(300, box.clientWidth), H = box.clientHeight || 280, L = 52, R = 16, T = 24, B = 40; if (!usable.length) { box.innerHTML = ''; return; }
   const low = Math.min(.95, Math.floor(Math.min(...usable.map(p => p.x)) * 20) / 20), ys = ticks(0, Math.max(...usable.map(p => p.cost)), 4), top = ys.values.at(-1), x = v => L + (v - low) / (1 - low || 1) * (W - L - R), y = v => H - B - v / top * (H - T - B), counts = [...new Set(usable.map(p => p.policy.maxPings))].sort((a, b) => a - b), tone = n => n === 0 ? 'baseline' : n === counts.at(-1) ? 'compache' : 'compache-soft';
   let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Cost of every candidate policy against the share of needed text it keeps in view">`;
   for (const v of ys.values) svg += `<line class="${v ? 'g-grid' : 'g-axis'}" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/><text x="${L - 8}" y="${y(v) + 4}" text-anchor="end">${usd(v, ys.digits)}</text>`;
   for (let v = low; v <= 1.0001; v += (1 - low) / 4) svg += `<text x="${x(v)}" y="${H - B + 17}" text-anchor="${v > .999 ? 'end' : 'middle'}">${pct(v, 0)}</text>`;
-  for (const n of counts) { const line = usable.filter(p => p.policy.maxPings === n).sort((a, b) => a.x - b.x || a.cost - b.cost); svg += `<polyline class="line thin s-${tone(n)}" points="${line.map(p => `${x(p.x).toFixed(1)},${y(p.cost).toFixed(1)}`).join(' ')}"/>`; }
+  for (const long of lasting ? [false, true] : [false]) for (const n of counts) { const line = usable.filter(p => p.policy.maxPings === n && p.policy.long === long).sort((a, b) => a.x - b.x || a.cost - b.cost); svg += `<polyline class="line thin s-${tone(n)}"${long ? ' stroke-dasharray="5 4"' : ''} points="${line.map(p => `${x(p.x).toFixed(1)},${y(p.cost).toFixed(1)}`).join(' ')}"/>`; }
   usable.forEach((p, i) => { svg += `<circle class="hit" data-i="${i}" cx="${x(p.x)}" cy="${y(p.cost)}" r="11"/><circle class="mark dot f-${p.chosen ? 'compache' : tone(p.policy.maxPings)}" cx="${x(p.x)}" cy="${y(p.cost)}" r="${p.chosen ? 6.5 : 4}"/>`; });
-  const chosen = usable.find(p => p.chosen); if (chosen) svg += `<text class="t-ink halo" x="${x(chosen.x)}" y="${y(chosen.cost) + 22}" text-anchor="middle">${dollars(chosen.cost)}</text>`;
+  const chosen = usable.find(p => p.chosen); if (chosen) svg += `<text class="t-ink halo" x="${Math.max(L + 24, x(chosen.x))}" y="${y(chosen.cost) + (y(chosen.cost) > H - B - 30 ? -13 : 22)}" text-anchor="middle">${dollars(chosen.cost)}</text>`;
   let at = L; for (const n of counts) { svg += `<circle class="f-${tone(n)}" cx="${at + 4}" cy="10" r="4"/><text class="t-2" x="${at + 13}" y="14">${n ? `up to ${plural(n, 'ping')}` : 'no pings'}</text>`; at += 92; }
   box.innerHTML = `${svg}<text x="${(L + W - R) / 2}" y="${H - 4}" text-anchor="middle">needed text in view</text></svg>`;
-  const el = box.firstElementChild; el.addEventListener('pointermove', e => { const p = usable[e.target.dataset?.i]; if (!p) return hideTip(); showTip(e, p.everything ? 'Keep everything' : `Questions ${label(p.policy.questions)} · answers ${label(p.policy.answers)} · retrieved ${label(p.policy.retrieved)}`, [['', dollars(p.cost), 'per 1,000 turns'], ['', pct(p.coverage, 0), 'in view'], ['', String(p.policy.maxPings), 'pings at most']]); }); el.addEventListener('pointerleave', hideTip);
+  const el = box.firstElementChild; el.addEventListener('pointermove', e => { const p = usable[e.target.dataset?.i]; if (!p) return hideTip(); showTip(e, p.everything ? 'Keep everything' : `Questions ${label(p.policy.questions)} · answers ${label(p.policy.answers)} · retrieved ${label(p.policy.retrieved)}`, [['', dollars(p.cost), 'per 1,000 turns'], ['', pct(p.coverage, 0), 'in view'], ['', String(p.policy.maxPings), 'pings at most'], ...(lasting ? [['', cache(p.policy.long), 'cache lifetime']] : [])]); }); el.addEventListener('pointerleave', hideTip);
 }
 
 // -- one conversation --------------------------------------------------------
@@ -460,6 +461,7 @@ $('needTabs').addEventListener('click', e => { const kind = e.target.dataset?.ki
 $('sides').addEventListener('click', e => { const id = e.target.closest('[data-id]')?.dataset.id; if (!id) return; baseConfig = {...baseConfig, compare: id}; if (id === 'app') $('appSettings').open = true; update(); });
 $('policyTabs').addEventListener('click', e => { const next = e.target.dataset?.mode; if (!next || next === mode) return; if (next === 'own') ownPolicy = {...(current?.policy ?? {questions: null, answers: null, retrieved: null, maxPings: 0, keepUnder: 0})}; mode = next; update(); });
 $('ownPings').addEventListener('change', e => { const n = Math.max(0, Math.min(60, Math.round(Number(e.target.value) || 0))); ownPolicy = {...(current?.policy ?? {}), maxPings: n}; mode = 'own'; update(); });
+$('ownLong').addEventListener('change', e => { ownPolicy = {...(current?.policy ?? {}), long: e.target.checked}; mode = 'own'; update(); });
 $('threadPicker').addEventListener('change', () => { firstCut(); renderThread(); });
 function fillFrom() { const list = comparisons(configure(applyPreset({}, $('modelPreset').value))); $('appFrom').replaceChildren(new Option('Rules below', ''), ...list.filter(b => b.id !== 'app').map(b => new Option(b.name, b.id))); }
 $('appFrom').addEventListener('change', e => { const b = comparisons(configure(readForm())).find(x => x.id === e.target.value); if (!b) return; for (const el of ruleFields) writeField(el, b.rules[el.dataset.rule]); baseConfig = {...baseConfig, compare: 'app'}; changed(); update(); });

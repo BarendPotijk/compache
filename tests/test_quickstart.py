@@ -57,6 +57,7 @@ class QuickstartTests(unittest.TestCase):
                 "retrieved": 1,
                 "keepUnder": 0,
                 "maxPings": 1,
+                "long": False,
             },
         )
         self.assertEqual(carried, profiled)

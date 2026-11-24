@@ -297,6 +297,36 @@ class HermesTests(unittest.TestCase):
             cache_read_reported(hermes._usage({**counts, "cache_read_tokens": 0}))
         )
 
+    def test_a_lifetime_that_hermes_does_not_ask_for_is_said(self):
+        asked = {"prompt_caching": {"cache_ttl": "5m"}}
+        config = types.ModuleType("hermes_cli.config")
+        config.load_config_readonly = lambda: asked
+        package = types.ModuleType("hermes_cli")
+        package.__path__ = []
+        names = ("hermes_cli", "hermes_cli.config")
+        kept = {k: sys.modules.get(k) for k in names}
+
+        def restore():
+            for name, module in kept.items():
+                if module is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = module
+
+        self.addCleanup(restore)
+        sys.modules.update(zip(names, (package, config)))
+        # The policy counts on five minutes, and so does Hermes: nothing to say.
+        with self.assertNoLogs("compache.hermes", "WARNING"):
+            self.engine()
+        # Hermes' own choice moves to an hour after a first pause.
+        asked["prompt_caching"] = {}
+        with self.assertLogs("compache.hermes", "WARNING") as said:
+            self.engine()
+        self.assertIn("prompt_caching.cache_ttl to 5m", said.output[0])
+        # Without a policy nothing is counted on.
+        with self.assertNoLogs("compache.hermes", "WARNING"):
+            self.engine(policy=None)
+
     def test_with_no_policy_it_only_records(self):
         engine = self.engine(policy=None)
         self.assertEqual(engine.get_tool_schemas(), [])

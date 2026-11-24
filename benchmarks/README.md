@@ -4,7 +4,7 @@ One package, three workloads, three different policies. Cost is against keeping 
 
 | Dataset | What it is | What the fit chose | Saving |
 |---|---|---|---|
-| [DocChat](docchat/README.md) | 30 document chats in five domains, 1,227 turns, with retrieval. Dependencies measured by withholding history | Keep questions and answers, keep retrieved text for one turn. 0 to 3 pings | 43% to 85% |
+| [DocChat](docchat/README.md) | 30 document chats in five domains, 1,227 turns, with retrieval. Dependencies measured by withholding history | Keep questions and answers, keep retrieved text for one turn. 0 to 3 pings, one-hour cache entries for users who take half an hour | 43% to 89% |
 | [BEAM](beam/README.md) | 90 personal chats of 130k to 1M tokens, no retrieval. Evidence from the dataset's graded questions | Keep every user message, drop earlier assistant text. 0 to 3 pings | 57% to 91% |
 | LongDS | 68 data-analysis tasks of about 26k tokens. Each turn builds on the recorded work of earlier ones | Keep everything and tune the pings in five of six cases. Cut to the last 20 turns in one | 0% to 32% |
 
@@ -20,4 +20,4 @@ Costs are modeled: every request and ping is priced with the provider's cache ru
 
 ## Other tools
 
-[Compare](compare/README.md): Headroom and Kompressor run on DocChat's retrieved text, and the cheapest way to keep the whole history cached, against compache. Modeled cost, 30% to 60% under the cheapest cache setting. [Read more](../docs/comparisons.md)
+[Compare](compare/README.md): Headroom and Kompressor run on DocChat's retrieved text, and the cheapest way to keep the whole history cached, against compache. Modeled cost, 30% to 70% under the cheapest cache setting. [Read more](../docs/comparisons.md)

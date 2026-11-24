@@ -119,7 +119,7 @@ class ChatApp:
 
 
 def fitted(model="claude-sonnet-5-5"):
-    """A policy that keeps retrieved text for one turn."""
+    """A policy that keeps retrieved text for one turn, under a cache that lives five minutes."""
     threads, labels = [], []
     for i in range(5):
         runs = []
@@ -138,7 +138,12 @@ def fitted(model="claude-sonnet-5-5"):
             labels.append({"thread_id": f"t{i}", "run": n, "needs": needs})
         threads.append({"thread_id": f"t{i}", "runs": runs})
     return compache.fit(
-        threads, labels, model=model, system_prompt=SYSTEM, share_headers=False
+        threads,
+        labels,
+        model=model,
+        system_prompt=SYSTEM,
+        share_headers=False,
+        lifetimes=(),
     )
 
 
@@ -224,7 +229,7 @@ class ObserveTests(unittest.TestCase):
                     live.drain()
                     clock.at += 3600
             self.assertEqual((live.stats["asked"], live.stats["noted"]), (28, 28))
-            policy = compache.fit(tmp)
+            policy = compache.fit(tmp, lifetimes=())
             summary = policy.summary
             self.assertEqual(
                 (summary["threads"], summary["turns"], summary["labelled_turns"]),
@@ -1048,6 +1053,7 @@ class PingTests(unittest.TestCase):
             model="claude-sonnet-5-5",
             system_prompt=SYSTEM,
             share_headers=False,
+            lifetimes=(),
         )
         self.assertGreater(policy.max_pings, 0)
         for kind in (ChatApp, ClaudeApp):
@@ -1097,6 +1103,150 @@ class PingTests(unittest.TestCase):
         for quiet in (Live(), Live(fitted())):
             start_pings(quiet)
             self.assertIsNone(quiet.pinger)
+
+
+class LifetimeTests(unittest.TestCase):
+    """A policy fitted for another cache lifetime than the provider's default asks for it."""
+
+    @staticmethod
+    def fit(gap):
+        threads, labels = [], []
+        for i in range(5):
+            runs = []
+            for n in range(1, 10):
+                at = 1_780_000_000 + n * gap
+                runs.append(
+                    {
+                        "started_at": at,
+                        "ended_at": at + 6,
+                        "input": "What does the next section say?",
+                        "retrievals": [passage(n)],
+                        "output": "It says the supplier carries the cost.",
+                    }
+                )
+                needs = [[f"t{i}:{n - 1}:retrieval:1"]] if n > 1 else []
+                labels.append({"thread_id": f"t{i}", "run": n, "needs": needs})
+            threads.append({"thread_id": f"t{i}", "runs": runs})
+        return compache.fit(
+            threads,
+            labels,
+            model="claude-sonnet-5-5",
+            system_prompt=SYSTEM,
+            share_headers=False,
+        )
+
+    @classmethod
+    def setUpClass(cls):
+        cls.policy = cls.fit(1500)
+        cls.started = 0
+
+    def live(self, **options):
+        type(self).started += 1
+        self.clock = Clock(1_810_000_000.0 + self.started * 1e7)
+        self.model = FakeModel(claude_looping, clock=self.clock, ttl=3600)
+        fresh = compache.Policy(json.loads(json.dumps(self.policy.artifact)))
+        return Live(fresh, clock=self.clock, **options)
+
+    def marks(self, body):
+        """Every cache mark in a request, wherever it is."""
+        found = []
+
+        def walk(value):
+            if isinstance(value, dict):
+                if "cache_control" in value:
+                    found.append(value["cache_control"])
+                for inner in value.values():
+                    walk(inner)
+            elif isinstance(value, list):
+                for inner in value:
+                    walk(inner)
+
+        walk(body)
+        return found
+
+    def test_requests_ask_for_it(self):
+        self.assertEqual(self.policy.cache_lifetime, 3600)
+        app = ClaudeApp(self.live(), self.model, thread="lasting")
+        for n in range(1, 5):
+            app.turn(f"Question {n}?", passage(n))
+            self.clock.at += 1500
+        hour = {"type": "ephemeral", "ttl": "1h"}
+        for body in self.model.bodies:
+            self.assertEqual(self.marks(body), [hour])
+        # Users are back after 25 minutes and read what the turn before left.
+        usage = app.seen[-2]["usage"]
+        self.assertGreater(usage["cache_read_input_tokens"], 300)
+
+    def test_the_application_s_own_marks_ask_for_it_too(self):
+        # An entry that lives longer may not follow one that lives shorter, so all marks agree.
+        live = self.live()
+        sent = []
+
+        def send(payload):
+            sent.append(payload)
+            return self.model.send("/v1/messages")(payload)
+
+        body = {
+            "model": "claude-sonnet-5-5",
+            "max_tokens": 64,
+            "system": [
+                {"type": "text", "text": SYSTEM, "cache_control": {"type": "ephemeral"}}
+            ],
+            "messages": [{"role": "user", "content": "Question 1?"}],
+        }
+        before = json.dumps(body)
+        live.exchange("/v1/messages", body, send, thread="own")
+        self.assertEqual(json.dumps(body), before)
+        self.assertEqual(self.marks(sent[0]), [{"type": "ephemeral", "ttl": "1h"}])
+
+    def test_a_provider_that_refuses_it_gets_the_application_s_own_request(self):
+        live = self.live()
+        sent = []
+
+        def send(payload):
+            sent.append(payload)
+            if "ttl" in json.dumps(payload):
+                return Result(400, json={"error": {"message": "ttl: unknown field"}})
+            return self.model.send("/v1/messages")(payload)
+
+        body = {
+            "model": "claude-sonnet-5-5",
+            "max_tokens": 64,
+            "messages": [{"role": "user", "content": "Question 1?"}],
+        }
+        reply = live.exchange("/v1/messages", body, send, thread="refused")
+        self.assertEqual(reply.status, 200)
+        self.assertIs(sent[-1], body)
+        self.assertEqual(live.stats["policy_refused"], 1)
+
+    def test_pings_ask_for_it(self):
+        # Users back after 70 minutes, just past the hour: one ping before it is over keeps the cache.
+        late = self.fit(4200)
+        self.assertEqual((late.cache_lifetime, late.max_pings), (3600, 1))
+        live = self.live()
+        live.policy = late
+        app = ClaudeApp(live, self.model, thread="pinged")
+        for n in range(1, 4):
+            app.turn(f"Question {n}?", passage(n))
+            due = live.next_ping_at()
+            # Due shortly before the hour is over, not before the five minutes are.
+            self.assertGreater(due, self.clock.at + 3000)
+            self.assertLess(due, self.clock.at + 3600)
+            self.clock.at = due
+            self.assertEqual(live.tick(), 1)
+            ping = self.model.bodies[-1]
+            self.assertEqual(ping["max_tokens"], 1)
+            self.assertEqual(self.marks(ping), [{"type": "ephemeral", "ttl": "1h"}])
+            self.clock.at += 700
+        # The first call of a turn reads what the ping before it left.
+        self.assertGreater(app.seen[-2]["usage"]["cache_read_input_tokens"], 300)
+
+    def test_without_a_policy_nothing_asks_for_anything(self):
+        clock = Clock(1_820_000_000.0)
+        model = FakeModel(claude_looping, clock=clock)
+        app = ClaudeApp(Live(clock=clock), model, thread="plain")
+        app.turn("Question 1?", passage(1))
+        self.assertEqual([self.marks(b) for b in model.bodies], [[], []])
 
 
 class ApartTests(unittest.TestCase):

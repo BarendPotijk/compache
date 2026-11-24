@@ -181,6 +181,7 @@ Keep questions from the last 4 turns, answers from the last 9 turns and retrieve
 Send up to 1 keep-warm ping while a user is away.
 82% of what the labelled turns need from earlier turns stays in view. The rest is fetched back, and that call is in the cost.
 $16.10 per 1,000 turns against $50.25 keeping everything: 68% less.
+Caching alone, at its best, would cost $18.66.
 ```
 
 | Option | Use |
@@ -247,6 +248,7 @@ if session.next_ping_at:                         # epoch seconds, or None
 | `session.reopen(reference)` | Answers the model's `reopen` tool call with the archived text |
 
 - **Cited sources.** For a policy fitted with them, pass `session.complete(turn, answer, cited_part_ids=[...])`. The IDs are the `part_id` of items given to `prepare`, or the generated ones in `turn.parts`, and must be in view in that request. They add nothing to what the model is sent.
+- **Cache marks.** Mark the end of a Claude request with `policy.cache_control`. It names the lifetime where the policy was fitted for another than the default, and then every mark of the request has to.
 - **Archived parts.** A cut replaces a part with a notice that carries a handle. Give the model `compache.REOPEN_TOOL` and `compache.REOPEN_INSTRUCTIONS`, and pass its tool calls to `session.reopen`.
 - **Placement.** `turn.messages` puts answers under `assistant` and everything else under `user`. If your application sends retrieved text another way, build the request from `turn.parts` and keep that mapping fixed.
 - **Tool loops.** Call `prepare` once per user message, append the calls of that turn yourself, and hand what the tools returned to `session.extend(turn, results)` before `complete`. With several calls, pass the first call's usage as `usage` and the last call's as `last_usage`.

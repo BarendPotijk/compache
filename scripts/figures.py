@@ -279,10 +279,11 @@ def policy_map(data):
         ),
     ]
     legend = [
-        ("line ns", "No keep-warm pings"),
-        ("line cs", f"Up to {most} keep-warm pings"),
+        ("line ns", "Default cache, no pings"),
+        ("line cs", f"Up to {most} pings"),
+        ("line os", f"One-hour cache, up to {most} pings"),
         ("dot c", "What compache picked"),
-        ("dot n", "Send everything, no pings"),
+        ("dot n", "Send everything"),
     ]
     at = 24
     for kind, label in legend:
@@ -307,11 +308,13 @@ def policy_map(data):
 
         rows = clock["candidates"]
         fitted = next(r for r in rows if r["fitted"])
+        standard = min(r["cache_ttl_seconds"] for r in rows)
         default = next(r for r in rows if r["recipe"] is None and r["max_pings"] == 0)
         ratio = default["dollars_per_1000_turns"] / fitted["dollars_per_1000_turns"]
         summary.append(
             f"Users back after {away(clock['median_idle_seconds'])}: fitted {dollars(fitted['dollars_per_1000_turns'])}, "
-            f"keep everything without pings {dollars(default['dollars_per_1000_turns'])}."
+            f"keep everything with the default cache and no pings {dollars(default['dollars_per_1000_turns'])}, "
+            f"with the cheapest cache setting {dollars(min(r['dollars_per_1000_turns'] for r in rows if r['recipe'] is None))}."
         )
         body.append(
             text(
@@ -333,9 +336,17 @@ def policy_map(data):
         for share in (0, 0.5, 1):
             anchor = "start" if share == 0 else "end" if share == 1 else "middle"
             body.append(text(x(share), top + plot + 17, f"{share:.0%}", "tm", anchor))
-        for pings, cls in ((0, "ns"), (most, "cs")):
+        longest = max(r["cache_ttl_seconds"] for r in rows)
+        kinds = [(0, standard, "ns"), (most, standard, "cs")]
+        if longest > standard:
+            kinds.append((most, longest, "os"))
+        for pings, lifetime, cls in kinds:
             line = sorted(
-                (r for r in rows if r["max_pings"] == pings),
+                (
+                    r
+                    for r in rows
+                    if r["max_pings"] == pings and r["cache_ttl_seconds"] == lifetime
+                ),
                 key=lambda r: r["tokens_kept"],
             )
             points = [
@@ -346,11 +357,19 @@ def policy_map(data):
                 + " L".join(f"{px:.1f},{py:.1f}" for px, py in points)
                 + '"/>'
             )
-            fill = "n" if cls == "ns" else "c"
+            fill = {"ns": "n", "cs": "c", "os": "o"}[cls]
             body += [
                 f'<circle class="{fill}" cx="{px:.1f}" cy="{py:.1f}" r="2.5"/>'
                 for px, py in points
             ]
+            if cls == "os":
+                whole = line[-1]["dollars_per_1000_turns"]
+                px, py = points[-1]
+                # Beside the label of sending everything, or under it where the two are close.
+                near = abs(py - y(default["dollars_per_1000_turns"])) < 26
+                body.append(
+                    text(px - 2, py + (16 if near else -8), dollars(whole), "tm", "end")
+                )
         dx, dy = x(default["tokens_kept"]), y(default["dollars_per_1000_turns"])
         body.append(f'<circle class="n ring" cx="{dx:.1f}" cy="{dy:.1f}" r="5.5"/>')
         body.append(
@@ -376,8 +395,8 @@ def policy_map(data):
         width,
         height,
         "The longer users are away, the more sending everything costs",
-        "Cost per 1,000 messages against the share of the history kept, without and with keep-warm pings, "
-        "for three return patterns. " + " ".join(summary),
+        "Cost per 1,000 messages against the share of the history kept, without and with keep-warm pings and with "
+        "one-hour cache entries, for three return patterns. " + " ".join(summary),
         body,
     )
 

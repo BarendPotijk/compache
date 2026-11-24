@@ -37,7 +37,7 @@ export const DEFAULTS = Object.freeze({
   retentionRequirement: 0.8, keepWarm: true, maxPings: 3, pingLeadMinutes: 0.75, pingOutputTokens: 16, recoveryOutputTokens: 32, safetyReserve: 32000,
   // Tokens of the notice left in place of one turn's archived retrieved text: 28 for each part the package archives.
   archivedTokens: 28,
-  // A policy to price instead of the fitted one: {questions, answers, retrieved} in turns, null for all, with {maxPings, keepUnder}.
+  // A policy to price instead of the fitted one: {questions, answers, retrieved} in turns, null for all, with {maxPings, keepUnder, long}.
   policy: null,
   // What Compache is compared with, the rules of your own application, and what it really costs per 1,000 turns when you know (0 when not).
   compare: 'everything', app: Object.freeze({}), measuredCost: 0,
@@ -68,8 +68,9 @@ function finite(n, name, min, max) {
 export function configurePolicy(policy) {
   if (policy === null) return null;
   if (typeof policy !== 'object' || Array.isArray(policy)) throw new TypeError('policy must be an object');
-  const p = {questions: null, answers: null, retrieved: null, maxPings: 0, keepUnder: 0, ...policy};
-  for (const key of Object.keys(p)) if (!['questions', 'answers', 'retrieved', 'maxPings', 'keepUnder'].includes(key)) throw new RangeError(`policy.${key} is not part of a policy`);
+  const p = {questions: null, answers: null, retrieved: null, maxPings: 0, keepUnder: 0, long: false, ...policy};
+  for (const key of Object.keys(p)) if (!['questions', 'answers', 'retrieved', 'maxPings', 'keepUnder', 'long'].includes(key)) throw new RangeError(`policy.${key} is not part of a policy`);
+  if (typeof p.long !== 'boolean') throw new TypeError('policy.long must be boolean');
   for (const key of ['questions', 'answers', 'retrieved']) if (p[key] !== null && (!Number.isInteger(p[key]) || p[key] < 0 || p[key] > 100000)) throw new RangeError(`policy.${key} must be a whole number of turns, or null for all`);
   for (const [key, max] of [['maxPings', 60], ['keepUnder', 1000000]]) if (!Number.isInteger(p[key]) || p[key] < 0 || p[key] > max) throw new RangeError(`policy.${key} must be a whole number between 0 and ${max}`);
   return Object.freeze(p);
@@ -335,7 +336,7 @@ function withCache(c,rules) {
 // Price every call one side makes on a workload. `strategy` is {kind: 'compache', policy} or {kind: 'rules', rules}.
 export function runArm(workload, config, strategy, {collectDecisions=true,collectLedger=true}={}) {
   const base=configure(config), ours=strategy.kind==='compache'; if(!ours && strategy.kind!=='rules')throw new RangeError('invalid strategy');
-  const rules=ours?null:configureRules(strategy.rules), policy=ours?configurePolicy(strategy.policy ?? {}):null, caching=ours || rules.cache!=='off', c=ours?base:withCache(base,rules);
+  const rules=ours?null:configureRules(strategy.rules), policy=ours?configurePolicy(strategy.policy ?? {}):null, caching=ours || rules.cache!=='off', c=withCache(base,ours?{cache:policy.long?'long':'standard'}:rules);
   const maxAge=Math.max(c.maxTurns,...workload.threads.map(t=>t.turns.length)), laws=needLaws(c,maxAge), future=forecast(c);
   const ledger=[], decisions=[], roles={}, cacheBreakdown=collectLedger?{cached:0,newContext:0,firstRequest:0,expiredPrefix:0,changedPrefix:0,missed:0}:null, total={inputTokens:0,cachedTokens:0,freshTokens:0,outputTokens:0,inputCost:0,cachedCost:0,outputCost:0,cost:0,calls:0};
   const freed=blocks=>blocks.reduce((n,b)=>n+b.tokens-noticeOf(b.kind,c),0);
@@ -609,23 +610,25 @@ export function candidateCuts(workload,config,limit=6) {
   if(frontier.length>limit){const step=(frontier.length-1)/(limit-1);return Array.from({length:limit},(_,i)=>frontier[Math.round(i*step)]);}
   return frontier;
 }
+// Whether a policy can ask for the long cache, as the package can of Claude.
+export const longAvailable=c=>c.anthropic && c.longTtlMinutes>c.ttlMinutes;
 export const pingCounts=c=>c.keepWarm?[...new Set([0,1,3,c.maxPings])].filter(n=>n<=c.maxPings).sort((a,b)=>a-b):[0];
 // The cheapest candidate on these threads. Keeping everything, with and without pings, is always one of them.
 export function fitPolicy(workload,config) {
   const c=configure(config), counts=pingCounts(c), cuts=candidateCuts(workload,c), candidates=[];
-  for(const row of [{policy:{},kept:1,coverage:null,everything:true},...cuts]) for(const maxPings of counts) {
-    const policy=configurePolicy({...row.policy,maxPings}), result=runArm(workload,c,{kind:'compache',policy},{collectDecisions:false,collectLedger:false});
+  for(const long of longAvailable(c)?[false,true]:[false]) for(const row of [{policy:{},kept:1,coverage:null,everything:true},...cuts]) for(const maxPings of counts) {
+    const policy=configurePolicy({...row.policy,maxPings,long}), result=runArm(workload,c,{kind:'compache',policy},{collectDecisions:false,collectLedger:false});
     candidates.push({policy,everything:!!row.everything,kept:row.kept,coverage:row.everything?1:row.coverage,retention:result.retention.expected,cost:result.totals.cost,requestTokens:(result.byRole.answer?.inputTokens??0)/Math.max(1,result.byRole.answer?.calls??0),complete:result.complete});
   }
   const usable=candidates.filter(x=>x.complete);
-  usable.sort((a,b)=>a.cost-b.cost || (b.coverage??1)-(a.coverage??1) || a.policy.maxPings-b.policy.maxPings);
+  usable.sort((a,b)=>a.cost-b.cost || (b.coverage??1)-(a.coverage??1) || a.policy.long-b.policy.long || a.policy.maxPings-b.policy.maxPings);
   return {candidates,chosen:usable[0] ?? null};
 }
 // A policy in the package's words.
 export function describePolicy(policy) {
   const window=(n,noun)=>n===null?`all ${noun}`:n===0?`no earlier ${noun}`:`${noun} from the last ${n===1?'turn':`${n} turns`}`;
   const keep=policy.questions===null && policy.answers===null && policy.retrieved===null?'Keep the whole history in view.':`Keep ${window(policy.questions,'questions')}, ${window(policy.answers,'answers')} and ${window(policy.retrieved,'retrieved text')}.`;
-  return [keep,policy.keepUnder?`Parts of at most ${policy.keepUnder} tokens always stay.`:'',policy.maxPings?`Send up to ${policy.maxPings} keep-warm ping${policy.maxPings===1?'':'s'} while a user is away.`:'Send no keep-warm pings.'].filter(Boolean);
+  return [keep,policy.keepUnder?`Parts of at most ${policy.keepUnder} tokens always stay.`:'',policy.long?'Ask for one-hour cache entries.':'',policy.maxPings?`Send up to ${policy.maxPings} keep-warm ping${policy.maxPings===1?'':'s'} while a user is away.`:'Send no keep-warm pings.'].filter(Boolean);
 }
 // The saving when the threads are drawn again from the ones at hand: the 5th and 95th percentile.
 function savingRange(ours,theirs,seed) {

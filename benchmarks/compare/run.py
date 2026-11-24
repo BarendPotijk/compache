@@ -226,6 +226,15 @@ def price(args):
             return held["policy_cost"] / held["turns"] * 1000 * per_token
 
         arms, warm = [], []
+        fitted = replay(
+            compache.fit(
+                train,
+                sum(train_labels, []),
+                model=args.model,
+                observed_until=docchat.END,
+                **docchat.HEADER,
+            )
+        )
         for lifetime in (spec, hour):
             policy = compache.fit(
                 train,
@@ -234,8 +243,6 @@ def price(args):
                 observed_until=docchat.END,
                 **docchat.HEADER,
             )
-            if lifetime is spec:
-                fitted = replay(policy)
             for pings in args.pings:
                 cost = replay(policy, recipes=[], planner_options={"max_pings": pings})
                 warm.append((cost, lifetime.cache_ttl_seconds, pings))

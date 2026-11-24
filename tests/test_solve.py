@@ -1,6 +1,7 @@
 """The solver picks the cut and the ping count by replayed cost on its own threads."""
 
 import unittest
+from dataclasses import replace
 
 from helpers import END, labels_for, thread
 
@@ -55,6 +56,52 @@ class WorkloadSolveTests(unittest.TestCase):
         self.assertGreater(chosen[400]["max_pings"], 0)
         self.assertEqual(chosen[3630]["max_pings"], 0)
         self.assertTrue(all(c["recipe"] is None for c in chosen.values()))
+
+    def test_the_cache_lifetime_follows_how_users_return(self):
+        hour = replace(self.spec, cache_ttl_seconds=3600, write_multiplier=2.0)
+        solved = {
+            gap: self.solve(threads(gap), lifetimes=(hour,))
+            for gap in (40, 1500, 7000, 20_000)
+        }
+        chosen = {
+            gap: artifact["solve"]["chosen"]["cache_ttl_seconds"]
+            for gap, artifact in solved.items()
+        }
+        # Back in seconds: the default is warm anyway. After 25 minutes only the longer one is,
+        # after two hours with pings. After many hours neither is, so the cheaper write wins.
+        self.assertEqual(chosen, {40: 300, 1500: 3600, 7000: 3600, 20_000: 300})
+        pings = {g: a["solve"]["chosen"]["max_pings"] for g, a in solved.items()}
+        self.assertEqual(pings, {40: 0, 1500: 0, 7000: 1, 20_000: 0})
+        # A lifetime that could help no return is not priced at all.
+        priced = {
+            gap: sorted({c["cache_ttl_seconds"] for c in a["solve"]["candidates"]})
+            for gap, a in solved.items()
+        }
+        self.assertEqual(
+            priced,
+            {40: [300], 1500: [300, 3600], 7000: [300, 3600], 20_000: [300]},
+        )
+        # The policy carries what it won under, and what the provider does by default.
+        slow = solved[1500]
+        self.assertEqual(slow["model_spec"], hour.to_dict())
+        self.assertEqual(slow["standard_spec"], self.spec.to_dict())
+        self.assertEqual(WorkloadPolicy(slow).spec, hour)
+        self.assertNotIn("standard_spec", solved[40])
+        # Its saving is against what an application does on its own: the default lifetime, no pings.
+        alone = self.solve(threads(1500))["solve"]["keep_everything_cost"]
+        self.assertEqual(slow["solve"]["keep_everything_cost"], alone)
+        self.assertGreater(slow["solve"]["saving_fraction"], 0.2)
+        # Nothing was cut here, so caching alone is all there is to it.
+        self.assertEqual(slow["solve"]["caching_alone"], slow["solve"]["chosen"])
+
+    def test_a_lifetime_changes_nothing_but_the_cache(self):
+        with self.assertRaisesRegex(ContractError, "nothing else"):
+            self.solve(
+                threads(1500),
+                lifetimes=(
+                    replace(self.spec, cache_ttl_seconds=3600, read_multiplier=0.2),
+                ),
+            )
 
     def test_solved_policy_carries_its_cut_and_ping_count(self):
         sample = threads(400, long_answers=True)

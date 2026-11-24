@@ -25,11 +25,17 @@ __all__ = [
     "Scan",
     "Slot",
     "TextStream",
+    "cache_mark",
     "dialect_for",
     "sse_events",
+    "with_lifetime",
 ]
 
 _CACHE = {"type": "ephemeral"}
+# How a lifetime other than the provider's default is spelled in a cache mark, by its seconds.
+_TTLS = {3600: "1h"}
+# What an application fills in itself, where a key may be called anything.
+_FREE = ("input", "input_schema", "parameters", "arguments")
 
 
 @dataclass(frozen=True)
@@ -110,6 +116,41 @@ def _text_parts(content: Any, base: tuple, types=("text",)) -> list[tuple[tuple,
             ):
                 found.append(((*base, j, "text"), part["text"]))
     return found
+
+
+def cache_mark(lifetime: float | None = None) -> dict:
+    """A cache mark that asks for a lifetime in seconds, or for the provider's default."""
+    if lifetime is None:
+        return dict(_CACHE)
+    if lifetime not in _TTLS:
+        raise ValueError(f"no cache mark asks for {lifetime:g} seconds")
+    return {**_CACHE, "ttl": _TTLS[lifetime]}
+
+
+def with_lifetime(value: Any, lifetime: float | None) -> Any:
+    """A request with every cache mark in it asking for this lifetime. What has none comes back as it is.
+
+    All of them change: an entry with a longer lifetime may not follow one with
+    a shorter, so one mark alone would be refused.
+    """
+    if lifetime is None:
+        return value
+    if isinstance(value, dict):
+        changed = {}
+        for key, inner in value.items():
+            if key == "cache_control" and isinstance(inner, dict):
+                asked = {**inner, **cache_mark(lifetime)}
+                if asked != inner:
+                    changed[key] = asked
+            elif key not in _FREE:
+                made = with_lifetime(inner, lifetime)
+                if made is not inner:
+                    changed[key] = made
+        return {**value, **changed} if changed else value
+    if isinstance(value, list):
+        made = [with_lifetime(inner, lifetime) for inner in value]
+        return made if any(a is not b for a, b in zip(made, value)) else value
+    return value
 
 
 def _has_cache_mark(value: Any) -> bool:

@@ -188,7 +188,7 @@ class FitTests(unittest.TestCase):
         pairs = [conversation(f"t{i}") for i in range(5)]
         threads = [t for t, _ in pairs]
         labels = [row for _, rows in pairs for row in rows]
-        options = dict(model="claude-sonnet-5-5", share_headers=False)
+        options = dict(model="claude-sonnet-5-5", share_headers=False, lifetimes=())
         from_text = compache.fit(
             threads, labels, system_prompt="." * 31, **options
         ).summary

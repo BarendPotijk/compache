@@ -615,6 +615,25 @@ class Live:
         except Exception:
             logger.warning("compache: a turn was not recorded", exc_info=True)
 
+    @property
+    def _lifetime(self) -> float | None:
+        """The cache lifetime the policy was fitted for, where it is not the provider's default."""
+        return None if self.policy is None else self.policy.cache_lifetime
+
+    def _asking(self, conversation, send, body):
+        """`send`, with the requests made here asking for the cache lifetime of the policy."""
+        if self._lifetime is None:
+            return send
+
+        def asked(payload):
+            # What the application wrote goes out as it wrote it.
+            ours = payload is not body and conversation.session is not None
+            return send(
+                wire.with_lifetime(payload, self._lifetime) if ours else payload
+            )
+
+        return asked
+
     def _exchange(self, path, body, send, thread, at=None, asks=True) -> Result:
         self.stats["calls"] += 1
         dialect = wire.dialect_for(path)
@@ -638,7 +657,14 @@ class Live:
                 conversation.when = at[0] if at is not None else None
                 try:
                     call = self._prepare(
-                        conversation, chains, dialect, body, scan, turns, send, asks
+                        conversation,
+                        chains,
+                        dialect,
+                        body,
+                        scan,
+                        turns,
+                        self._asking(conversation, send, body),
+                        asks,
                     )
                 except Exception:
                     logger.warning(
@@ -695,7 +721,7 @@ class Live:
             self._stand_down(conversation, number, now)
             plain = body
         marked = (
-            dialect.with_cache_mark(plain)
+            wire.with_lifetime(dialect.with_cache_mark(plain), self._lifetime)
             if conversation.session is not None
             else plain
         )

@@ -336,7 +336,10 @@ def tiny_policy(prices: str, shape: str = "tool"):
         threads.append(
             {"thread_id": f"tiny-{i}", "provenance": "sizes only", "runs": runs}
         )
-    return compache.fit(threads, labels, model=prices, share_headers=False)
+    # The default lifetime: the provider's cache sees seconds where the policy sees an hour.
+    return compache.fit(
+        threads, labels, model=prices, share_headers=False, lifetimes=()
+    )
 
 
 def check(args):
@@ -1177,7 +1180,7 @@ def report(args):
         print(json.dumps(out, indent=1))
 
 
-def main(argv=None):
+def parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -1291,7 +1294,11 @@ def main(argv=None):
     )
     parser.add_argument("--verbose", action="store_true", help="Print the whole report")
     parser.add_argument("--figure", help="Where report writes the data of the figure")
-    args = parser.parse_args(argv)
+    return parser
+
+
+def main(argv=None):
+    args = parser().parse_args(argv)
     commands = {
         "check": check,
         "learn": learn,

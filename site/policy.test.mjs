@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {gunzipSync} from 'node:zlib';
-import {DEFAULTS, candidateCuts, configure, describePolicy, fitPolicy, generateWorkload, pingCounts, runArm, simulate, theoreticalSurvival, continueChance, warmReturnShare} from './engine.mjs';
+import {DEFAULTS, candidateCuts, configure, describePolicy, fitPolicy, generateWorkload, pingCounts, runArm, simulate, theoreticalSurvival, continueChance, warmReturnShare, longAvailable} from './engine.mjs';
 import {comparisons} from './baselines.mjs';
 import {applyPreset, presets} from './models.mjs';
 import {measure, parseRows, readThread} from './traces.mjs';
@@ -92,7 +92,7 @@ test('a summary replaces what is older than the tail, from the request itself or
 });
 test('the fit is deterministic, keeps everything as a candidate and takes the cheapest', () => {
   const c = configure(applyPreset({...STARTS[0].scenario, threads: 15}, 'sonnet')), w = generateWorkload(c), fit = fitPolicy(w, c);
-  assert.deepEqual(fit, fitPolicy(w, c)); assert.ok(fit.candidates.filter(x => x.everything).length === pingCounts(c).length);
+  assert.deepEqual(fit, fitPolicy(w, c)); assert.ok(fit.candidates.filter(x => x.everything).length === 2 * pingCounts(c).length);
   for (const x of fit.candidates) { assert.ok(fit.chosen.cost <= x.cost + 1e-12); if (!x.everything) assert.ok(x.coverage >= .8 && x.kept < 1); }
   // Each cut on the frontier keeps more than every smaller one.
   const cuts = candidateCuts(w, c); assert.ok(cuts.length > 1 && cuts.length <= 6); cuts.slice(1).forEach((x, i) => { assert.ok(x.coverage >= cuts[i].coverage + .01 - 1e-9 && x.kept >= cuts[i].kept); });
@@ -113,10 +113,10 @@ test('the package and the calculator agree on DocChat: the saving against sendin
 });
 test('a policy of your own is priced instead of the fitted one, which is still reported', () => {
   const c = applyPreset({...STARTS[0].scenario, threads: 10, policy: {questions: 2, retrieved: 1}}, 'sonnet'), r = simulate(c);
-  assert.deepEqual({...r.policy}, {questions: 2, answers: null, retrieved: 1, maxPings: 0, keepUnder: 0}); assert.equal(r.fit.pinned, true); assert.ok(r.fit.fittedHere > 0);
+  assert.deepEqual({...r.policy}, {questions: 2, answers: null, retrieved: 1, maxPings: 0, keepUnder: 0, long: false}); assert.equal(r.fit.pinned, true); assert.ok(r.fit.fittedHere > 0);
   assert.deepEqual(describePolicy(r.policy), ['Keep questions from the last 2 turns, all answers and retrieved text from the last turn.', 'Send no keep-warm pings.']);
   assert.deepEqual(describePolicy({questions: null, answers: null, retrieved: null, maxPings: 1, keepUnder: 0}), ['Keep the whole history in view.', 'Send up to 1 keep-warm ping while a user is away.']);
-  for (const bad of [{questions: -1}, {answers: 1.5}, {other: 1}, {maxPings: null}]) assert.throws(() => configure({policy: bad}), /policy/);
+  for (const bad of [{questions: -1}, {answers: 1.5}, {other: 1}, {maxPings: null}, {long: 1}]) assert.throws(() => configure({policy: bad}), /policy/);
 });
 test('what is compared: a named comparison, your app, or a cost you measured', () => {
   const base = {...STARTS[0].scenario, threads: 8}, run = o => simulate(applyPreset({...base, ...o}, 'sonnet'));
@@ -150,4 +150,18 @@ test('thread lengths: the laws, position effects and the chance of another turn'
 test('the published result is pinned', () => {
   const r = simulate(applyPreset({compare: 'openclaw'}, 'sonnet')); assert.equal(r.selected.id, 'openclaw'); near(r.selected.per1000, 207.77, .01);
   assert.equal(presets.sonnet.anthropic, true); assert.ok(comparisons(r.config).length >= 10); assert.equal(Object.keys(DEFAULTS).includes('target'), false);
+});
+test('the long cache is fitted where a model has one to ask for', () => {
+  const fitted = (preset, changes) => { const c = configure(applyPreset({...STARTS[0].scenario, threads: 25, ...changes}, preset)); return {c, fit: fitPolicy(generateWorkload(c), c)}; };
+  // Users back in seconds find the default cache warm. After half an hour only the long one is.
+  const quick = fitted('sonnet', {gapMedianMinutes: .5, gapP95Minutes: 3}), slow = fitted('sonnet', {gapMedianMinutes: 25, gapP95Minutes: 55});
+  assert.equal(quick.fit.chosen.policy.long, false); assert.equal(slow.fit.chosen.policy.long, true);
+  assert.ok(describePolicy(slow.fit.chosen.policy).includes('Ask for one-hour cache entries.'));
+  // The package cannot ask OpenAI for its longer one on every API, so no policy here does either.
+  const luna = fitted('luna', {gapMedianMinutes: 60, gapP95Minutes: 300});
+  assert.ok(luna.fit.candidates.every(x => !x.policy.long)); assert.equal(longAvailable(luna.c), false);
+  // Keeping everything under it is the comparison with the long cache.
+  const everything = slow.fit.candidates.find(x => x.everything && x.policy.long && !x.policy.maxPings);
+  const rules = runArm(generateWorkload(slow.c), slow.c, {kind: 'rules', rules: {cache: 'long'}}, {collectLedger: false});
+  assert.ok(Math.abs(everything.cost - rules.totals.cost) < 1e-9 * rules.totals.cost);
 });

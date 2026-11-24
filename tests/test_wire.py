@@ -267,6 +267,74 @@ class ScanTests(unittest.TestCase):
                 [True, False],
             )
 
+    def test_every_cache_mark_asks_for_the_lifetime(self):
+        mark = {"type": "ephemeral"}
+        # Where an application may have put marks, and where the same words mean something of its own.
+        body = {
+            "model": "claude-sonnet-5-5",
+            "cache_control": mark,
+            "system": [{"type": "text", "text": "Rules.", "cache_control": mark}],
+            "tools": [
+                {
+                    "name": "f",
+                    "input_schema": {
+                        "properties": {"cache_control": {"type": "string"}}
+                    },
+                    "cache_control": {**mark, "ttl": "5m"},
+                }
+            ],
+            "messages": [
+                {"role": "user", "content": "Question?"},
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "c",
+                            "name": "f",
+                            "input": {"cache_control": {"type": "ephemeral"}},
+                        }
+                    ],
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "c",
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": "Found.",
+                                    "cache_control": mark,
+                                }
+                            ],
+                        }
+                    ],
+                },
+            ],
+        }
+        before = copy.deepcopy(body)
+        asked = wire.with_lifetime(body, 3600)
+        self.assertEqual(body, before)
+        hour = {"type": "ephemeral", "ttl": "1h"}
+        self.assertEqual(asked["cache_control"], hour)
+        self.assertEqual(asked["system"][0]["cache_control"], hour)
+        self.assertEqual(asked["tools"][0]["cache_control"], hour)
+        self.assertEqual(
+            asked["messages"][2]["content"][0]["content"][0]["cache_control"], hour
+        )
+        # The application's own words are left alone, and what did not change is the same object.
+        self.assertEqual(
+            asked["tools"][0]["input_schema"], body["tools"][0]["input_schema"]
+        )
+        self.assertIs(asked["messages"][1], body["messages"][1])
+        self.assertIs(wire.with_lifetime(asked, 3600), asked)
+        self.assertIs(wire.with_lifetime(body, None), body)
+        self.assertEqual(wire.cache_mark(), mark)
+        with self.assertRaises(ValueError):
+            wire.cache_mark(60)
+
     def test_a_request_that_waits_for_a_tool_says_so(self):
         call = {
             "id": "c",
