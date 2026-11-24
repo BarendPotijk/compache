@@ -18,7 +18,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import compache
-from compache import doctor, launch
+from compache import doctor, launch, proxy
 from compache.cli import main
 from compache.proxy import _decoded, serve as proxied
 from compache.record import load, load_calls
@@ -177,6 +177,54 @@ class SetupTests(unittest.TestCase):
             made["provider"]["anthropic"]["options"]["baseURL"],
             "http://127.0.0.1:9999/v1",
         )
+
+    def test_kilo_takes_the_same_configuration_under_a_name_of_its_own(self):
+        (variable,) = self.told("kilo")[0]
+        self.assertEqual(variable, "KILO_CONFIG_CONTENT")
+
+    def test_copilot_with_a_model_of_one_s_own(self):
+        with self.assertRaisesRegex(ValueError, "COPILOT_PROVIDER_BASE_URL"):
+            self.told("copilot")
+        for kind, api in (("", "openai"), ("azure", "openai"), ("anthropic",) * 2):
+            changes, _, upstreams = self.told(
+                "copilot",
+                {
+                    "COPILOT_PROVIDER_BASE_URL": "https://eu.example/v1",
+                    "COPILOT_PROVIDER_TYPE": kind,
+                },
+            )
+            base = changes["COPILOT_PROVIDER_BASE_URL"]
+            self.assertEqual(base, "http://127.0.0.1:9999/v1")
+            self.assertEqual(upstreams, {api: "https://eu.example"})
+
+    def test_pi_is_told_by_an_extension(self):
+        with tempfile.TemporaryDirectory() as folder:
+            before = os.environ.get("COMPACHE_HOME")
+            os.environ["COMPACHE_HOME"] = folder
+            try:
+                changes, ahead, _ = self.told("pi")
+            finally:
+                os.environ.pop("COMPACHE_HOME")
+                if before is not None:
+                    os.environ["COMPACHE_HOME"] = before
+            self.assertEqual(ahead[0], "-e")
+            self.assertIn("registerProvider", Path(ahead[1]).read_text())
+        told = json.loads(changes["COMPACHE_BASES"])
+        self.assertEqual(told["anthropic"], "http://127.0.0.1:9999")
+        self.assertEqual(told["openai"], "http://127.0.0.1:9999/v1")
+
+    def test_crush(self):
+        changes, _, upstreams = self.told(
+            "crush", {"OPENAI_API_ENDPOINT": "https://gateway.example/api/v1"}
+        )
+        self.assertEqual(
+            changes,
+            {
+                "OPENAI_API_ENDPOINT": "http://127.0.0.1:9999/api/v1",
+                "ANTHROPIC_API_ENDPOINT": "http://127.0.0.1:9999",
+            },
+        )
+        self.assertEqual(upstreams, {"openai": "https://gateway.example"})
 
     def test_gemini_aider_and_goose(self):
         self.assertEqual(
@@ -445,6 +493,35 @@ class ProxyTests(unittest.TestCase):
         path = "http://provider.example/v1/chat/completions"
         self.assertEqual(asked[0], (path, "Basic bWU6aXRAcw==", self.body))
         self.assertEqual(asked[1], "provider.example:443")
+
+    def test_a_base_url_without_the_version_works_too(self):
+        heard = []
+
+        class Heard:
+            def __init__(self, base, method, path, *more):
+                heard.append((base, path))
+
+            def __call__(self, payload, raw=None):
+                return compache.live.Result(200, json=FakeModel().chat(payload)[1])
+
+        before = proxy._Upstream
+        proxy._Upstream = Heard
+        self.addCleanup(setattr, proxy, "_Upstream", before)
+        for upstream in (None, "https://gateway.example"):
+            self.server.forward(upstream, {})
+            request = urllib.request.Request(
+                self.base + "/chat/completions",
+                json.dumps(self.body).encode(),
+                {"Content-Type": "application/json"},
+            )
+            urllib.request.urlopen(request).close()
+        self.assertEqual(
+            list(dict.fromkeys(heard)),
+            [
+                ("https://api.openai.com", "/v1/chat/completions"),
+                ("https://gateway.example", "/chat/completions"),
+            ],
+        )
 
     def test_a_request_in_chunks_is_read(self):
         pieces = iter(

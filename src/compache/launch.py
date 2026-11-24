@@ -48,6 +48,10 @@ _VARIABLES = {
 # What a base URL of that API ends on, and so what is set when none is.
 _PATHS = {"anthropic": "", "openai": "/v1", "gemini": ""}
 _GOOSE = {"openai": ("OPENAI_HOST",), "anthropic": ("ANTHROPIC_HOST",)}
+_CRUSH = {
+    "openai": ("OPENAI_API_ENDPOINT",),
+    "anthropic": ("ANTHROPIC_API_ENDPOINT",),
+}
 # What says that this machine reaches others through a proxy.
 _PROXIES = ("http_proxy", "https_proxy", "all_proxy")
 
@@ -160,22 +164,26 @@ def _codex(bases: dict, env: dict) -> tuple[dict, list, dict]:
     return {}, [w for line in said for w in ("-c", line)], {"openai": given}
 
 
-def _opencode(bases: dict, env: dict) -> tuple[dict, list, dict]:
-    try:
-        given = json.loads(env.get("OPENCODE_CONFIG_CONTENT") or "{}")
-    except ValueError:
-        given = {}
-    providers = dict(given.get("provider") or {})
-    for name, base in (
-        ("anthropic", bases["anthropic"].rstrip("/") + "/v1"),
-        ("openai", bases["openai"]),
-        ("google", bases["gemini"].rstrip("/") + "/v1beta"),
-    ):
-        own = dict(providers.get(name) or {})
-        own["options"] = {"baseURL": base, **(own.get("options") or {})}
-        providers[name] = own
-    content = {**given, "provider": providers}
-    return {"OPENCODE_CONFIG_CONTENT": json.dumps(content)}, [], {}
+def _configured(variable: str):
+    """opencode, or an agent made from it, which takes its configuration from a variable."""
+
+    def setup(bases: dict, env: dict) -> tuple[dict, list, dict]:
+        try:
+            given = json.loads(env.get(variable) or "{}")
+        except ValueError:
+            given = {}
+        providers = dict(given.get("provider") or {})
+        for name, base in (
+            ("anthropic", bases["anthropic"].rstrip("/") + "/v1"),
+            ("openai", bases["openai"]),
+            ("google", bases["gemini"].rstrip("/") + "/v1beta"),
+        ):
+            own = dict(providers.get(name) or {})
+            own["options"] = {"baseURL": base, **(own.get("options") or {})}
+            providers[name] = own
+        return {variable: json.dumps({**given, "provider": providers})}, [], {}
+
+    return setup
 
 
 def _goose(bases: dict, env: dict) -> tuple[dict, list, dict]:
@@ -183,10 +191,52 @@ def _goose(bases: dict, env: dict) -> tuple[dict, list, dict]:
     return {name: _origin(bases[api]) for name, api in hosts.items()}, [], {}
 
 
+def _crush(bases: dict, env: dict) -> tuple[dict, list, dict]:
+    return {names[0]: bases[api] for api, names in _CRUSH.items()}, [], {}
+
+
+def _copilot(bases: dict, env: dict) -> tuple[dict, list, dict]:
+    given = env.get("COPILOT_PROVIDER_BASE_URL")
+    if not given:
+        raise ValueError(
+            "what GitHub hosts does not go through compache. For a model of your own, set "
+            "COPILOT_PROVIDER_BASE_URL and COPILOT_MODEL (copilot help providers-env)"
+        )
+    kind = (env.get("COPILOT_PROVIDER_TYPE") or "openai").lower()
+    api = {"anthropic": "anthropic", "google": "gemini"}.get(kind, "openai")
+    base = _origin(bases["openai"]) + _path(given)
+    changes = {"COPILOT_PROVIDER_BASE_URL": base, "COPILOT_PROVIDER_TRANSPORT": "http"}
+    return changes, [], {api: given}
+
+
+# What pi loads to be told: its own way of sending a provider's models elsewhere.
+_PI = """// Written by compache wrap: what pi asks of these providers goes through it.
+export default function (pi) {
+  const bases = JSON.parse(process.env.COMPACHE_BASES || "{}");
+  for (const [name, baseUrl] of Object.entries(bases)) pi.registerProvider(name, { baseUrl });
+}
+"""
+
+
+def _pi(bases: dict, env: dict) -> tuple[dict, list, dict]:
+    file = home() / "pi" / "compache.js"
+    file.parent.mkdir(parents=True, exist_ok=True)
+    file.write_text(_PI, "utf-8")
+    told = {
+        "anthropic": bases["anthropic"],
+        "openai": bases["openai"],
+        "google": bases["gemini"].rstrip("/") + "/v1beta",
+    }
+    return {"COMPACHE_BASES": json.dumps(told)}, ["-e", str(file)], {}
+
+
 AGENTS = {
     "claude": Agent("claude", "Claude Code", _claude, _reading("anthropic")),
     "codex": Agent("codex", "Codex", _codex, {}),
-    "opencode": Agent("opencode", "opencode", _opencode, _VARIABLES),
+    "opencode": Agent(
+        "opencode", "opencode", _configured("OPENCODE_CONFIG_CONTENT"), _VARIABLES
+    ),
+    "kilo": Agent("kilo", "Kilo", _configured("KILO_CONFIG_CONTENT"), _VARIABLES),
     "gemini": Agent("gemini", "Gemini CLI", _plain("gemini"), _reading("gemini")),
     "qwen": Agent("qwen", "Qwen Code", _plain("openai"), _reading("openai")),
     "aider": Agent(
@@ -196,6 +246,9 @@ AGENTS = {
         _reading("openai", "anthropic"),
     ),
     "goose": Agent("goose", "goose", _goose, _GOOSE),
+    "crush": Agent("crush", "Crush", _crush, _CRUSH),
+    "copilot": Agent("copilot", "Copilot CLI", _copilot, {}),
+    "pi": Agent("pi", "pi", _pi, {}),
 }
 
 

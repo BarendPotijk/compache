@@ -72,6 +72,8 @@ _HOP = {
     "content-length",
     "accept-encoding",
 }
+# Paths as they come from an SDK whose base URL was set without the API's version.
+_UNVERSIONED = ("/messages", "/chat/completions", "/responses", "/models")
 _BODY = {
     "content-length",
     "content-encoding",
@@ -312,6 +314,9 @@ def serve(
             raw = self._read()
             headers = {k.lower(): v for k, v in self.headers.items()}
             base = forward["all"] or targets[_family(self.path, headers)]
+            if base in DEFAULTS.values() and self.path.startswith(_UNVERSIONED):
+                # SDKs differ in whether a base URL holds the version. Their providers do not.
+                self.path = "/v1" + self.path
             kept = [
                 (k, v)
                 for k, v in self.headers.items()

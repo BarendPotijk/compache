@@ -36,6 +36,13 @@ def tokens(value) -> int:
     return len(json.dumps(value, ensure_ascii=False).encode()) // 4
 
 
+def unmarked(value):
+    """What is cached of a value: where the cache marks stand does not matter."""
+    if isinstance(value, dict):
+        return {k: unmarked(v) for k, v in value.items() if k != "cache_control"}
+    return [unmarked(v) for v in value] if isinstance(value, list) else value
+
+
 class FakeModel:
     """Replies from a script, and meters a prompt cache.
 
@@ -267,6 +274,7 @@ class FakeModel:
                 "error": {"message": made.get("error", "refused")},
             }
         head = [body.get("tools"), body.get("system"), body.get("output_config")]
+        head = unmarked(head)
         if "cache_control" in body and blocks:
             marks.append(len(blocks) - 1)
         meter = self._meter(head, blocks, marks[-1] if marks else None, marks)
