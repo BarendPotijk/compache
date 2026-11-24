@@ -57,6 +57,23 @@ A request that should have hit the cache and read nothing suspends pings for tha
 | Rewrite a copy | Archived parts get their notice, and from the first notice on the model has a `reopen` tool. A part no larger than its notice stays. Tool calls, images, thinking blocks and anything unknown stay as they were |
 | Read the reply | The model's `reopen` calls are answered and the model asked again, inside a stream too. A model still fetching after three rounds, or saying nothing, gets the application's own request instead, and a conversation where that happens twice is left alone. Of a turn with several calls, the first call's usage says what the turn found cached and the last call's what it leaves |
 
+## Agents
+
+A turn of an agent is a loop of many calls, so there the unit is the call. `compache fit` sees it by the calls per turn and fits a policy of its own, `compache.agent`.
+
+| | |
+|---|---|
+| What is decided | The newest rounds of tool results stay in full. Older ones become a notice at the next call where that is cheaper at once (the cache has expired, or a long request is billed dearer), or where what goes is so many times as large as what would be written again behind it |
+| What is fitted | How many rounds, how many times, keep-warm pings while a tool runs and while a user is away, the cache lifetime, and whether instructions and tools get a longer one. Some 250 candidates, each priced on every recorded call by the provider's cache rules |
+| What has to stay | At least 85% of the calls that rely on an earlier result find it in view. A call relies on a result where its reply repeats a line that only this tool returned. A call that does not find it is priced as fetching it back: one more call, and the result again |
+| Sizes | The provider's own count. What a request grew by belongs to the results that joined it, so text that is dense in tokens counts as dense |
+| Shared instructions | A conversation that begins while another has the same instructions and tools in the cache reads them |
+| Too little data | Under 40 calls that rely on something, only the cut that public runs taught is priced, with every lifetime and number of pings |
+
+`Flow`, what a conversation holds and what the provider has cached of it, is one class that the fit, the replay and the runtime share, so what was priced is what happens.
+
+In the request path a loop is recognized by the IDs of its tool calls. Conversations that share a name, as a main agent and those it starts, are kept apart by what was asked, and a request that branches off, as a host's suggestion of what to say next, leaves the main line as it stood. What the model fetched back is put into the later requests at its place, and goes with the cut it would go with. Where an application rewrites what its tools had returned, the policy starts over from what it says now.
+
 ## Notes from the model
 
 Labels normally come from reading past conversations. Where those cannot be read, the model that answered is asked, on a sample of turns.
@@ -70,7 +87,7 @@ A model names what helped as readily as what the turn could not do without, so n
 
 ## Assumptions
 
-- One model call per user message, unless the threads record more.
+- One model call per user message, unless the threads record more. An agent's policy takes the calls one by one.
 - The cache lifetime counts from when a request is sent, so a long answer leaves less of it for the user's return.
 - A cache entry lives exactly the lifetime in the model spec.
 - Tokens are estimated at four bytes each unless the engine is given a tokenizer.

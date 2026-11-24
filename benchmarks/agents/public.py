@@ -105,63 +105,96 @@ def prompts(rows: list[dict], calls: int, median: float, sigma: float = 1.2):
     return made
 
 
-def price(folder: Path) -> None:
+def price(folder: Path, output: Path | None) -> None:
     rows = runs(folder)
-    cases = [("one task at a stretch", sessions(rows, 1, 0))]
-    cases += [
-        (f"three tasks, back after {m} s", sessions(rows, 3, m))
-        for m in (30, 240, 1800)
-    ]
-    cases += [
-        (f"eight calls a prompt, back after {m} s", prompts(rows, 8, m))
-        for m in (30, 240, 900)
-    ]
+    cases = [("one task at a stretch", 0, sessions(rows, 1, 0))]
+    for median in (30, 240, 1800):
+        name = f"three tasks, back after {median} s"
+        cases.append((name, median, sessions(rows, 3, median)))
+    for median in (30, 240, 900):
+        name = f"eight calls a prompt, back after {median} s"
+        cases.append((name, median, prompts(rows, 8, median)))
     print(f"{len(rows)} runs. Dollars per 1,000 calls on runs the fit has not seen.\n")
-    for name, made in cases:
+    priced = []
+    for name, median, made in cases:
         threads = compache.load_threads(made, model=MODELS[0])
         train, test = threads[::2], threads[1::2]
         for model in MODELS:
-            spec = model_spec(model)
-            unit = 1000 * pricing(model)["input_price_per_million"] / 1e6
+            spec, longer = model_spec(model), cache_lifetimes(model)
             fitted = agent.fit_agent(
-                train,
-                spec,
-                lifetimes=cache_lifetimes(model),
-                header_tokens=HEADER,
+                train, spec, lifetimes=longer, header_tokens=HEADER
             )
             held = agent.replay_agent(fitted, test, header_tokens=HEADER)
+            # Everything kept, at the pings and lifetimes that were cheapest on what was fitted on.
             alone = fitted["solve"]["caching_alone"]
-            asked = next(
-                s
-                for s in (spec, *cache_lifetimes(model))
-                if s.cache_ttl_seconds == alone["cache_ttl_seconds"]
-            )
+            specs = {s.cache_ttl_seconds: s.to_dict() for s in (spec, *longer)}
             cached = agent.replay_agent(
                 {
-                    **fitted,
                     "recipe": alone["recipe"],
-                    "model_spec": asked.to_dict(),
+                    "model_spec": specs[alone["cache_ttl_seconds"]],
+                    "header_spec": specs[alone["header_ttl_seconds"]],
                     "standard_spec": spec.to_dict(),
                 },
                 test,
                 header_tokens=HEADER,
             )
-            calls = held["calls"]
+            calls, recipe = held["calls"], fitted["recipe"]
+            unit = 1000 * pricing(model)["input_price_per_million"] / 1e6 / calls
+            ttl = fitted["model_spec"]["cache_ttl_seconds"]
+            row = {
+                "case": name,
+                "median": median,
+                "model": model,
+                "calls": calls,
+                "whole": held["keep_everything_cost"] * unit,
+                "cached": cached["policy_cost"] * unit,
+                "policy": held["policy_cost"] * unit,
+                "coverage": held["coverage"],
+                "fetched_back": held["missed_calls"] / calls,
+                **recipe,
+                "ttl": ttl,
+                "header_ttl": fitted.get("header_spec", {}).get(
+                    "cache_ttl_seconds", ttl
+                ),
+            }
+            priced.append(row)
             print(
-                f"{name:38} {model:18} whole ${held['keep_everything_cost'] / calls * unit:6.2f}  "
-                f"cached at its best ${cached['policy_cost'] / calls * unit:6.2f}  "
-                f"policy ${held['policy_cost'] / calls * unit:6.2f}  {held['saving']:4.0%} less, "
-                f"{held['coverage']:.0%} in view, {held['missed_calls'] / calls:.1%} of calls fetch back, "
-                f"{fitted['recipe']['rounds']} rounds, ratio {fitted['recipe']['ratio']}, "
-                f"pings {fitted['recipe']['tool_pings']}/{fitted['recipe']['user_pings']}, "
-                f"entries {fitted['model_spec']['cache_ttl_seconds']:.0f} s, "
-                f"header {fitted.get('header_spec', fitted['model_spec'])['cache_ttl_seconds']:.0f} s"
+                f"{name:38} {model:18} whole ${row['whole']:6.2f}  cached ${row['cached']:6.2f}  "
+                f"policy ${row['policy']:6.2f}  {1 - row['policy'] / row['whole']:4.0%} less, "
+                f"{row['coverage']:.0%} in view, {row['fetched_back']:.1%} of calls fetch back, "
+                f"{row['rounds']} rounds, ratio {row['ratio']}, pings {row['tool_pings']}/{row['user_pings']}, "
+                f"entries {ttl:.0f} s, header {row['header_ttl']:.0f} s"
             )
+    if output is not None:
+        shown = "claude-sonnet-5-5"
+        shows = {
+            "one task at a stretch": "One task at a stretch",
+            "eight calls a prompt, back after 240 s": "A few steps, a 4-minute break",
+            "three tasks, back after 240 s": "Three tasks, 4-minute breaks",
+        }
+        figure = [
+            {**r, "heading": shows[r["case"]]}
+            for name in shows
+            for r in priced
+            if r["model"] == shown and r["case"] == name
+        ]
+        data = {
+            "model_name": pricing(shown)["name"],
+            "runs": len(rows),
+            "header_tokens": HEADER,
+            "rows": priced,
+            "figure": figure,
+        }
+        output.write_text(json.dumps(data, indent=1) + "\n")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("command", choices=["fetch", "price"])
     parser.add_argument("folder", type=Path)
+    parser.add_argument("--output", type=Path, help="Where to write the figure's data")
     args = parser.parse_args()
-    {"fetch": fetch, "price": price}[args.command](args.folder)
+    if args.command == "fetch":
+        fetch(args.folder)
+    else:
+        price(args.folder, args.output)

@@ -3,6 +3,7 @@
 | Page | Covers |
 |---|---|
 | [Guide](guide.md) | Thread and label formats, recording without past traces, `compache fit`, `replay` and `profile`, applying a policy |
+| [Agents](agents.md) | `compache wrap` for coding agents, what it does in a loop of tool calls, how it learns, what it saves |
 | [Integrations](integrations.md) | Every way into the request path: SDK clients, LangChain, the proxy for agent harnesses. And every source of traces |
 | [How it works](how-it-works.md) | What is read from the threads, how candidates are priced, what the runtime decides |
 | [Calculator](calculator.md) | The browser cost model, what it compares, and opening it on your own workload |

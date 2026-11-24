@@ -2,7 +2,7 @@
 """Draw the figures under docs/assets from the data files in docs/assets/data.
 
     python scripts/figures.py              # every figure
-    python scripts/figures.py breaks thread   # some of: headline, requests, breaks, thread, openclaw, preview, live, compare, workflow
+    python scripts/figures.py breaks thread   # some of: headline, requests, breaks, agents, thread, openclaw, preview, live, compare, workflow
 
 Every figure paints its own surface and carries a light and a dark palette, so it
 reads on either GitHub theme. The palette, typeface and marks are the calculator's.
@@ -14,6 +14,7 @@ Where the data comes from:
     live.json          python benchmarks/live/run.py report --work <folder> --figure docs/assets/data/live.json
     answers.json       the graded answers on benchmarks/live/README.md
     requests.json      python scripts/request_sizes.py
+    agents.json        python benchmarks/agents/public.py price <runs> --output ...
     compare.json       python benchmarks/compare/run.py price --data <fast> <mixed> <slow> --sizes ... --output ...
 """
 
@@ -247,14 +248,67 @@ def requests(data):
 # -- how long users are away ---------------------------------------------------
 
 
-def breaks(data):
-    """Three groups of columns, one per return pattern: sending everything on each cache, and compache."""
+def grouped(title, subtitle, legend, groups, description, size):
+    """A panel of columns per group, the saving beside them and what was picked under them."""
     width, height = 880, 400
     left, right, top, bottom, gap = 24, 24, 112, 52, 20
-    clocks = list(data["clocks"].values())
-    panel = (width - left - right - gap * (len(clocks) - 1)) / len(clocks)
+    panel = (width - left - right - gap * (len(groups) - 1)) / len(groups)
     plot, thick, space = height - top - bottom, 46, 14
     base = top + plot
+    highest = max(value for group in groups for _, value in group["columns"])
+    body = [
+        "<style>.n2{fill:#c3c2b7}@media (prefers-color-scheme:dark){.n2{fill:#5a5954}}</style>",
+        text(24, 32, title, "big"),
+        text(24, 51, subtitle, "t2"),
+    ]
+    at = 24
+    for cls, label in legend:
+        body.append(
+            f'<rect class="{cls}" x="{at}" y="66" width="10" height="10" rx="2"/>'
+        )
+        body.append(text(at + 16, 75.5, label, "t2"))
+        at += 6.2 * len(label) + 44
+    for i, group in enumerate(groups):
+        x0, columns = left + i * (panel + gap), group["columns"]
+        wide = len(columns) * thick + (len(columns) - 1) * space
+        body += [
+            text(x0, top - 4, group["heading"], "h"),
+            f'<line class="axis" x1="{x0:.1f}" x2="{x0 + wide:.1f}" y1="{base}" y2="{base}"/>',
+        ]
+        # The tallest column leaves room for its own number under the heading.
+        scale = (plot - 40) / highest
+        for k, (cls, value) in enumerate(columns):
+            x, tall = x0 + k * (thick + space), value * scale
+            body.append(
+                f'<path class="{cls}" d="M{x:.1f},{base} v-{tall - 4:.1f} a4,4 0 0 1 4,-4 h{thick - 8} '
+                f'a4,4 0 0 1 4,4 v{tall - 4:.1f} z"/>'
+            )
+            body.append(
+                text(
+                    x + thick / 2,
+                    base - tall - 8,
+                    size(value),
+                    "h" if cls == "c" else "t2",
+                    "middle",
+                )
+            )
+        # The saving stands beside the column it belongs to.
+        beside = x0 + wide + space
+        for row, (saved, against) in enumerate(group["beside"]):
+            body += [
+                text(beside, base - 56 + 36 * row, saved, "h"),
+                text(beside, base - 41 + 36 * row, against, "tm"),
+            ]
+        body += [
+            text(x0, base + 20, "compache picked", "tm"),
+            text(x0, base + 36, group["picked"], "t2"),
+        ]
+    return svg(width, height, title, description, body)
+
+
+def breaks(data):
+    """Three groups of columns, one per return pattern: sending everything on each cache, and compache."""
+    clocks = list(data["clocks"].values())
 
     def everything(clock, seconds):
         return next(
@@ -265,93 +319,86 @@ def breaks(data):
             and r["cache_ttl_seconds"] == seconds
         )
 
-    highest = max(everything(c, 300) for c in clocks)
-    body = [
-        "<style>.n2{fill:#c3c2b7}@media (prefers-color-scheme:dark){.n2{fill:#5a5954}}</style>",
-        text(
-            24,
-            32,
-            "The longer users are away, the more compache saves",
-            "big",
-        ),
-        text(
-            24,
-            51,
-            f"Cost per 1,000 messages. Same document chats, {data['model_name']}, "
-            f"{clocks[0]['test_turns']:,} messages compache had not seen.",
-            "t2",
-        ),
-    ]
-    at = 24
-    for cls, label in (
-        ("n", "Send everything, 5-minute cache"),
-        ("n2", "Send everything, 1-hour cache"),
-        ("c", "compache"),
-    ):
-        body.append(
-            f'<rect class="{cls}" x="{at}" y="66" width="10" height="10" rx="2"/>'
-        )
-        body.append(text(at + 16, 75.5, label, "t2"))
-        at += 6.2 * len(label) + 44
-    summary = []
-    for i, clock in enumerate(clocks):
-        x0 = left + i * (panel + gap)
+    groups, summary = [], []
+    for clock in clocks:
         fitted = next(r for r in clock["candidates"] if r["fitted"])
         ours = fitted["dollars_per_1000_turns"]
         short, long = everything(clock, 300), everything(clock, 3600)
-        body += [
-            text(
-                x0,
-                top - 4,
-                f"Users back after {away(clock['median_idle_seconds'])}",
-                "h",
-            ),
-            f'<line class="axis" x1="{x0:.1f}" x2="{x0 + 3 * thick + 2 * space:.1f}" y1="{base}" y2="{base}"/>',
-        ]
-        # The tallest column leaves room for its own number under the heading.
-        scale = (plot - 40) / highest
-        for k, (cls, value) in enumerate((("n", short), ("n2", long), ("c", ours))):
-            x, tall = x0 + k * (thick + space), value * scale
-            body.append(
-                f'<path class="{cls}" d="M{x:.1f},{base} v-{tall - 4:.1f} a4,4 0 0 1 4,-4 h{thick - 8} '
-                f'a4,4 0 0 1 4,4 v{tall - 4:.1f} z"/>'
-            )
-            body.append(
-                text(
-                    x + thick / 2,
-                    base - tall - 8,
-                    dollars(value),
-                    "h" if cls == "c" else "t2",
-                    "middle",
-                )
-            )
-        # The saving stands beside the column it belongs to.
-        beside = x0 + 3 * (thick + space)
-        for row, (saved, against) in enumerate(
-            ((1 - ours / short, "than 5-minute"), (1 - ours / long, "than 1-hour"))
-        ):
-            body += [
-                text(beside, base - 56 + 36 * row, f"{saved:.0%} less", "h"),
-                text(beside, base - 41 + 36 * row, against, "tm"),
-            ]
         pings = fitted["max_pings"]
         cache = "1-hour" if fitted["cache_ttl_seconds"] == 3600 else "5-minute"
         chose = f"{cache} cache, " + (f"up to {pings} pings" if pings else "no pings")
-        body += [
-            text(x0, base + 20, "compache picked", "tm"),
-            text(x0, base + 36, chose, "t2"),
-        ]
+        groups.append(
+            {
+                "heading": f"Users back after {away(clock['median_idle_seconds'])}",
+                "columns": [("n", short), ("n2", long), ("c", ours)],
+                "beside": [
+                    (f"{1 - ours / short:.0%} less", "than 5-minute"),
+                    (f"{1 - ours / long:.0%} less", "than 1-hour"),
+                ],
+                "picked": chose,
+            }
+        )
         summary.append(
             f"Users back after {away(clock['median_idle_seconds'])}: everything {dollars(short)} on the 5-minute cache, "
             f"{dollars(long)} on the 1-hour cache, compache {dollars(ours)} with {chose}."
         )
-    return svg(
-        width,
-        height,
+    return grouped(
         "The longer users are away, the more compache saves",
+        f"Cost per 1,000 messages. Same document chats, {data['model_name']}, "
+        f"{clocks[0]['test_turns']:,} messages compache had not seen.",
+        (
+            ("n", "Send everything, 5-minute cache"),
+            ("n2", "Send everything, 1-hour cache"),
+            ("c", "compache"),
+        ),
+        groups,
         "Cost per 1,000 messages of sending everything and of compache, for three return patterns. "
         + " ".join(summary),
-        body,
+        dollars,
+    )
+
+
+def agents(data):
+    """Three groups of columns, one per way of working: an agent's calls as they are, and with compache."""
+    groups, summary = [], []
+    for row in data["figure"]:
+        ours, whole, best = row["policy"], row["whole"], row["cached"]
+        picked = f"{row['rounds']} rounds in full, "
+        pings = row["user_pings"]
+        if row["header_ttl"] > row["ttl"]:
+            picked += "1-hour instructions"
+        elif pings:
+            picked += f"{pings} ping{'' if pings == 1 else 's'}"
+        else:
+            picked += f"{'1-hour' if row['ttl'] == 3600 else '5-minute'} cache"
+        groups.append(
+            {
+                "heading": row["heading"],
+                "columns": [("n", whole), ("n2", best), ("c", ours)],
+                "beside": [
+                    (f"{1 - ours / whole:.0%} less", "than everything"),
+                    (f"{1 - ours / best:.0%} less", "than cached"),
+                ],
+                "picked": picked,
+            }
+        )
+        summary.append(
+            f"{row['heading']}: everything {dollars(whole)}, cached at its best {dollars(best)}, "
+            f"compache {dollars(ours)} with {picked}."
+        )
+    return grouped(
+        "What an agent saves follows from how it is worked with",
+        f"Cost per 1,000 model calls on {data['model_name']}. {data['runs']} public coding-agent runs, "
+        "the half compache had not seen.",
+        (
+            ("n", "Send everything"),
+            ("n2", "Send everything, cached at its best"),
+            ("c", "compache"),
+        ),
+        groups,
+        "Cost per 1,000 model calls of sending everything and of compache, for three ways of working. "
+        + " ".join(summary),
+        dollars,
     )
 
 
@@ -870,6 +917,7 @@ FIGURES = {
     "headline": ("headline.svg", "live.json", headline),
     "requests": ("requests.svg", "requests.json", requests),
     "breaks": ("breaks-cost.svg", "policy-grid.json", breaks),
+    "agents": ("agents-cost.svg", "agents.json", agents),
     "thread": ("thread-dependencies.svg", "thread.json", thread),
     "openclaw": ("openclaw-cost.svg", "openclaw.json", openclaw),
     "preview": ("preview.svg", "openclaw.json", preview),
