@@ -3,7 +3,7 @@
 
   cost     fit a policy on each build's training threads and price it on its test threads
   answers  a model answers test turns from the full history and from the policy's view; a judge grades both
-  grid     price every candidate the fit considered on the test threads (the policy map figure)
+  grid     price every candidate the fit considered on the test threads (the breaks figure)
   thread   one thread's turns, what each needed and what the policy kept (the thread figure)
 
 Builds of one dataset with different --clock values share their text and differ only in timing.

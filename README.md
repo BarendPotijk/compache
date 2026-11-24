@@ -113,11 +113,11 @@ Because every chatbot needs a different answer. Three workloads, three settings,
 | **Long personal chats** ([BEAM](benchmarks/beam/README.md)) | What the user said matters. Earlier replies of the assistant can go | **57%&nbsp;to&nbsp;91%&nbsp;less** |
 | **Data analysis** ([LongDS](benchmarks/README.md)) | Almost every step builds on earlier ones. Keep nearly everything, and time the pings | **0%&nbsp;to&nbsp;32%&nbsp;less** |
 
-On DocChat that is against Claude's 5-minute cache, and against its 1-hour cache [30% to 79%](#results). How long users stay away matters as much. The same document chats, with three kinds of users:
+How long users stay away matters as much. The same document chats, with three kinds of users, and what compache picked for each:
 
-![The same chats with users who return after 30 seconds, 4 minutes and 30 minutes: sending everything costs 1.8, 5.9 and 8.9 times what compache's setting costs](docs/assets/policy-map.svg)
+![Cost per 1,000 messages for users who are back after 30 seconds, 4 minutes and 30 minutes. Sending everything on the 5-minute cache: $34, $143, $286. On the 1-hour cache: $28, $39, $155. compache: $19, $24, $32](docs/assets/breaks-cost.svg)
 
-A fixed rule such as "keep the last 20 messages" or "summarize at 75% of the window" is one setting for all of these.
+A fixed rule such as "keep the last 20 messages" or "summarize at 75% of the window" is one setting for all of these. DocChat's 43% to 89% is against the 5-minute cache. On the 1-hour cache it is 30% to 79%.
 
 ## Results
 

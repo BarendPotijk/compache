@@ -2,7 +2,7 @@
 """Draw the figures under docs/assets from the data files in docs/assets/data.
 
     python scripts/figures.py              # every figure
-    python scripts/figures.py map thread   # some of: headline, requests, map, thread, openclaw, preview, live, compare, workflow
+    python scripts/figures.py breaks thread   # some of: headline, requests, breaks, thread, openclaw, preview, live, compare, workflow
 
 Every figure paints its own surface and carries a light and a dark palette, so it
 reads on either GitHub theme. The palette, typeface and marks are the calculator's.
@@ -244,164 +244,112 @@ def requests(data):
     )
 
 
-# -- the policy map ---------------------------------------------------------
+# -- how long users are away ---------------------------------------------------
 
 
-def policy_map(data):
-    """Three panels, one per return pattern: cost against how much history stays in view."""
-    width, height = 880, 424
-    left, right, top, bottom, gap = 52, 20, 140, 48, 28
-    clocks = list(data["clocks"].items())
+def breaks(data):
+    """Three groups of columns, one per return pattern: sending everything on each cache, and compache."""
+    width, height = 880, 400
+    left, right, top, bottom, gap = 24, 24, 112, 52, 20
+    clocks = list(data["clocks"].values())
     panel = (width - left - right - gap * (len(clocks) - 1)) / len(clocks)
-    plot = height - top - bottom
-    highest = max(
-        c["dollars_per_1000_turns"] for _, clock in clocks for c in clock["candidates"]
-    )
-    step = 100 if highest > 150 else 50 if highest > 60 else 10
-    ceiling = step * -(-highest // step)
-    most = max(c["max_pings"] for _, clock in clocks for c in clock["candidates"])
+    plot, thick, space = height - top - bottom, 46, 14
+    base = top + plot
 
-    def y(value):
-        return top + plot - value / ceiling * plot
+    def everything(clock, seconds):
+        return next(
+            r["dollars_per_1000_turns"]
+            for r in clock["candidates"]
+            if r["recipe"] is None
+            and r["max_pings"] == 0
+            and r["cache_ttl_seconds"] == seconds
+        )
 
+    highest = max(everything(c, 300) for c in clocks)
     body = [
+        "<style>.n2{fill:#c3c2b7}@media (prefers-color-scheme:dark){.n2{fill:#5a5954}}</style>",
         text(
             24,
-            30,
-            "The longer your users are away, the more sending everything costs",
+            32,
+            "The longer users are away, the more compache saves",
             "big",
         ),
         text(
             24,
-            49,
-            f"Cost per 1,000 messages of every setting compache tried. Same chats, {data['model_name']} with prompt caching on.",
+            51,
+            f"Cost per 1,000 messages. Same document chats, {data['model_name']}, "
+            f"{clocks[0]['test_turns']:,} messages compache had not seen.",
             "t2",
         ),
     ]
-    legend = [
-        ("line ns", "Default cache, no pings"),
-        ("line cs", f"Up to {most} pings"),
-        ("dot c", "What compache picked"),
-        ("dot n", "Send everything"),
-    ]
-    lives = {r["cache_ttl_seconds"] for _, clock in clocks for r in clock["candidates"]}
-    if len(lives) > 1:
-        hours = max(lives) / 3600
-        named = "One-hour" if hours == 1 else f"{hours:g}-hour"
-        legend.insert(2, ("line os", f"{named} cache, up to {most} pings"))
     at = 24
-    for kind, label in legend:
-        if kind.startswith("line"):
-            body.append(
-                f'<line class="{kind}" x1="{at}" x2="{at + 18}" y1="70" y2="70"/>'
-            )
-            at += 24
-        else:
-            body.append(
-                f'<circle class="{kind[4:]} ring" cx="{at + 5}" cy="70" r="5.5"/>'
-            )
-            at += 16
-        body.append(text(at, 74, label, "t2"))
-        at += 6.4 * len(label) + 22
-    summary = []
-    for i, (name, clock) in enumerate(clocks):
-        x0 = left + i * (panel + gap)
-
-        def x(share, x0=x0):
-            return x0 + share * panel
-
-        rows = clock["candidates"]
-        fitted = next(r for r in rows if r["fitted"])
-        standard = min(r["cache_ttl_seconds"] for r in rows)
-        default = next(r for r in rows if r["recipe"] is None and r["max_pings"] == 0)
-        ratio = default["dollars_per_1000_turns"] / fitted["dollars_per_1000_turns"]
-        summary.append(
-            f"Users back after {away(clock['median_idle_seconds'])}: fitted {dollars(fitted['dollars_per_1000_turns'])}, "
-            f"keep everything with the default cache and no pings {dollars(default['dollars_per_1000_turns'])}, "
-            f"with the cheapest cache setting {dollars(min(r['dollars_per_1000_turns'] for r in rows if r['recipe'] is None))}."
-        )
+    for cls, label in (
+        ("n", "Send everything, 5-minute cache"),
+        ("n2", "Send everything, 1-hour cache"),
+        ("c", "compache"),
+    ):
         body.append(
+            f'<rect class="{cls}" x="{at}" y="66" width="10" height="10" rx="2"/>'
+        )
+        body.append(text(at + 16, 75.5, label, "t2"))
+        at += 6.2 * len(label) + 44
+    summary = []
+    for i, clock in enumerate(clocks):
+        x0 = left + i * (panel + gap)
+        fitted = next(r for r in clock["candidates"] if r["fitted"])
+        ours = fitted["dollars_per_1000_turns"]
+        short, long = everything(clock, 300), everything(clock, 3600)
+        body += [
             text(
                 x0,
-                top - 30,
+                top - 4,
                 f"Users back after {away(clock['median_idle_seconds'])}",
                 "h",
-            )
-        )
-        body.append(
-            text(x0, top - 14, f"sending everything costs {ratio:.1f}× as much", "tm")
-        )
-        for tick in range(0, int(ceiling) + 1, step):
+            ),
+            f'<line class="axis" x1="{x0:.1f}" x2="{x0 + 3 * thick + 2 * space:.1f}" y1="{base}" y2="{base}"/>',
+        ]
+        # The tallest column leaves room for its own number under the heading.
+        scale = (plot - 40) / highest
+        for k, (cls, value) in enumerate((("n", short), ("n2", long), ("c", ours))):
+            x, tall = x0 + k * (thick + space), value * scale
             body.append(
-                f'<line class="{"axis" if tick == 0 else "grid"}" x1="{x0:.1f}" x2="{x0 + panel:.1f}" y1="{y(tick):.1f}" y2="{y(tick):.1f}"/>'
+                f'<path class="{cls}" d="M{x:.1f},{base} v-{tall - 4:.1f} a4,4 0 0 1 4,-4 h{thick - 8} '
+                f'a4,4 0 0 1 4,4 v{tall - 4:.1f} z"/>'
             )
-            if i == 0:
-                body.append(text(x0 - 8, y(tick) + 4, f"${tick}", "tm", "end"))
-        for share in (0, 0.5, 1):
-            anchor = "start" if share == 0 else "end" if share == 1 else "middle"
-            body.append(text(x(share), top + plot + 17, f"{share:.0%}", "tm", anchor))
-        longest = max(r["cache_ttl_seconds"] for r in rows)
-        kinds = [(0, standard, "ns"), (most, standard, "cs")]
-        if longest > standard:
-            kinds.append((most, longest, "os"))
-        for pings, lifetime, cls in kinds:
-            line = sorted(
-                (
-                    r
-                    for r in rows
-                    if r["max_pings"] == pings and r["cache_ttl_seconds"] == lifetime
-                ),
-                key=lambda r: r["tokens_kept"],
-            )
-            points = [
-                (x(r["tokens_kept"]), y(r["dollars_per_1000_turns"])) for r in line
-            ]
             body.append(
-                f'<path class="line {cls}" d="M'
-                + " L".join(f"{px:.1f},{py:.1f}" for px, py in points)
-                + '"/>'
-            )
-            fill = {"ns": "n", "cs": "c", "os": "o"}[cls]
-            body += [
-                f'<circle class="{fill}" cx="{px:.1f}" cy="{py:.1f}" r="2.5"/>'
-                for px, py in points
-            ]
-            if cls == "os":
-                whole = line[-1]["dollars_per_1000_turns"]
-                px, py = points[-1]
-                # Beside the label of sending everything, or under it where the two are close.
-                near = abs(py - y(default["dollars_per_1000_turns"])) < 26
-                body.append(
-                    text(px - 2, py + (16 if near else -8), dollars(whole), "tm", "end")
+                text(
+                    x + thick / 2,
+                    base - tall - 8,
+                    dollars(value),
+                    "h" if cls == "c" else "t2",
+                    "middle",
                 )
-        dx, dy = x(default["tokens_kept"]), y(default["dollars_per_1000_turns"])
-        body.append(f'<circle class="n ring" cx="{dx:.1f}" cy="{dy:.1f}" r="5.5"/>')
-        body.append(
-            text(
-                dx - 9, dy - 8, dollars(default["dollars_per_1000_turns"]), "t2", "end"
             )
+        # The saving stands beside the column it belongs to.
+        beside = x0 + 3 * (thick + space)
+        for row, (saved, against) in enumerate(
+            ((1 - ours / short, "than 5-minute"), (1 - ours / long, "than 1-hour"))
+        ):
+            body += [
+                text(beside, base - 56 + 36 * row, f"{saved:.0%} less", "h"),
+                text(beside, base - 41 + 36 * row, against, "tm"),
+            ]
+        pings = fitted["max_pings"]
+        cache = "1-hour" if fitted["cache_ttl_seconds"] == 3600 else "5-minute"
+        chose = f"{cache} cache, " + (f"up to {pings} pings" if pings else "no pings")
+        body += [
+            text(x0, base + 20, "compache picked", "tm"),
+            text(x0, base + 36, chose, "t2"),
+        ]
+        summary.append(
+            f"Users back after {away(clock['median_idle_seconds'])}: everything {dollars(short)} on the 5-minute cache, "
+            f"{dollars(long)} on the 1-hour cache, compache {dollars(ours)} with {chose}."
         )
-        fx, fy = x(fitted["tokens_kept"]), y(fitted["dollars_per_1000_turns"])
-        body.append(f'<circle class="c ring" cx="{fx:.1f}" cy="{fy:.1f}" r="6.5"/>')
-        body.append(
-            text(fx - 11, fy + 4, dollars(fitted["dollars_per_1000_turns"]), "b", "end")
-        )
-    body.append(
-        text(
-            left + (width - left - right) / 2,
-            height - 12,
-            "Share of the history kept",
-            "t2",
-            "middle",
-        )
-    )
     return svg(
         width,
         height,
-        "The longer users are away, the more sending everything costs",
-        "Cost per 1,000 messages against the share of the history kept, for three return patterns and these settings: "
-        + ", ".join(label for kind, label in legend if kind.startswith("line"))
-        + ". "
+        "The longer users are away, the more compache saves",
+        "Cost per 1,000 messages of sending everything and of compache, for three return patterns. "
         + " ".join(summary),
         body,
     )
@@ -921,7 +869,7 @@ def workflow():
 FIGURES = {
     "headline": ("headline.svg", "live.json", headline),
     "requests": ("requests.svg", "requests.json", requests),
-    "map": ("policy-map.svg", "policy-grid.json", policy_map),
+    "breaks": ("breaks-cost.svg", "policy-grid.json", breaks),
     "thread": ("thread-dependencies.svg", "thread.json", thread),
     "openclaw": ("openclaw-cost.svg", "openclaw.json", openclaw),
     "preview": ("preview.svg", "openclaw.json", preview),
