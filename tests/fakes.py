@@ -9,6 +9,7 @@ behind a local HTTP port, so SDK clients and the proxy can be run against it.
 from __future__ import annotations
 
 import hashlib
+import itertools
 import json
 import re
 import threading
@@ -52,6 +53,7 @@ class FakeModel:
         self.bodies: list[dict] = []
         self.paths: list[str] = []
         self.headers: list[dict] = []
+        self._numbers = itertools.count(1)
         self._cache: dict[str, float] = {}
         self._lock = threading.Lock()
 
@@ -113,6 +115,8 @@ class FakeModel:
             else {"text": f"Answer {len(self.bodies)}."}
         )
         made.setdefault("text", "")
+        # A number of its own for every call, also where several are made at the same moment.
+        made["id"] = next(self._numbers)
         made["tools"] = made.get("tools") or (
             [made["tool"]] if made.get("tool") else []
         )
@@ -176,7 +180,7 @@ class FakeModel:
         if made["tools"]:
             message["tool_calls"] = [
                 {
-                    "id": f"call_{len(self.bodies)}" + (f"_{k}" if k else ""),
+                    "id": f"call_{made['id']}" + (f"_{k}" if k else ""),
                     "type": "function",
                     "function": {"name": name, "arguments": json.dumps(arguments)},
                 }
@@ -279,7 +283,7 @@ class FakeModel:
             content.append(
                 {
                     "type": "tool_use",
-                    "id": f"toolu_{len(self.bodies)}" + (f"_{k}" if k else ""),
+                    "id": f"toolu_{made['id']}" + (f"_{k}" if k else ""),
                     "name": name,
                     "input": arguments,
                 }
@@ -380,7 +384,7 @@ class FakeModel:
             "output_tokens_details": {"reasoning_tokens": 0},
         }
         usage["total_tokens"] = usage["input_tokens"] + usage["output_tokens"]
-        n, output = len(self.bodies), []
+        n, output = made["id"], []
         if made.get("reasoning"):
             output.append(
                 {
