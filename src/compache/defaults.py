@@ -18,9 +18,9 @@ import math
 import random
 from dataclasses import asdict
 
-from .agent import SCHEMA, default_recipe
+from .agent import SCHEMA, default_header, default_recipe
 from .api import Policy, fit
-from .models import model_spec, pricing
+from .models import cache_lifetimes, model_spec, pricing
 from .record import SIZES_ONLY
 
 __all__ = ["WORKLOAD", "default_policy", "default_workload"]
@@ -119,10 +119,12 @@ def default_policy(model, *, agent: bool = False, seed: int = 42, **changes) -> 
     if changes:
         raise TypeError("the default policy for agents has no workload to change")
     spec = model_spec(model)
+    header = default_header(spec, cache_lifetimes(model))
     return Policy(
         {
             "schema_version": SCHEMA,
             "model_spec": spec.to_dict(),
+            **({} if header is None else {"header_spec": header.to_dict()}),
             "recipe": asdict(default_recipe(spec)),
             "reserve_tokens": 8192,
             "training_threads": [],

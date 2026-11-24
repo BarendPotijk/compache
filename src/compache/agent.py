@@ -39,6 +39,7 @@ __all__ = [
     "Call",
     "Flow",
     "calls_of",
+    "default_header",
     "default_recipe",
     "fit_agent",
     "is_agentic",
@@ -696,9 +697,10 @@ def replay_agent(
 def default_recipe(spec: ModelSpec) -> AgentRecipe:
     """Where to start without recorded conversations, by how cheap the model's cache reads are.
 
-    Fitted on 174 public coding-agent runs of 43 to 100 calls, one task and three to a
-    session: the cheaper a read, the less it is worth to write a conversation again for
-    leaving something out.
+    What does best over seven kinds of sessions made of 174 public coding-agent runs, from
+    one task at a stretch to prompts of eight calls with a user in between
+    (benchmarks/agents/public.py): the cheaper a read, the less it is worth to write a
+    conversation again for leaving something out.
     """
     if spec.cache_ttl_seconds <= 0:
         return AgentRecipe(rounds=12, ratio=0.0)
@@ -707,8 +709,17 @@ def default_recipe(spec: ModelSpec) -> AgentRecipe:
         rounds=8 if cheap else 12,
         ratio=2.0 if cheap else 1.5,
         tool_pings=3,
-        user_pings=1,
     )
+
+
+def default_header(spec: ModelSpec, lifetimes) -> ModelSpec | None:
+    """The lifetime to start with for instructions and tools: the longest a provider can be asked for.
+
+    They stay the same from session to session, so an entry that lives an hour is written once
+    and read for as long as somebody is at work.
+    """
+    longer = [s for s in lifetimes if s.cache_ttl_seconds > spec.cache_ttl_seconds]
+    return max(longer, key=lambda s: s.cache_ttl_seconds, default=None)
 
 
 # -- in words ----------------------------------------------------------------------

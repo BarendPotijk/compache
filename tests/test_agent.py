@@ -515,6 +515,10 @@ class CommandTests(unittest.TestCase):
         policy = compache.default_policy("claude-sonnet-5-5", agent=True)
         self.assertEqual(policy.max_pings, 3)
         self.assertIsNone(policy.cache_lifetime)
+        self.assertEqual(policy.header_lifetime, 3600)
+        self.assertIsNone(
+            compache.default_policy("gpt-6-luna", agent=True).header_lifetime
+        )
         self.assertIsNone(policy.summary["saving"])
         with self.assertRaises(TypeError):
             compache.default_policy("claude-sonnet-5-5", agent=True, threads=3)

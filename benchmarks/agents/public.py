@@ -29,7 +29,7 @@ ROWS = (
     "&config=default&split=train&offset={}&length=3"
 )
 MODELS = ("claude-sonnet-5-5", "claude-haiku-5-5", "gpt-6-luna")
-HEADER = 8_000
+HEADER = 18_000
 
 
 def fetch(folder: Path) -> None:
@@ -86,13 +86,39 @@ def sessions(rows: list[dict], tasks: int, median: float, sigma: float = 1.2):
     return made
 
 
+def prompts(rows: list[dict], calls: int, median: float, sigma: float = 1.2):
+    """Runs given in prompts of a few calls each, with a user in between: how people work with an agent."""
+    r, made = random.Random(5), []
+    for i, row in enumerate(rows):
+        at, messages, made_calls = 1_790_000_000.0 + 1e7 * i, [], 0
+        for message in row["messages"]:
+            at += {"assistant": 8, "tool": 3}.get(message["role"], 0)
+            if message["role"] == "assistant":
+                made_calls += 1
+                if made_calls % calls == 0 and messages[-1]["role"] == "tool":
+                    said = {"role": "assistant", "content": "That part is done."}
+                    messages.append({**said, "at": at})
+                    at += median * math.exp(r.gauss(0, sigma))
+                    messages.append({"role": "user", "content": "Go on.", "at": at})
+            messages.append({**message, "at": at})
+        made.append({"thread_id": f"p{i}", "messages": messages})
+    return made
+
+
 def price(folder: Path) -> None:
     rows = runs(folder)
-    cases = [("one task", 1, 0)]
-    cases += [(f"three tasks, back after {m:g} s", 3, m) for m in (30, 240, 1800)]
+    cases = [("one task at a stretch", sessions(rows, 1, 0))]
+    cases += [
+        (f"three tasks, back after {m} s", sessions(rows, 3, m))
+        for m in (30, 240, 1800)
+    ]
+    cases += [
+        (f"eight calls a prompt, back after {m} s", prompts(rows, 8, m))
+        for m in (30, 240, 900)
+    ]
     print(f"{len(rows)} runs. Dollars per 1,000 calls on runs the fit has not seen.\n")
-    for name, tasks, median in cases:
-        threads = compache.load_threads(sessions(rows, tasks, median), model=MODELS[0])
+    for name, made in cases:
+        threads = compache.load_threads(made, model=MODELS[0])
         train, test = threads[::2], threads[1::2]
         for model in MODELS:
             spec = model_spec(model)
@@ -122,11 +148,14 @@ def price(folder: Path) -> None:
             )
             calls = held["calls"]
             print(
-                f"{name:32} {model:18} whole ${held['keep_everything_cost'] / calls * unit:6.2f}  "
+                f"{name:38} {model:18} whole ${held['keep_everything_cost'] / calls * unit:6.2f}  "
                 f"cached at its best ${cached['policy_cost'] / calls * unit:6.2f}  "
                 f"policy ${held['policy_cost'] / calls * unit:6.2f}  {held['saving']:4.0%} less, "
                 f"{held['coverage']:.0%} in view, {held['missed_calls'] / calls:.1%} of calls fetch back, "
-                f"{fitted['recipe']['rounds']} rounds, ratio {fitted['recipe']['ratio']}"
+                f"{fitted['recipe']['rounds']} rounds, ratio {fitted['recipe']['ratio']}, "
+                f"pings {fitted['recipe']['tool_pings']}/{fitted['recipe']['user_pings']}, "
+                f"entries {fitted['model_spec']['cache_ttl_seconds']:.0f} s, "
+                f"header {fitted.get('header_spec', fitted['model_spec'])['cache_ttl_seconds']:.0f} s"
             )
 
 
