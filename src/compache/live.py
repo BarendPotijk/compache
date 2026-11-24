@@ -901,12 +901,7 @@ class Live:
                                 dialect, out, slot.path, _GONE if i else notice[part_id]
                             )
             conversation.reopens = True
-        can_answer = not scan.stream or dialect.Stream is not wire.TextStream
-        if (
-            conversation.reopens
-            and can_answer
-            and _REOPEN not in dialect.tool_names(body)
-        ):
+        if conversation.reopens and _REOPEN not in dialect.tool_names(body):
             # A model that is offered the tool while nothing is archived calls it for nothing. So it
             # comes with the first notice, and stays: the first cut rewrites the request from near
             # its start anyway, and after that the tool never changes what is cached.

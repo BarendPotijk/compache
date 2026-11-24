@@ -622,7 +622,7 @@ class WorkloadSession:
         )
         return plan
 
-    def extend(self, plan, parts):
+    def extend(self, plan, parts, *, at=None):
         """Add parts that arrived while the pending run was being answered.
 
         A tool loop learns what it retrieved only after its first call. The
