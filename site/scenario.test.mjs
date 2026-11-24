@@ -24,10 +24,10 @@ test('a version 5 link loads: each look-back becomes a median of half and a 95th
   assert.deepEqual([config.retrievalDependencyTurnsBack, config.retrievalDependencyTurnsBackP95], [5, 10]);
   assert.deepEqual([config.outputDependencyTurnsBack, config.outputDependencyTurnsBackP95], [3, 5]);
   assert.deepEqual([config.inputDependencyProbability, config.retrievalDependencyProbability, config.outputDependencyProbability], [0.4, 0.25, 0.25]);
-  // Everything else is carried over, removed settings are gone, and the new OpenClaw constants take their defaults.
-  for (const key of ['tokenMedian', 'gapP95Minutes', 'retentionRequirement', 'seed', 'toolClearing', 'ttlMinutes']) assert.equal(config[key], old[key], key);
+  // Everything else is carried over, and removed settings are gone.
+  for (const key of ['tokenMedian', 'gapP95Minutes', 'retentionRequirement', 'seed', 'ttlMinutes']) assert.equal(config[key], old[key], key);
+  assert.equal(config.anthropic, true); assert.equal(config.compare, 'openclaw'); assert.deepEqual({...config.app}, {});
   assert.deepEqual(Object.keys(config).sort(), Object.keys(DEFAULTS).sort());
-  assert.equal(config.clearKeepResults, 3); assert.equal(config.summaryTriggerShare, 0.75);
   // Read as a current link, the same settings are refused instead of silently dropped.
   assert.throws(() => resolveScenario(parseLink(link(LINK_VERSION, 'sonnet', old))), /is not a setting/);
 });
@@ -39,6 +39,16 @@ test('versions 1 and 2 had one chance and one look-back for all kinds and no flo
   assert.deepEqual([bare.inputDependencyProbability, bare.inputDependencyTurnsBack, bare.inputDependencyTurnsBackP95], [0.25, 12, 24]);
   assert.deepEqual(migrateScenario(4, {retrievalDependencyLookback: 1, unknownOldKey: 3, model: {context: 5, gone: 1}}).model, {context: 5});
   assert.equal(migrateScenario(4, {retrievalDependencyLookback: 1}).retrievalDependencyTurnsBack, 1);
+});
+test('a version 6 link with a changed OpenClaw constant carries it over as the rules of your app', () => {
+  const six = resolveScenario(parseLink(link(6, 'sonnet', {tokenMedian: 4000, tokenP95: 9000, target: .2, warmTrigger: .5, maxPings: 12, toolClearing: true, clearKeepResults: 5, baselineReserve: 20000, tailTokens: 20000})));
+  assert.equal(six.legacy, true); assert.equal(six.config.compare, 'app'); assert.equal(six.config.app.clearKeepResults, 5); assert.equal(six.config.app.clear, true); assert.equal(six.config.app.summarize, true); assert.equal(six.config.maxPings, DEFAULTS.maxPings);
+  const usual = resolveScenario(parseLink(link(6, 'luna', {toolClearing: false, clearKeepResults: 3, tailTokens: 20000, inputDependencyTurnsBack: 2, inputDependencyTurnsBackP95: 9}))); assert.equal(usual.config.compare, 'openclaw'); assert.equal(usual.config.inputDependencyTurnsBack, 2);
+});
+test('drawn distributions, a policy and your app travel in a link', () => {
+  const gapDrawn = new Array(14).fill(0); gapDrawn[3] = 2; gapDrawn[8] = 1;
+  const config = configure(applyPreset({gapDrawn, policy: {questions: 4, retrieved: 1, maxPings: 1}, app: {keepTurns: 6, cache: 'long'}, compare: 'app', measuredCost: 12.5}, 'sonnet'));
+  const hash = shareHash(config, 'sonnet'); assert.ok(hash.length < 8000, String(hash.length)); assert.deepEqual(resolveScenario(parseLink(`#${hash}`)).config, config);
 });
 test('a share link carries every setting and the source label back unchanged', () => {
   const config = configure(applyPreset({tokenMedian: 3615, tokenP95: 4207, gapMedianMinutes: 4.18, gapP95Minutes: 31.3, plannedTurns: 27, plannedTurnsP95: 87, retrievalDependencyTurnsBack: 3, retrievalDependencyTurnsBackP95: 29}, 'sonnet'));
@@ -56,14 +66,14 @@ test('a profile made from traces fills in the workload and keeps the preset pric
   const {preset, config, source, legacy} = resolveScenario(parseFile(profile));
   assert.equal(preset, 'sonnet'); assert.equal(source, '30 threads, 1,227 turns'); assert.equal(legacy, false);
   for (const [key, value] of Object.entries(scenario)) assert.equal(config[key], value, key);
-  assert.deepEqual(config.model, presets.sonnet.model); assert.equal(config.ttlMinutes, 5); assert.equal(config.toolClearing, true);
+  assert.deepEqual(config.model, presets.sonnet.model); assert.equal(config.ttlMinutes, 5); assert.equal(config.anthropic, true);
   // The package's model ID names the same preset as the calculator's key.
   assert.deepEqual(resolveScenario(parseFile({...profile, calculator: {...profile.calculator, model: 'claude-sonnet-5-5'}})), {preset: 'sonnet', config, source, legacy});
   // The same profile through a link, as `compache profile` prints it.
-  assert.deepEqual(resolveScenario(parseLink(link(6, 'sonnet', scenario, '30 threads, 1,227 turns'))).config, config);
+  assert.deepEqual(resolveScenario(parseLink(link(LINK_VERSION, 'sonnet', scenario, '30 threads, 1,227 turns'))).config, config);
   // It runs: the workload and both arms complete.
   const r = simulate({...config, threads: 6});
-  assert.ok(r.compache.complete && r.openclaw.complete && r.optimization.feasible);
+  assert.ok(r.compache.complete && r.baseline.arm.complete && r.savings);
   // A model the calculator has no preset for brings its own prices and cache rules.
   const own = {...scenario, ttlMinutes: 60, cacheMinTokens: 2048, cacheBlockTokens: 64, model: {context: 400000, maxInput: 380000, inputRate: 3, cachedRate: 0.3, outputRate: 15, writeMultiplier: 2, longThreshold: 0, longInputMultiplier: 1, longOutputMultiplier: 1}};
   const custom = resolveScenario(parseFile({...profile, calculator: {model: 'custom', scenario: own}}));
@@ -74,24 +84,24 @@ test('a profile carries what depends on the position in a thread, and a link wit
   const measured = {lengthDistribution: 'continuation', continueFirst: 0.42, continueLong: 0.96, continueHalfTurn: 5, plannedTurns: 2, plannedTurnsP95: 31, continuationProbability: 1,
     retrievalShare: 0.83, reasoningTokens: 310, callsPerTurn: 2.4, answerSeconds: 11.5, gapMedianMinutes: 3.2, gapP95Minutes: 41, gapFirstFactor: 2.6, gapHalfTurn: 3,
     breakShare: 0.07, breakMedianMinutes: 960.5, sharedPrefixWarm: 0.25};
-  const {config, legacy} = resolveScenario(parseLink(link(6, 'claude-sonnet-5-5', measured, '212 threads, 1,904 turns')));
+  const {config, legacy} = resolveScenario(parseLink(link(LINK_VERSION, 'claude-sonnet-5-5', measured, '212 threads, 1,904 turns')));
   assert.equal(legacy, false);
   for (const [key, value] of Object.entries(measured)) assert.equal(config[key], value, key);
   // It runs, and the share link gives the same scenario back.
   const r = simulate({...config, threads: 8});
-  assert.ok(r.compache.complete && r.openclaw.complete && r.optimization.feasible);
-  assert.ok(r.compache.byRole.further.calls > 0 && r.openclaw.byRole.further.calls > 0);
+  assert.ok(r.compache.complete && r.baseline.arm.complete && r.savings);
+  assert.ok(r.compache.byRole.further.calls > 0 && r.baseline.arm.byRole.further.calls > 0);
   assert.deepEqual(resolveScenario(parseLink(`#${shareHash(config, 'sonnet')}`)).config, config);
   // The same through a profile file.
-  assert.deepEqual(resolveScenario(parseFile({schema_version: 'compache-profile-v1', calculator: {v: 6, model: 'sonnet', scenario: measured}})).config, config);
+  assert.deepEqual(resolveScenario(parseFile({schema_version: 'compache-profile-v1', calculator: {v: LINK_VERSION, model: 'sonnet', scenario: measured}})).config, config);
   // A link made before these settings existed takes their defaults, which change nothing.
   const before = resolveScenario(parseLink(link(6, 'sonnet', {tokenMedian: 3615, tokenP95: 4207}))).config;
   for (const key of ['continueFirst', 'continueLong', 'continueHalfTurn', 'gapFirstFactor', 'gapHalfTurn', 'breakShare', 'breakMedianMinutes', 'answerSeconds', 'callsPerTurn', 'sharedPrefixWarm', 'retrievalShare', 'reasoningTokens', 'cacheHitShare', 'archivedTokens'])
     assert.equal(before[key], DEFAULTS[key], key);
   assert.equal(before.lengthDistribution, 'lognormal');
   // A value out of range is refused by name.
-  assert.throws(() => resolveScenario({version: 6, model: 'sonnet', scenario: {callsPerTurn: 0}}), /callsPerTurn must be between 1 and 100/);
-  assert.throws(() => resolveScenario({version: 6, model: 'sonnet', scenario: {lengthDistribution: 'chance'}}), /lengthDistribution must be/);
+  assert.throws(() => resolveScenario({version: LINK_VERSION, model: 'sonnet', scenario: {callsPerTurn: 0}}), /callsPerTurn must be between 1 and 100/);
+  assert.throws(() => resolveScenario({version: LINK_VERSION, model: 'sonnet', scenario: {lengthDistribution: 'chance'}}), /lengthDistribution must be/);
 });
 test('an export of this page loads again, and an older export is migrated', () => {
   const config = configure(applyPreset({seed: 9}, 'opus'));
@@ -102,17 +112,17 @@ test('an export of this page loads again, and an older export is migrated', () =
 });
 test('whatever cannot be loaded is an error that names the cause, never a default', () => {
   const ok = {tokenMedian: 3615};
-  assert.throws(() => resolveScenario({version: 6, model: 'sonnet', scenario: {...ok, tokenMedain: 1}}), /tokenMedain is not a setting/);
-  assert.throws(() => resolveScenario({version: 6, model: 'sonnet', scenario: {...ok, gapMedianMinutes: 0}}), /gapMedianMinutes must be between/);
-  assert.throws(() => resolveScenario({version: 6, model: 'sonnet', scenario: {...ok, inputTokens: 29.5}}), /inputTokens must be a whole number/);
-  assert.throws(() => resolveScenario({version: 6, model: 'sonet', scenario: ok}), /sonet is not a model preset/);
-  assert.throws(() => resolveScenario({version: 6, model: 'custom', scenario: ok}), /custom prices need a model/);
-  assert.throws(() => resolveScenario({version: 6, model: 'sonnet', scenario: [1]}), /must be an object/);
-  assert.throws(() => resolveScenario({version: 7, model: 'sonnet', scenario: ok}), /newer version/);
+  assert.throws(() => resolveScenario({version: LINK_VERSION, model: 'sonnet', scenario: {...ok, tokenMedain: 1}}), /tokenMedain is not a setting/);
+  assert.throws(() => resolveScenario({version: LINK_VERSION, model: 'sonnet', scenario: {...ok, gapMedianMinutes: 0}}), /gapMedianMinutes must be between/);
+  assert.throws(() => resolveScenario({version: LINK_VERSION, model: 'sonnet', scenario: {...ok, inputTokens: 29.5}}), /inputTokens must be a whole number/);
+  assert.throws(() => resolveScenario({version: LINK_VERSION, model: 'sonet', scenario: ok}), /sonet is not a model preset/);
+  assert.throws(() => resolveScenario({version: LINK_VERSION, model: 'custom', scenario: ok}), /custom prices need a model/);
+  assert.throws(() => resolveScenario({version: LINK_VERSION, model: 'sonnet', scenario: [1]}), /must be an object/);
+  assert.throws(() => resolveScenario({version: LINK_VERSION + 1, model: 'sonnet', scenario: ok}), /newer version/);
   assert.throws(() => resolveScenario({version: null, model: 'sonnet', scenario: ok}), /version is missing/);
   assert.throws(() => parseLink('#v=6&model=sonnet&scenario={oops'), /not valid JSON/);
   assert.throws(() => parseFile({hello: 1}), /not a Compache profile/); assert.throws(() => parseFile(null), /not a Compache profile/);
   assert.throws(() => parseFile({schema_version: 'compache-profile-v1'}), /no calculator section/);
   // A long source label is cut, not refused.
-  assert.equal(resolveScenario({version: 6, model: 'sonnet', scenario: ok, source: 'x'.repeat(500)}).source.length, 120);
+  assert.equal(resolveScenario({version: LINK_VERSION, model: 'sonnet', scenario: ok, source: 'x'.repeat(500)}).source.length, 120);
 });

@@ -1,8 +1,9 @@
 // What carries a scenario into the calculator: a share link, a profile made from traces, or a file this page exported.
 import {DEFAULTS, configure} from './engine.mjs';
+import {RULES, OPENCLAW_RULES} from './baselines.mjs';
 import {applyPreset, presetKey} from './models.mjs';
 
-export const LINK_VERSION = 6;
+export const LINK_VERSION = 7;
 export const EXPORT_SCHEMA = `compache-cost-explorer-v${LINK_VERSION}`;
 export const PROFILE_SCHEMA = 'compache-profile-v1';
 const KINDS = ['input', 'retrieval', 'output'];
@@ -11,7 +12,7 @@ const isObject = value => value !== null && typeof value === 'object' && !Array.
 // Settings saved by an earlier version of the page, rewritten for this one.
 export function migrateScenario(version, scenario) {
   const v = Number(version), s = {...scenario};
-  for (const kind of KINDS) {
+  if (v <= 5) for (const kind of KINDS) {
     const chance = `${kind}DependencyProbability`, lookback = `${kind}DependencyLookback`;
     // Versions 1 and 2 had one chance and one look-back for every kind, and no floor on what stays in view.
     if (v <= 2) { s[chance] = s.dependencyProbability ?? .25; s[lookback] = s.dependencyLookback ?? 24; }
@@ -22,6 +23,15 @@ export function migrateScenario(version, scenario) {
     s[`${kind}DependencyTurnsBackP95`] = turns;
   }
   if (v <= 2) s.retentionRequirement = .95;
+  // Version 6 had one comparison, with its constants among the settings. Changed ones become the rules of your app.
+  const old = {clearTriggerShare: 'clearTriggerShare', clearTriggerFloor: 'clearTriggerFloor', clearKeepResults: 'clearKeepResults', clearMinFreedShare: 'clearMinFreedShare', clearMinFreedFloor: 'clearMinFreedFloor', clearedTokens: 'clearedTokens', summaryTriggerShare: 'summaryTriggerShare', baselineReserve: 'reserveTokens', tailTokens: 'tailTokens', summaryTokens: 'summaryTokens', summaryInputCap: 'summaryInputCap', toolSummaryTokens: 'toolSummaryTokens', summarySystemTokens: 'summarySystemTokens', recordTokens: 'recordTokens', flushOutputTokens: 'flushOutputTokens'};
+  const usual = {...RULES, ...OPENCLAW_RULES}, changed = Object.entries(old).filter(([from, to]) => s[from] !== undefined && s[from] !== usual[to]);
+  if (changed.length) { s.app = {...OPENCLAW_RULES, clear: s.toolClearing === true, ...Object.fromEntries(changed.map(([from, to]) => [to, s[from]]))}; s.compare = 'app'; }
+  if (typeof s.toolClearing === 'boolean') s.anthropic = s.toolClearing;
+  // It was compared with OpenClaw.
+  s.compare ??= 'openclaw';
+  // Its policies were of another form and its pings were not limited to what the package tries.
+  delete s.maxPings;
   // Settings that no longer exist are dropped.
   const known = Object.fromEntries(Object.entries(s).filter(([key]) => Object.hasOwn(DEFAULTS, key)));
   if (isObject(known.model)) known.model = Object.fromEntries(Object.entries(known.model).filter(([key]) => Object.hasOwn(DEFAULTS.model, key)));

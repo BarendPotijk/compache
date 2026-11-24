@@ -18,7 +18,7 @@ test('Haiku tiers include cached tokens and apply to the entire request',()=>{
 });
 test('identical six-minute gap is warm for Luna and cold for Claude',()=>{
  const workload={totalRuns:2,threads:[{id:'x',turns:[0,1].map(i=>({index:i,time:i*6,inputTokens:100,retrievalTokens:2000,outputTokens:100,dependencies:[]}))}]};
- const a=runArm(workload,applyPreset({keepWarm:false},'luna'),'compache'),b=runArm(workload,applyPreset({keepWarm:false},'opus'),'compache');
+ const a=runArm(workload,applyPreset({keepWarm:false},'luna'),{kind:'compache'}),b=runArm(workload,applyPreset({keepWarm:false},'opus'),{kind:'compache'});
  assert.ok(a.ledger[1].cachedTokens>0);assert.equal(b.ledger[1].cachedTokens,0);
 });
 test('the calculator presets and the package price sheet agree on every number',()=>{
@@ -32,8 +32,8 @@ test('the calculator presets and the package price sheet agree on every number',
     ttlSeconds:p.ttlMinutes*60,cacheMin:p.cacheMinTokens,cacheBlock:p.cacheBlockTokens,longThreshold:p.model.longThreshold,longInput:p.model.longInputMultiplier,longOutput:p.model.longOutputMultiplier},
    {name:m.name,url:m.source,input:m.input_price,cacheRead:m.cache_read_price,output:m.output_price,write:m.cache_write_multiplier,context:m.context_tokens,maxInput:m.max_input_tokens,
     ttlSeconds:m.cache_ttl_seconds,cacheMin:m.cache_min_tokens,cacheBlock:m.cache_block_tokens,longThreshold:m.long_input_threshold??0,longInput:m.long_input_factor,longOutput:m.long_output_factor},id);
-  // OpenClaw clears old tool results for its Anthropic provider only.
-  assert.equal(p.toolClearing,m.provider==='anthropic',id);
+  // What depends on the provider: the comparisons it has.
+  assert.equal(p.anthropic,m.provider==='anthropic',id);
  }
  assert.deepEqual([...seen].sort(),Object.keys(presets).sort());
  assert.equal(presetKey('custom'),undefined);assert.equal(presetKey('claude-sonnet'),undefined);

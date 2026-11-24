@@ -1,5 +1,7 @@
 # Other tools compared
 
+The [calculator](https://barendpotijk.github.io/compache/) prices your workload against all of these at once, and against your own rules.
+
 Every tool below ships fixed rules. compache fits the rule to recorded traffic and decides compaction and cache keep-warm together. That is the difference, and the table says what was and was not measured.
 
 | Tool | What it does by default | Fitted to traffic | Keeps the cache warm | Compared how |
@@ -24,12 +26,12 @@ Defaults as documented at revision [`c49b553`](https://github.com/openclaw/openc
 
 | Models | 8-turn threads | 30-turn threads | 80-turn threads |
 |---|---|---|---|
-| Claude Fable 5.2, Opus 5.5, Sonnet 5.5 | 58% cheaper | 61% to 63% cheaper | 60% to 63% cheaper |
-| Claude Haiku 5.5 | 90% cheaper | 91% cheaper | 88% cheaper |
-| GPT-6 Astra, GPT-5.6 Terra, GPT-6 Luna | 59% cheaper | 80% cheaper | 82% cheaper |
+| Claude Fable 5.2, Opus 5.5, Sonnet 5.5 | 48% to 51% cheaper | 54% to 57% cheaper | 54% to 58% cheaper |
+| Claude Haiku 5.5 | 85% cheaper | 85% cheaper | 81% cheaper |
+| GPT-6 Astra, GPT-5.6 Terra, GPT-6 Luna | 50% cheaper | 75% cheaper | 78% cheaper |
 
 - The workload is the calculator's default: 25k retrieved tokens per turn, users back after a median of four minutes, and what later turns need as measured on DocChat. compache's policy is fitted on one set of threads and priced on another.
-- compache leaves 81% to 93% of what turns need in the request and fetches the rest back, on 3% to 9% of turns. OpenClaw leaves 92% to 99% in the request. With OpenAI its summaries stand in for up to 8% of what 80-turn threads need.
+- compache leaves 80% to 92% of what turns need in the request and fetches the rest back, on 3% to 9% of turns. OpenClaw leaves 92% to 99% in the request. With OpenAI its summaries stand in for up to 8% of what 80-turn threads need.
 - Haiku charges five times as much for a request above 100k tokens. OpenClaw's thresholds let requests grow past that, and the fitted policy stays under it.
 
 ## Headroom
@@ -47,3 +49,25 @@ The two are not alternatives. Headroom makes a single tool result smaller. compa
 ## Provider-side compaction
 
 Anthropic's tool-result clearing and compaction, and OpenAI's compaction endpoint, act at a context-size threshold. They do not know how your users return or which earlier parts later turns need, and they send no keep-warm request. The calculator models Anthropic's clearing as OpenClaw configures it.
+
+## The long cache
+
+Anthropic keeps an entry for an hour at 2× the input price for a write instead of 1.25×, and OpenAI for 12 hours at 2.5×. For an app that sends everything it is the simplest saving there is. Priced by the calculator on DocChat's profiles with Claude Sonnet 5.5, per 1,000 turns, mean of six seeds:
+
+| Users back after | Everything, 5-minute cache | Everything, 1-hour cache | compache, 5-minute cache | compache against the 1-hour cache |
+|---|---|---|---|---|
+| 30 seconds | $25 | $27 | $17 | 39% less |
+| 4 minutes | $127 | $29 | $19 | 33% less |
+| 30 minutes | $260 | $129 | $34 | 74% less |
+
+## In the calculator
+
+| Comparison | Rules, read from its documentation |
+|---|---|
+| [opencode](https://opencode.ai/docs/compaction) | Summary when 15% of the window is left (at least 16k tokens), 15k tokens kept beside it, written from the whole conversation. Session warming is off by default. Read 2026-11-24 |
+| [Anthropic context editing](https://platform.claude.com/docs/en/build-with-claude/context-editing) | Tool results cleared above 100k input tokens, newest 3 kept. LangChain's `ContextEditingMiddleware` has the same defaults. Read 2026-11-24 |
+| [Anthropic compaction](https://platform.claude.com/docs/en/build-with-claude/compaction-threshold) | Everything replaced by a summary at 150k input tokens. Read 2026-11-24 |
+| [Headroom](https://github.com/headroomlabs-ai/headroom) | History kept, retrieved text 37% smaller: the mean of its four published agent scenarios (21%, 57%, 42%, 30%). Prose shrinks far less. Read 2026-11-24 |
+| Last 10 turns, retrieved text for one turn, everything without caching | Common rules, not a product |
+
+No summary size is documented for opencode or Anthropic compaction: 4,000 tokens is assumed. OpenAI's compaction has no documented default threshold and is left out, and LangChain's `SummarizationMiddleware` does not trigger until a threshold is set.
