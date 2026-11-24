@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="400" viewBox="0 0 880 400" role="img" aria-labelledby="t d">
+<title id="t">The longer users are away, the more compache saves</title>
+<desc id="d">Cost per 1,000 messages of sending everything and of compache, for three return patterns. Users back after 30 seconds: everything $34 on the 5-minute cache, $28 on the 1-hour cache, compache $19 with 5-minute cache, no pings. Users back after 4 minutes: everything $143 on the 5-minute cache, $39 on the 1-hour cache, compache $24 with 5-minute cache, up to 3 pings. Users back after 30 minutes: everything $286 on the 5-minute cache, $155 on the 1-hour cache, compache $32 with 1-hour cache, up to 3 pings.</desc>
+<style>
+text{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;font-size:12px;fill:#0b0b0b}
+.surface{fill:#fcfcfb;stroke:rgba(11,11,11,.1)}
+.t2{fill:#52514e}.tm{fill:#898781}.b{font-weight:600}.h{font-size:13px;font-weight:600}.big{font-size:15px;font-weight:600}
+.grid{stroke:#e1e0d9}.axis{stroke:#c3c2b7}.box{fill:none;stroke:#c3c2b7}
+.c{fill:#2a78d6}.cs{stroke:#2a78d6}.n{fill:#898781}.ns{stroke:#898781}.o{fill:#eb6834}.os{stroke:#eb6834}
+.cell{fill:#e1e0d9}.ring{stroke:#fcfcfb;stroke-width:2}.line{fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.arc{fill:none;stroke-width:1.75;stroke-linecap:round}
+@media (prefers-color-scheme:dark){
+text{fill:#f0efec}.surface{fill:#1a1a19;stroke:rgba(255,255,255,.1)}.t2{fill:#c3c2b7}
+.grid{stroke:#2c2c2a}.axis{stroke:#383835}.box{stroke:#52514e}
+.c{fill:#3987e5}.cs{stroke:#3987e5}.o{fill:#d95926}.os{stroke:#d95926}
+.cell{fill:#383835}.ring{stroke:#1a1a19}
+}
+</style>
+<rect class="surface" x=".5" y=".5" width="879" height="399" rx="10"/>
+<style>.n2{fill:#c3c2b7}@media (prefers-color-scheme:dark){.n2{fill:#5a5954}}</style>
+<text x="24.0" y="32.0" class="big">The longer users are away, the more compache saves</text>
+<text x="24.0" y="51.0" class="t2">Cost per 1,000 messages. Same document chats, Claude Sonnet 5.5, 625 messages compache had not seen.</text>
+<rect class="n" x="24" y="66" width="10" height="10" rx="2"/>
+<text x="40.0" y="75.5" class="t2">Send everything, 5-minute cache</text>
+<rect class="n2" x="260.20000000000005" y="66" width="10" height="10" rx="2"/>
+<text x="276.2" y="75.5" class="t2">Send everything, 1-hour cache</text>
+<rect class="c" x="484.00000000000006" y="66" width="10" height="10" rx="2"/>
+<text x="500.0" y="75.5" class="t2">compache</text>
+<text x="24.0" y="108.0" class="h">Users back after 30 seconds</text>
+<line class="axis" x1="24.0" x2="190.0" y1="348" y2="348"/>
+<path class="n" d="M24.0,348 v-19.4 a4,4 0 0 1 4,-4 h38 a4,4 0 0 1 4,4 v19.4 z"/>
+<text x="47.0" y="316.6" class="t2" text-anchor="middle">$34</text>
+<path class="n2" d="M84.0,348 v-14.9 a4,4 0 0 1 4,-4 h38 a4,4 0 0 1 4,4 v14.9 z"/>
+<text x="107.0" y="321.1" class="t2" text-anchor="middle">$28</text>
+<path class="c" d="M144.0,348 v-9.3 a4,4 0 0 1 4,-4 h38 a4,4 0 0 1 4,4 v9.3 z"/>
+<text x="167.0" y="326.7" class="h" text-anchor="middle">$19</text>
+<text x="204.0" y="292.0" class="h">43% less</text>
+<text x="204.0" y="307.0" class="tm">than 5-minute</text>
+<text x="204.0" y="328.0" class="h">30% less</text>
+<text x="204.0" y="343.0" class="tm">than 1-hour</text>
+<text x="24.0" y="368.0" class="tm">compache picked</text>
+<text x="24.0" y="384.0" class="t2">5-minute cache, no pings</text>
+<text x="308.0" y="108.0" class="h">Users back after 4 minutes</text>
+<line class="axis" x1="308.0" x2="474.0" y1="348" y2="348"/>
+<path class="n" d="M308.0,348 v-94.1 a4,4 0 0 1 4,-4 h38 a4,4 0 0 1 4,4 v94.1 z"/>
+<text x="331.0" y="241.9" class="t2" text-anchor="middle">$143</text>
+<path class="n2" d="M368.0,348 v-22.8 a4,4 0 0 1 4,-4 h38 a4,4 0 0 1 4,4 v22.8 z"/>
+<text x="391.0" y="313.2" class="t2" text-anchor="middle">$39</text>
+<path class="c" d="M428.0,348 v-12.5 a4,4 0 0 1 4,-4 h38 a4,4 0 0 1 4,4 v12.5 z"/>
+<text x="451.0" y="323.5" class="h" text-anchor="middle">$24</text>
+<text x="488.0" y="292.0" class="h">83% less</text>
+<text x="488.0" y="307.0" class="tm">than 5-minute</text>
+<text x="488.0" y="328.0" class="h">38% less</text>
+<text x="488.0" y="343.0" class="tm">than 1-hour</text>
+<text x="308.0" y="368.0" class="tm">compache picked</text>
+<text x="308.0" y="384.0" class="t2">5-minute cache, up to 3 pings</text>
+<text x="592.0" y="108.0" class="h">Users back after 30 minutes</text>
+<line class="axis" x1="592.0" x2="758.0" y1="348" y2="348"/>
+<path class="n" d="M592.0,348 v-192.0 a4,4 0 0 1 4,-4 h38 a4,4 0 0 1 4,4 v192.0 z"/>
+<text x="615.0" y="144.0" class="t2" text-anchor="middle">$286</text>
+<path class="n2" d="M652.0,348 v-101.9 a4,4 0 0 1 4,-4 h38 a4,4 0 0 1 4,4 v101.9 z"/>
+<text x="675.0" y="234.1" class="t2" text-anchor="middle">$155</text>
+<path class="c" d="M712.0,348 v-18.0 a4,4 0 0 1 4,-4 h38 a4,4 0 0 1 4,4 v18.0 z"/>
+<text x="735.0" y="318.0" class="h" text-anchor="middle">$32</text>
+<text x="772.0" y="292.0" class="h">89% less</text>
+<text x="772.0" y="307.0" class="tm">than 5-minute</text>
+<text x="772.0" y="328.0" class="h">79% less</text>
+<text x="772.0" y="343.0" class="tm">than 1-hour</text>
+<text x="592.0" y="368.0" class="tm">compache picked</text>
+<text x="592.0" y="384.0" class="t2">1-hour cache, up to 3 pings</text>
+</svg>
