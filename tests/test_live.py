@@ -635,6 +635,28 @@ class PolicyTests(unittest.TestCase):
                 runs = load(self.tmp.name)[0][0]["runs"]
                 self.assertEqual(runs[0]["retrievals"], [{"bytes": len(passage(1))}])
 
+    def test_a_question_after_a_tool_of_the_client_s_opens_a_turn(self):
+        """An answer that ends on a tool the application shows something with, and asks nothing after."""
+
+        def script(request):
+            last = request["body"]["messages"][-1]
+            if last["role"] == "tool":
+                return {"text": "Here it is.", "tool": ("show_chart", {})}
+            return {"text": "", "tool": ("search_docs", {"query": "q"})}
+
+        app = self.start(script=script)
+        for n in range(1, 5):
+            app.messages.append({"role": "user", "content": f"Question {n}?"})
+            for found in (passage(n), "shown"):
+                message = app.call()
+                (call,) = message["tool_calls"]
+                shown = {"role": "tool", "tool_call_id": call["id"], "content": found}
+                app.messages += [message, shown]
+            self.clock.at += self.gap
+        self.assertEqual(self.live.stats["turns"], 3)
+        self.assertIn('reopen(\\"ctx:', json.dumps(self.model.bodies[-1]))
+        self.assertNotIn("Clause 001", json.dumps(self.model.bodies[-1]))
+
     def test_a_tool_result_in_several_pieces_is_one_part(self):
         clock = Clock(1_990_000_000.0)
         model = FakeModel(

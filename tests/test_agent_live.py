@@ -449,6 +449,66 @@ class LoopTests(unittest.TestCase):
         counted = tokens([model.bodies[-1]["messages"]])
         self.assertLess(abs(flow.size - counted) / counted, 0.25)
 
+    def test_a_conversation_met_in_the_middle_is_sized_like_any(self):
+        """A proxy is restarted while an agent works."""
+        sizes = []
+        for restarted in (False, True):
+            clock = Clock()
+            model = FakeModel(worker(40), clock=lambda: clock.at)
+            live = compache.Live(policy(rounds=8, ratio=1.5), clock=clock)
+            app = Agent(live, Claude(), model, clock=clock)
+            app.shape.ask("Read forty files")
+            for k in range(34):
+                if restarted and k == 30:
+                    app.live = compache.Live(policy(rounds=8, ratio=1.5), clock=clock)
+                _, calls = app.call()
+                clock.at += 5
+                app.made += 1
+                app.shape.answer([(c, result(app.made)) for c, _ in calls])
+            (conversation,) = {id(c): c for c in app.live._by_call.values()}.values()
+            engine = conversation.session._engine
+            flow = engine.flow
+            self.assertEqual(flow.size, sum(flow.shown))
+            self.assertEqual(
+                flow._before(flow.live[0]), sum(flow.shown[: flow.live[0]])
+            )
+            sizes.append(engine._off)
+        self.assertLess(abs(sizes[1] / sizes[0] - 1), 0.2)
+
+    def test_what_a_turn_of_one_call_fetched_is_counted(self):
+        clock = Clock()
+        model = FakeModel(worker(12), clock=lambda: clock.at)
+        live = compache.Live(policy(rounds=2), clock=clock)
+        app = Agent(live, Claude(), model, clock=clock)
+        app.run("Read twelve files")
+        asked = []
+
+        def script(request):
+            if not asked:
+                asked.append(NOTICE.search(json.dumps(request["body"])).group())
+                return {"text": "", "tools": [(REOPEN, {"reference": asked[0]})]}
+            return {"text": "It said so."}
+
+        model.script = script
+        clock.at += 20
+        app.run("What did the first file say?")
+        (conversation,) = live._by_chain.values()
+        flow = conversation.session._engine.flow
+        counted = tokens([model.bodies[-1]["messages"]])
+        self.assertLess(abs(flow.size - counted) / counted, 0.2)
+
+    def test_another_model_has_a_cache_of_its_own(self):
+        clock = Clock()
+        model = FakeModel(worker(12), clock=lambda: clock.at)
+        live = compache.Live(policy(rounds=2, ratio=None), clock=clock)
+        app = Agent(live, Claude(), model, clock=clock)
+        app.run("Read twelve files")
+        self.assertFalse(any(noticed(b["messages"]) for b in model.bodies))
+        app.shape.model = "agent-model-2"
+        model.script = worker(13)
+        app.run("And one more")
+        self.assertTrue(noticed(model.bodies[-1]["messages"]))
+
     def test_a_second_task_goes_on_where_the_first_ended(self):
         model = FakeModel(worker(4))
         live = compache.Live(policy(rounds=2))
@@ -1083,6 +1143,61 @@ class RecordTests(unittest.TestCase):
             # No word of what was said or read is in it.
             with open(f"{folder}/turns.jsonl", encoding="utf-8") as stream:
                 self.assertNotIn("a line of file", stream.read())
+
+    def test_a_cut_inside_a_warm_turn_leaves_a_record_to_fit_on(self):
+        class Haiku(Claude):
+            model = "claude-haiku-5-5"
+
+        with tempfile.TemporaryDirectory() as folder:
+            clock = Clock()
+            live = compache.Live(
+                policy(rounds=8, ratio=2.0), record=folder, clock=clock
+            )
+            model = FakeModel(worker(25), clock=lambda: clock.at)
+            app = Agent(live, Haiku(), model, clock=clock)
+            app.run("Read files")
+            clock.at += 20
+            model.script = worker(60)
+            app.run("Read more")
+            self.assertTrue(noticed(model.bodies[-1]["messages"]))
+            rows, _ = load(folder)
+            for run in rows[0]["runs"]:
+                usage = run["usage"]
+                cached = usage["cache_read"] + usage["cache_write"]
+                self.assertLessEqual(cached, usage["input"])
+            compache.load_threads(rows)
+
+    def test_a_request_of_the_host_s_that_takes_long_leaves_a_record_to_fit_on(self):
+        with tempfile.TemporaryDirectory() as folder:
+            clock = Clock()
+            live = compache.Live(policy(rounds=8), record=folder, clock=clock)
+            model = FakeModel(worker(5), clock=lambda: clock.at)
+            app = Agent(live, Claude(), model, clock=clock)
+            app.run("Read files")
+            # The host asks for a suggestion, and it streams while the user goes on.
+            side = Claude()
+            side.said = list(app.shape.said)
+            side.ask("Suggest what the user may say next")
+            model.script = lambda request: {"text": "Perhaps: run the tests."}
+            slow = live.exchange(side.path, side.body(True), model.send(side.path))
+            events = iter(slow.events)
+            next(events)
+            for k, count in enumerate((6, 7)):
+                clock.at += 5
+                model.script = worker(count)
+                if k:
+                    app.shape.ask("And then?")
+                    _, calls = app.call()
+                    clock.at += 2
+                    list(events)
+                    app.made += 1
+                    app.shape.answer([(c, result(app.made)) for c, _ in calls])
+                    app.call()
+                else:
+                    app.run("Next, please")
+            rows, _ = load(folder)
+            compache.load_threads(rows)
+            self.assertEqual([len(row["runs"]) for row in rows], [3])
 
     def test_what_was_left_out_is_on_record_with_every_call(self):
         with tempfile.TemporaryDirectory() as folder:

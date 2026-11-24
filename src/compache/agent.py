@@ -27,6 +27,7 @@ from bisect import bisect_left
 from dataclasses import asdict, dataclass, replace
 
 from .errors import ContractError
+from .labels import normalize_label
 from .optimizer.contracts import ModelSpec, digest, number, seconds
 from .optimizer.distribution import _charge
 from .optimizer.parts import NOTICE_BYTES, placeholder
@@ -219,11 +220,12 @@ class Flow:
             self.ripe, self.freed, self.ahead = 0, 0, (0, 0)
 
     def resize(self, i: int, tokens: int) -> None:
-        """What block `i`, one of the newest round, turned out to hold."""
+        """What block `i`, which is in full view, turned out to hold. What could go is counted again."""
         self.size += tokens - self.shown[i]
         self.shown[i] = self.whole[i] = tokens
         if self.names[i] is not None:
             self.sizes[self.names[i][0]] = tokens
+        self.ripe, self.freed, self.ahead = 0, 0, (0, 0)
 
     def gone(self, name) -> bool:
         """Whether a result is out of view."""
@@ -338,7 +340,7 @@ def _steps(run, spec):
         seen = total if count == 1 else round(total * k / (count - 1))
         last = k + 1 == count
         said = reply if last else 0
-        yield at, done, seen, said, said, (), None, 0
+        yield at, done, seen, said, said, None, None, 0
 
 
 def calls_of(thread, spec: ModelSpec, header_tokens: int = 0) -> Talk:
@@ -367,7 +369,7 @@ def calls_of(thread, spec: ModelSpec, header_tokens: int = 0) -> Talk:
             ruled = said + sum(tokens for _, tokens in found)
             off = known / measured if measured else 1.0
             grown = counted - held - thought if counted is not None else 0
-            if grown > 0 and found:
+            if grown > 0 and found and ruled:
                 # The reply and what surrounds a result are counted too: all of it grows alike.
                 off = grown / ruled
                 known, measured = known + grown, measured + ruled
@@ -419,6 +421,65 @@ def is_agentic(threads) -> bool:
 # -- pricing ---------------------------------------------------------------------
 
 
+def _priced(conversation, recipe, spec, reserve, header, heeded=True):
+    """What one conversation costs under a recipe. `heeded` says whether what its calls need and is out
+    of view is fetched back. None where a request would not fit.
+    """
+    cost = 0.0
+    missed = pings = cuts = peak = 0
+    lasting = header or spec
+    flow = Flow(spec, recipe, reserve)
+    opens = getattr(conversation, "header", 0)
+    if opens < spec.cache_min_tokens or lasting.cache_ttl_seconds <= 0:
+        opens = 0
+    for i, call in enumerate(conversation):
+        if call.thought:
+            flow.add(call.thought, ("thought", i), again=True, held=True)
+        if i and not conversation[i - 1].tool:
+            # A new turn: what was reasoned in the ones before it can go.
+            flow.release()
+        flow.add(call.said)
+        if call.found:
+            flow.rounds += 1
+            for name, tokens in call.found:
+                flow.add(tokens, name)
+        cuts += bool(flow.cut(call.at))
+        if opens and not flow.warm(call.at):
+            # The conversation has gone from the cache. What opens it may be there still.
+            used = conversation.header_used(call.at)
+            there = used is not None and call.at - used < lasting.cache_ttl_seconds
+            flow.sent(call.at, opens if there else 0)
+            if header is not None and not there:
+                more = header.write_multiplier - spec.write_multiplier
+                cost += opens * more * spec.input_price_factor(flow.size)
+        if flow.size > flow.cap:
+            return None
+        peak = max(peak, flow.size)
+        lost = [n for n in call.needs or () if flow.gone(n)] if heeded else ()
+        if lost:
+            # The model asks for them first: a call that reads the same request.
+            missed += 1
+            cost += flow.charge(call.at, REOPEN_OUTPUT_TOKENS)
+            flow.sent(call.at)
+            for name in lost:
+                flow.add(flow.sizes[name], name, again=True)
+        cost += flow.charge(call.at, call.output)
+        flow.sent(call.at)
+        most = recipe.tool_pings if call.tool else recipe.user_pings
+        if most:
+            back = conversation[i + 1].at if i + 1 < len(conversation) else None
+            for n in range(1, most + 1):
+                due = call.at + n * flow.interval
+                if due < call.end or (back is not None and due >= back):
+                    break
+                if flow.size < spec.cache_min_tokens:
+                    break
+                cost += flow.charge(due, spec.ping_output_tokens)
+                flow.sent(due)
+                pings += 1
+    return cost, missed, pings, cuts, peak
+
+
 def simulate(
     conversations,
     recipe: AgentRecipe,
@@ -434,60 +495,20 @@ def simulate(
     """
     cost = fetched = 0.0
     calls = known = asked = missed = pings = cuts = peak = 0
-    lasting = header or spec
     for conversation in conversations:
-        flow = Flow(spec, recipe, reserve)
-        opens = getattr(conversation, "header", 0)
-        if opens < spec.cache_min_tokens or lasting.cache_ttl_seconds <= 0:
-            opens = 0
-        for i, call in enumerate(conversation):
-            if call.thought:
-                flow.add(call.thought, ("thought", i), again=True, held=True)
-            if i and not conversation[i - 1].tool:
-                # A new turn: what was reasoned in the ones before it can go.
-                flow.release()
-            flow.add(call.said)
-            if call.found:
-                flow.rounds += 1
-                for name, tokens in call.found:
-                    flow.add(tokens, name)
-            cuts += bool(flow.cut(call.at))
-            if opens and not flow.warm(call.at):
-                # The conversation has gone from the cache. What opens it may be there still.
-                used = conversation.header_used(call.at)
-                there = used is not None and call.at - used < lasting.cache_ttl_seconds
-                flow.sent(call.at, opens if there else 0)
-                if header is not None and not there:
-                    more = header.write_multiplier - spec.write_multiplier
-                    cost += opens * more * spec.input_price_factor(flow.size)
-            if flow.size > flow.cap:
-                return None
-            peak = max(peak, flow.size)
-            calls += 1
-            known += call.needs is not None
-            asked += bool(call.needs)
-            lost = [n for n in call.needs or () if flow.gone(n)]
-            if lost:
-                # The model asks for them first: a call that reads the same request.
-                missed += 1
-                fetched += flow.charge(call.at, REOPEN_OUTPUT_TOKENS)
-                flow.sent(call.at)
-                for name in lost:
-                    flow.add(flow.sizes[name], name, again=True)
-            cost += flow.charge(call.at, call.output)
-            flow.sent(call.at)
-            most = recipe.tool_pings if call.tool else recipe.user_pings
-            if most:
-                back = conversation[i + 1].at if i + 1 < len(conversation) else None
-                for n in range(1, most + 1):
-                    due = call.at + n * flow.interval
-                    if due < call.end or (back is not None and due >= back):
-                        break
-                    if flow.size < spec.cache_min_tokens:
-                        break
-                    cost += flow.charge(due, spec.ping_output_tokens)
-                    flow.sent(due)
-                    pings += 1
+        found = _priced(conversation, recipe, spec, reserve, header)
+        if found is None:
+            return None
+        whole = plain = found[0]
+        if found[1]:
+            # The same with nothing fetched back: the difference is what that costs, here and later.
+            plain = _priced(conversation, recipe, spec, reserve, header, False)[0]
+        cost, fetched = cost + plain, fetched + whole - plain
+        missed, pings, cuts = missed + found[1], pings + found[2], cuts + found[3]
+        peak = max(peak, found[4])
+        calls += len(conversation)
+        known += sum(call.needs is not None for call in conversation)
+        asked += sum(bool(call.needs) for call in conversation)
     return {
         "cost": cost + fetched * (calls / known if known else 1),
         "calls": calls,
@@ -500,18 +521,43 @@ def simulate(
     }
 
 
+def _wanted(threads, labels) -> dict:
+    """The earlier results that labelled turns needed, by thread and turn. Turns nobody could tell of are left out."""
+    by_id = {t.thread_id: t for t in threads}
+    owner = {r.run_id: t for t in threads for r in t.runs}
+    wanted: dict = {}
+    for row in labels or ():
+        thread = by_id.get(row.get("thread_id")) if isinstance(row, dict) else None
+        if thread is None and isinstance(row, dict):
+            thread = owner.get(row.get("target_run_id", row.get("run_id")))
+        if thread is None:
+            raise ContractError(
+                "label targets must be unique runs in the supplied traces"
+            )
+        label = normalize_label(row, thread)
+        index = {r.run_id: r.run_index for r in thread.runs}
+        turn = index.get(label.get("target_run_id"))
+        if turn is None or label.get("status") == "unassessable":
+            continue
+        named = {
+            source["part_id"]
+            for requirement in label.get("task_requirements") or ()
+            for way in (requirement.get("alternatives") or ())[:1]
+            for source in way.get("sources") or ()
+        }
+        found = {p for p in named if thread.part_origin.get(p, ("",))[0] == "retrieval"}
+        # That a first turn needs nothing from before it says nothing.
+        if found or turn > 1:
+            wanted.setdefault((thread.thread_id, turn), set()).update(found)
+    return wanted
+
+
 def _conversations(threads, spec, header_tokens, labels=()):
     """Threads as calls, with what their labels say a turn needed on the turn's last call.
 
     `header_tokens` is the size of instructions and tools, or one by thread ID.
     """
-    wanted: dict = {}
-    for row in labels or ():
-        needs = row.get("needs")
-        if needs:
-            first = [n for n in needs[0] if ":retrieval:" in n]
-            if first:
-                wanted[row["thread_id"], row["run"]] = first
+    wanted = _wanted(threads, labels)
     named = {thread_id for thread_id, _ in wanted}
     made: list[Talk] = []
     for thread in threads:
@@ -524,8 +570,9 @@ def _conversations(threads, spec, header_tokens, labels=()):
             for run in thread.runs:
                 at += len(list(_steps(run, spec)))
                 more = wanted.get((thread.thread_id, run.run_index))
-                if more:
-                    last = calls[at - 1]
+                last = calls[at - 1]
+                # A call that nothing is known of stays that, unless its turn was only counted.
+                if more is not None and (last.needs is not None or not run.steps):
                     needs = (last.needs or frozenset()) | frozenset(more)
                     calls[at - 1] = replace(last, needs=needs)
         made.append(calls)
@@ -582,6 +629,7 @@ def fit_agent(
     header_tokens: int | dict = 0,
     floor: float = FLOOR,
     reserve: int = 8192,
+    pings: bool = True,
 ) -> dict:
     """Fit what an agent's conversations keep, on recorded ones. Returns a policy artifact.
 
@@ -589,7 +637,7 @@ def fit_agent(
     it in view. Where calls rarely rely on one, the misses are held to a share
     of all calls instead. They are priced as fetching it back. Every lifetime
     is priced for the whole request, and the longer ones for its instructions
-    and tools alone.
+    and tools alone. `pings=False` leaves keep-warm pings out of it.
     """
     conversations = _conversations(threads, spec, header_tokens, labels)
     if sum(map(len, conversations)) < 2:
@@ -642,14 +690,14 @@ def fit_agent(
     for ttl, recipes in best.items():
         for recipe in {*recipes[:4], AgentRecipe()}:
             paid = {}
-            for tool in _TOOL_PINGS[1:]:
+            for tool in _TOOL_PINGS[1:] if pings else ():
                 result = price(replace(recipe, tool_pings=tool), specs[ttl])
                 if result is not None:
                     paid[tool] = result["cost"]
             tool = min(paid, key=paid.get) if paid else 0
             for header in (None, *longer[ttl]):
                 for some in sorted({0, tool}):
-                    for user in _USER_PINGS:
+                    for user in _USER_PINGS if pings else (0,):
                         if header is not None or user:
                             pinged = replace(recipe, tool_pings=some, user_pings=user)
                             price(pinged, specs[ttl], header)
@@ -839,11 +887,14 @@ class AgentEngine:
         # What tool results came to by the provider's count and by our ruler, and the ratio of the two.
         self._counted = self._ruled = 0
         self._off = 1.0
-        # Where reasoning of its replies stands: the block, by message. And whether the provider
-        # counts it, once that is known.
+        # Where reasoning of its replies stands: the block, by message. Whether the provider counts it
+        # while its turn goes on, and once that is over, as far as that is known.
         self._thoughts: dict = {}
         self._counts_thoughts: bool | None = None
+        self._keeps_thoughts: bool | None = None
         self._just_cut = False
+        # The turn that is being answered, and how everything stood before it.
+        self._turn: tuple | None = None
 
     def copy(self) -> AgentEngine:
         made = AgentEngine.__new__(AgentEngine)
@@ -851,6 +902,17 @@ class AgentEngine:
         made.flow, made._known = self.flow.copy(), set(self._known)
         made._fresh, made._thoughts = list(self._fresh), dict(self._thoughts)
         return made
+
+    def _begins(self, run_id) -> None:
+        """A turn begins, or begins again: a retry starts from where the turn did."""
+        if self._turn is not None and self._turn[0] == run_id:
+            tried, before = self.copy(), self._turn
+            self.__dict__.update(before[1].copy().__dict__)
+            self._turn = before
+            self.follows(tried)
+        else:
+            self._turn = None
+            self._turn = (run_id, self.copy())
 
     def follows(self, other: AgentEngine) -> None:
         """Take over how warm the cache is from a conversation that went on from the same start."""
@@ -901,11 +963,14 @@ class AgentEngine:
         )
 
     def prepare(self, request, *, started_at, system_prompt, tools, **_) -> AgentPlan:
+        self._begins(request.run_id)
         if not self._known:
             header = f"{system_prompt or ''}{json.dumps(tools) if tools else ''}"
             self._joins(self.spec.text_tokens(header))
         self._spoken = 0
         self.flow.release()
+        if self._keeps_thoughts is False:
+            self._drop(self._thoughts)
         self._arrived(request.parts)
         return self._plan(request, started_at)
 
@@ -964,22 +1029,33 @@ class AgentEngine:
             p for p in places if p in self._thoughts and ("thought", p) not in names
         ]
 
+    def _drop(self, places) -> None:
+        """The provider does not count the reasoning in those messages, so it takes none of the room."""
+        for place in list(places):
+            self.flow.forget(self._thoughts.pop(place))
+
+    def _counted_thoughts(self, reported: int) -> None:
+        """See whether the provider counts reasoning: each once, on a request that nothing else changed."""
+        flow = self.flow
+        held = {p: i for p, i in self._thoughts.items() if i in flow.held}
+        over = {p: i for p, i in self._thoughts.items() if i not in flow.held}
+        for name, places in (("_counts_thoughts", held), ("_keeps_thoughts", over)):
+            tokens = sum(flow.shown[i] for i in places.values())
+            if getattr(self, name) is None and tokens >= 64:
+                counts = reported - flow.size >= -tokens / 2
+                setattr(self, name, counts)
+                if not counts:
+                    self._drop(places)
+
     def _measure(self, reported: int) -> None:
         """Let what has joined hold what the provider's count of the request grew by."""
-        flow, fresh = self.flow, [(i, r) for i, r in self._fresh if r]
+        flow = self.flow
+        # What a cut has taken already is a notice, and that is as long as it is.
+        fresh = [(i, r) for i, r in self._fresh if r and flow.shown[i] == flow.whole[i]]
         self._fresh = []
+        if not self._just_cut:
+            self._counted_thoughts(reported)
         hidden = reported - flow.size
-        new = [i for i in self._thoughts.values() if i in flow.held]
-        thought = sum(flow.shown[i] for i in new)
-        if self._counts_thoughts is None and thought >= 64 and not self._just_cut:
-            # Seen once, on a request that nothing else changed.
-            self._counts_thoughts = hidden >= -thought / 2
-            if not self._counts_thoughts:
-                # The provider does not count it, so it takes none of the room.
-                for i in self._thoughts.values():
-                    flow.forget(i)
-                self._thoughts = {}
-                hidden = reported - flow.size
         held = sum(flow.shown[i] for i, _ in fresh)
         if not held or held + hidden <= 0:
             if hidden:
@@ -1025,8 +1101,14 @@ class AgentEngine:
         self._spoken += said
         called = spoken("", calls)
         visible = said + (self.spec.text_tokens(called) if called else 0)
-        self.thought(place, thought)
-        self.flow.add(visible if output_tokens is None else output_tokens - thought)
+        if place is not None:
+            self.thought(place, thought)
+        # Reasoning that was billed and stays out of the conversation may not be told apart from what
+        # was said, so the next count is taken to speak of the reply too.
+        self._fresh.append((len(self.flow.shown), visible))
+        self.flow.add(
+            visible if output_tokens is None else max(0, output_tokens - thought)
+        )
         self._wait(self.recipe.tool_pings, at)
 
     def complete(
@@ -1035,7 +1117,8 @@ class AgentEngine:
         """The reply that ends the turn. The next request comes from the user."""
         self._seen(counters)
         self._known.add(answer.part_id)
-        self.thought(place, thought)
+        if place is not None:
+            self.thought(place, thought)
         # What was said in between its tool calls has joined already.
         said = self.spec.part_tokens(answer.text) - self._spoken
         self.flow.add(round(max(0, said) * self._off))

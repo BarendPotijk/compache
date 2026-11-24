@@ -28,6 +28,7 @@ import os
 import re
 import threading
 import time
+import uuid
 from collections import Counter
 from dataclasses import replace
 from pathlib import Path
@@ -40,6 +41,7 @@ from .defaults import default_policy
 from .errors import ContractError
 from .models import cache_lifetimes, known_models, model_spec
 from .optimizer.contracts import ModelSpec, seconds
+from .threads import load_threads
 
 __all__ = ["Learner"]
 
@@ -72,6 +74,11 @@ def _known(spec: ModelSpec) -> bool:
 def _named(spec: ModelSpec):
     """A model as `fit` takes it: by name where there is a price sheet, or by its spec."""
     return spec.model_id if _known(spec) else spec
+
+
+def _asked(row: dict):
+    """The name a recorded request gave its model."""
+    return row.get("requested") or row.get("model")
 
 
 class Learner:
@@ -111,11 +118,19 @@ class Learner:
         return found if isinstance(found, dict) else {}
 
     def _write(self, name: str, text: str) -> None:
-        # Other processes may read the folder at this moment.
+        # Other processes may read the folder at this moment, and write to it.
         path = self.folder / "policies" / name
-        aside = path.with_name(f"{name}.{os.getpid()}.part")
-        aside.write_text(text, "utf-8")
-        aside.replace(path)
+        aside = path.with_name(f"{name}.{uuid.uuid4().hex}.part")
+        try:
+            aside.write_text(text, "utf-8")
+            aside.replace(path)
+        finally:
+            aside.unlink(missing_ok=True)
+
+    def _keep(self, changed: dict) -> None:
+        """Add to the state. Another process may have added to it meanwhile."""
+        self._state = {**self._read_state(), **changed}
+        self._write("state.json", json.dumps(self._state, indent=2) + "\n")
 
     def _load(self, key: str) -> Policy | None:
         try:
@@ -129,33 +144,49 @@ class Learner:
     # -- what a conversation is given -------------------------------------------
 
     @staticmethod
-    def _key(model, tools: bool) -> tuple[str, ModelSpec] | None:
-        """The name a model's policy goes by, and the model's spec. None where no model is named."""
+    def _key(model, tools: bool, answered=None) -> tuple[str, ModelSpec] | None:
+        """The name a model's policy goes by, and the model's spec. None where no model is named.
+
+        `model` is the name that requests give, and `answered` the one their replies gave.
+        """
         name = str(model or "").strip()
         if not name:
             return None
-        try:
-            spec = model_spec(name)
-        except ContractError:
+        spec = None
+        for known in (name, str(answered or "").strip()):
+            try:
+                spec = spec or model_spec(known)
+            except ContractError:
+                pass
+        if spec is None:
             # One without a price sheet: what most providers charge, and no pings at a guess.
             spec = replace(_OTHER, model_id=name)
-        plain = re.sub(r"[^A-Za-z0-9._-]+", "_", spec.model_id)
+        try:
+            name = model_spec(name).model_id
+        except ContractError:
+            pass
+        plain = re.sub(r"[^A-Za-z0-9._-]+", "_", name)
         return f"{plain}.{'agent' if tools else 'chat'}", spec
 
     def _on_record(self) -> dict[str, int]:
         """How many conversations the record holds, by key. Only their first turns are looked at."""
         counts: Counter = Counter()
         try:
-            with open(self.folder / "turns.jsonl", encoding="utf-8") as stream:
+            with open(
+                self.folder / "turns.jsonl", encoding="utf-8", errors="replace"
+            ) as stream:
                 for line in stream:
                     if '"turn":1,' not in line:
                         continue
-                    row = json.loads(line)
+                    try:
+                        row = json.loads(line)
+                    except ValueError:
+                        continue
                     tools = (row.get("bytes") or {}).get("tools")
-                    found = self._key(row.get("model"), bool(tools))
+                    found = self._key(_asked(row), bool(tools))
                     if found is not None:
                         counts[found[0]] += 1
-        except (OSError, ValueError):
+        except OSError:
             pass
         return dict(counts)
 
@@ -186,14 +217,16 @@ class Learner:
                     policy = Policy(artifact)
                 self._policies[key] = policy
             policy = self._policies[key]
-            if policy is None or not policy.agentic:
+            if policy is None:
+                return None, False
+            if self.default_lifetime:
+                policy = policy.at_default_lifetime()
+            if not policy.agentic:
                 return policy, False
             if self._begun is None:
                 self._begun = self._on_record()
             begun = self._begun[key] = self._begun.get(key, 0) + 1
-        if begun % CONTROL_EVERY == 0:
-            return None, True
-        return policy.at_default_lifetime() if self.default_lifetime else policy, False
+        return (None, True) if begun % CONTROL_EVERY == 0 else (policy, False)
 
     def _last_call(self, key: str) -> float | None:
         """When the record last saw a call of a model."""
@@ -209,7 +242,9 @@ class Learner:
                 row = json.loads(line)
             except ValueError:
                 continue
-            found = self._key(row.get("model"), key.endswith(".agent"))
+            if not isinstance(row, dict):
+                continue
+            found = self._key(_asked(row), key.endswith(".agent"))
             if found is not None and found[0] == key:
                 return row.get("at")
         return None
@@ -237,8 +272,8 @@ class Learner:
                     spec.cache_ttl_seconds < at - last < longer.cache_ttl_seconds
                 ):
                     return None
-                self._state = {**self._read_state(), "lasting": [*lasting, key]}
-                self._write("state.json", json.dumps(self._state, indent=2) + "\n")
+                others = self._read_state().get("lasting", [])
+                self._keep({"lasting": sorted({*others, *lasting, key})})
         return longer.cache_ttl_seconds
 
     def opened(self, model, at: float) -> None:
@@ -286,9 +321,9 @@ class Learner:
         groups: dict = {}
         for row in rows:
             named = Counter(run["model"] for run in row["runs"] if run.get("model"))
-            if not named:
-                continue
-            found = self._key(named.most_common(1)[0][0], bool(row.get("tools_bytes")))
+            answered = named.most_common(1)[0][0] if named else None
+            asked = row.get("requested_model") or answered
+            found = self._key(asked, bool(row.get("tools_bytes")), answered)
             if found is not None:
                 groups.setdefault(found[0], (found[1], []))[1].append(row)
         return groups, labels
@@ -313,17 +348,26 @@ class Learner:
             return
         kept, held = [], 0
         for row in sorted(rows, key=lambda r: -seconds_of(r)):
+            try:
+                load_threads([row])
+            except ContractError:
+                logger.warning("compache: a conversation was not read", exc_info=True)
+                continue
             kept.append(row)
             held += sum(run.get("calls") or 1 for run in row["runs"])
             if held >= _MOST_CALLS:
                 break
+        if not kept:
+            return
         names = {row["thread_id"] for row in kept}
         mine = [row for row in labels if row["thread_id"] in names]
         asked = [row for row in mine if row["run"] > 1]
         if not agentic and not asked:
             # Without labels nothing can be left out, and a chat is given nothing else here.
             return
-        policy = fit(kept, mine, model=_named(spec), agent=agentic)
+        # Where a cache's lifetime is a guess, nothing is paid to keep one alive.
+        more = {"pings": _known(spec)} if agentic else {}
+        policy = fit(kept, mine, model=_named(spec), agent=agentic, **more)
         text = json.dumps(policy.artifact, ensure_ascii=False)
         self._write(f"{key}.json", text)
         summary = policy.summary
@@ -334,9 +378,7 @@ class Learner:
             "saving": summary["saving"],
         }
         with self._lock:
-            # Another process may have fitted another model meanwhile.
-            self._state = {**self._read_state(), key: entry}
-            self._write("state.json", json.dumps(self._state, indent=2) + "\n")
+            self._keep({key: entry})
             self._policies[key] = policy
         logger.info("compache: fitted %s on %d calls", key, calls)
 

@@ -743,7 +743,7 @@ def _stats(args):
         said = stats.lines(report)
         policies = {}
         for model in report["models"] if learner is not None else ():
-            fitted = learner.fitted_on(model)
+            fitted = learner.fitted_on(report["models"][model]["requested"])
             policies[model] = fitted
             said.append(
                 f"  policy for {model}: fitted on {fitted['calls']:,} of your calls"
@@ -774,7 +774,13 @@ def _learn(args):
         k: v for k, v in learner._state.items() if k != "lasting" and before.get(k) != v
     }
     fitted = [
-        f"Fitted {key} on {entry['calls']:,} calls: {entry['saving']:.0%} less than keeping everything."
+        f"Fitted {key} on {entry['calls']:,} calls"
+        + (
+            "."
+            if entry["saving"] is None
+            # Where not everything would have fit, there is nothing to compare with.
+            else f": {entry['saving']:.0%} less than keeping everything."
+        )
         for key, entry in new.items()
     ]
     lines += fitted or ["Nothing has grown enough for a new fit."]

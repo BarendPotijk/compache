@@ -102,6 +102,46 @@ class SavingTests(unittest.TestCase):
         long = stats.savings([row("a", 0, 10_000, 0, 10_000, ttl=3600)])["spent"]
         self.assertGreater(long, short * 1.4)
 
+    def test_what_an_hour_s_header_kept_would_have_been_written_again(self):
+        sent = {"left_bytes": 0, "sent_bytes": 120_000, "header_ttl": 3600}
+        rows = [row("a", 0, 30_000, 0, 30_000, long_write=28_000, **sent)]
+        for k in range(1, 6):
+            size = 30_000 + 500 * k
+            rows.append(row("a", 900 * k, size, 28_000, size - 28_000, **sent))
+        spec = compache.model_spec(MODEL)
+        without = sum(spec.token_charge(0, 30_000 + 500 * k, 0, 100) for k in range(6))
+        self.assertAlmostEqual(stats.savings(rows)["without"], without * 0.1 / 1e6)
+
+    def test_an_hour_s_entries_of_a_long_request_cost_as_much_more(self):
+        found = stats.savings(
+            [row("a", 0, 150_000, 0, 150_000, 0, header_ttl=3600, long_write=100_000)]
+        )
+        billed = (50_000 * 1.25 + 100_000 * 2.0) * 5 * 0.1 / 1e6
+        self.assertAlmostEqual(found["spent"], billed)
+
+    def test_an_hour_that_the_application_asks_for_is_no_cost_of_ours(self):
+        sent = {"left_bytes": 0, "sent_bytes": 40_000, "long_write": 10_000}
+        found = stats.savings([row("a", 0, 10_000, 0, 10_000, **sent)])
+        self.assertAlmostEqual(found["spent"], found["without"])
+        self.assertAlmostEqual(found["spent"], (10_000 * 2 + 500) * 0.1 / 1e6)
+
+    def test_an_answer_that_needed_a_fetch_would_have_been_given_anyway(self):
+        sent = {"left_bytes": 0, "sent_bytes": 200_000}
+        rows = [
+            row("a", 0, 50_000, 0, 50_000, 30, **sent),
+            row("a", 10, 50_500, 50_000, 500, 30, **sent),
+        ]
+        before = stats.savings(rows)["without"]
+        rows.append(row("a", 12, 56_000, 50_500, 5_500, 2_000, kind="reopen"))
+        after = stats.savings(rows)["without"]
+        self.assertAlmostEqual(after - before, 1_970 * 5 * 0.1 / 1e6)
+
+    def test_prices_are_those_of_the_model_that_was_asked_for(self):
+        rows = [dict(row("a", 0, 10_000), model="a-snapshot", requested=MODEL)]
+        found = stats.savings(rows)
+        self.assertGreater(found["spent"], 0)
+        self.assertEqual(found["models"]["a-snapshot"]["requested"], MODEL)
+
     def test_a_model_without_prices_is_counted_apart(self):
         rows = [dict(row("a", 0, 10_000), model="my-model")]
         found = stats.savings(rows)

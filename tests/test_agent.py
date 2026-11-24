@@ -181,6 +181,20 @@ class FlowTests(unittest.TestCase):
                 self.assertFalse(newest & flow.archived)
                 flow.sent(at)
 
+    def test_the_books_hold_where_a_block_turns_out_larger(self):
+        rng = random.Random(3)
+        for _ in range(40):
+            flow = flow_of(AgentRecipe(rounds=4, ratio=1.5), rng.randint(6, 20))
+            shown = [i for i in range(len(flow.shown)) if flow.shown[i] > flow.notice]
+            for i in rng.sample(shown, min(3, len(shown))):
+                flow.cut(1e3)
+                if flow.shown[i] == flow.whole[i]:
+                    flow.resize(i, flow.shown[i] + rng.randint(-200, 900))
+            self.assertEqual(flow.size, sum(flow.shown))
+            if flow.live:
+                first = flow.live[0]
+                self.assertEqual(flow._before(first), sum(flow.shown[:first]))
+
     def test_a_copy_goes_its_own_way(self):
         flow = flow_of(AgentRecipe(rounds=2, ratio=None), 6)
         other = flow.copy()
@@ -278,6 +292,8 @@ class FitTests(unittest.TestCase):
         threads = compache.load_threads(rows, model=SPEC.model_id)
         fitted = agent.fit_agent(threads, SPEC)
         self.assertGreater(fitted["recipe"]["tool_pings"], 0)
+        still = agent.fit_agent(threads, SPEC, pings=False)["recipe"]
+        self.assertEqual((still["tool_pings"], still["user_pings"]), (0, 0))
 
     def test_a_longer_lifetime_is_chosen_where_it_pays(self):
         # Coming back after a long time each step is what an hour's entries are for.
@@ -372,6 +388,113 @@ class FitTests(unittest.TestCase):
         }
         calls = agent._conversations(silent, SPEC, 0, [row])[0]
         self.assertEqual(calls[-1].needs, frozenset({"run-0:1:retrieval:1"}))
+
+    def test_labels_may_name_a_turn_by_its_id(self):
+        rows = runs(4)
+        named = {"thread_id": "run-0", "run_id": "run-0:1", "needs": []}
+        named["needs"] = [[{"part_id": "run-0:1:retrieval:1", "quote": "a line"}]]
+        threads = compache.load_threads(rows)
+        (calls, *_) = agent._conversations(threads, SPEC, 0, [named])
+        self.assertEqual(calls[-1].needs, frozenset({"run-0:1:retrieval:1"}))
+        with self.assertRaises(compache.ContractError):
+            agent._conversations(threads, SPEC, 0, [{"thread_id": "x", "needs": []}])
+
+    def test_what_fetching_costs_is_the_same_whatever_share_of_it_is_seen(self):
+        def talk(known, pause=600, rounds=30):
+            made, at, n = agent.Talk(), 0.0, 0
+            for prompt in range(3):
+                for k in range(rounds):
+                    found = ((f"r{n}", 3_000),) if k else ()
+                    n += bool(k)
+                    needs = frozenset({"r0"} if prompt and not k else ())
+                    made.append(
+                        agent.Call(
+                            at,
+                            at + 5,
+                            100 if made else 2_000,
+                            found,
+                            100,
+                            needs if known else None,
+                            k + 1 < rounds,
+                        )
+                    )
+                    at += 8
+                at += pause
+            return made
+
+        for spec in (SPEC, model_spec("claude-haiku-5-5")):
+            recipe = AgentRecipe(8, 2.0)
+            every = agent.simulate([talk(True)] * 10, recipe, spec)
+            one = agent.simulate([talk(k == 0) for k in range(10)], recipe, spec)
+            none = agent.simulate([talk(False)] * 10, recipe, spec)
+            self.assertAlmostEqual(every["cost"], one["cost"])
+            self.assertGreater(every["cost"], none["cost"])
+
+    def test_calls_that_were_only_counted_say_nothing_of_what_they_need(self):
+        row = {
+            "thread_id": "t",
+            "runs": [
+                {
+                    "started_at": 0,
+                    "ended_at": 300,
+                    "input": "Fix it",
+                    "retrievals": ["content " * 100] * 9,
+                    "output": "Done.",
+                    "calls": 10,
+                }
+            ],
+        }
+        (calls,) = agent._conversations(compache.load_threads([row]), SPEC, 0)
+        self.assertEqual({c.needs for c in calls}, {None})
+
+    def test_a_turn_of_one_call_may_quote_what_an_earlier_one_read(self):
+        line = "the one line that only the first result holds"
+        messages = [{"role": "user", "content": "Fix it", "at": 1}]
+        for k in range(3):
+            messages += [
+                {
+                    "role": "assistant",
+                    "content": f"Step {k}",
+                    "at": 2 + 2 * k,
+                    "tool_calls": [{"id": f"c{k}", "function": {"arguments": "{}"}}],
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": f"c{k}",
+                    "content": line if not k else "nothing",
+                    "at": 3 + 2 * k,
+                },
+            ]
+        messages += [
+            {"role": "assistant", "content": "Done.", "at": 9},
+            {"role": "user", "content": "What was in the first?", "at": 4_000},
+            {"role": "assistant", "content": "It says:\n" + line, "at": 4_005},
+        ]
+        rows = [{"thread_id": "t", "messages": messages}]
+        (calls,) = agent._conversations(compache.load_threads(rows), SPEC, 0)
+        self.assertEqual(calls[-1].needs, frozenset({"t:1:retrieval:1"}))
+
+    def test_an_empty_result_weighs_nothing(self):
+        spec = replace(SPEC, part_overhead_tokens=0)
+        step = {"started_at": 1, "ended_at": 2, "results": 0, "bytes": 0}
+        run = {
+            "started_at": 0,
+            "ended_at": 9,
+            "input": "",
+            "retrievals": [""],
+            "output": "",
+            "steps": [
+                {**step, "input_tokens": 100},
+                {**step, "results": 1, "input_tokens": 200},
+            ],
+        }
+        rows = [{"thread_id": "t", "runs": [run]}]
+        (calls,) = agent._conversations(compache.load_threads(rows), spec, 0)
+        self.assertEqual(sum(c.said for c in calls), 200)
+
+    def test_an_option_of_the_other_fit_is_named(self):
+        with self.assertRaisesRegex(compache.ContractError, "share_headers"):
+            compache.fit(runs(4), model="claude-haiku-5-5", share_headers=False)
 
     def test_sizes_are_what_the_provider_counted(self):
         rows = runs(1, calls=6, quotes=0.0)
@@ -626,6 +749,92 @@ class SessionTests(unittest.TestCase):
         self.assertGreater(flow.sizes["t:1:retrieval:2"], 1_900)
         self.assertEqual(flow.size, sum(flow.shown))
 
+    def test_a_loop_that_is_told_of_at_its_end_keeps_its_sizes(self):
+        session = self.policy().session("t", system_prompt="You are an agent. " * 100)
+        turn = session.prepare("Fix it", at=0.0)
+        for k in range(20):
+            turn = session.extend(turn, ["x" * 8_000], at=10.0 * k + 10)
+        flow = session._engine.flow
+        usage = {
+            "input_tokens": flow.size,
+            "cache_read_input_tokens": 0,
+            "cache_creation_input_tokens": 0,
+            "output_tokens": 50,
+        }
+        session.complete(turn, "done", at=300.0, usage=usage)
+        self.assertEqual(session._engine._off, 1.0)
+        turn = session.prepare("Next", at=310.0)
+        session.extend(turn, ["x" * 8_000], at=320.0)
+        self.assertEqual(flow.shown[-1], 2_006)
+        self.assertEqual(flow.size, sum(flow.shown))
+
+    def test_reasoning_that_stays_out_of_the_conversation_is_no_result_s_size(self):
+        for told in (True, False):
+            session = self.policy(None, None).session("t")
+            turn = session.prepare("Fix it", at=0.0)
+            size = 1_000
+            for k in range(6):
+                details = {"reasoning_tokens": 900} if told else {}
+                usage = {
+                    "prompt_tokens": size,
+                    "completion_tokens": 950,
+                    "completion_tokens_details": details,
+                }
+                at = 10.0 * k
+                session.replied(turn, "x" * 160, [], at=at + 4, usage=usage)
+                turn = session.extend(turn, ["y" * 4_000], at=at + 8)
+                size += 1_046
+            flow = session._engine.flow
+            self.assertLess(abs(flow.sizes["t:1:retrieval:5"] - 1_006), 60)
+            self.assertLess(abs(session._engine._off - 1), 0.1)
+
+    def test_reasoning_that_a_provider_drops_with_its_turn_takes_no_room(self):
+        for kept in (True, False):
+            session = self.policy(None, None).session("t")
+            size = 1_000
+            for n in range(3):
+                turn = session.prepare(f"Task {n}", at=1_000.0 * n)
+                reasoned = 0
+                for k in range(4):
+                    usage = {
+                        "input_tokens": size,
+                        "output_tokens": 540,
+                        "output_tokens_details": {"thinking_tokens": 500},
+                    }
+                    at = 1_000.0 * n + 10 * k
+                    place = (n, k)
+                    session.replied(
+                        turn, "z" * 160, [], at=at, usage=usage, place=place
+                    )
+                    turn = session.extend(turn, ["y" * 4_000], at=at + 5)
+                    size += 540 + 1_006
+                    reasoned += 500
+                final = {"input_tokens": size, "output_tokens": 40}
+                session.complete(
+                    turn, "z" * 160, at=1_000.0 * n + 90, last_usage=final, usage=final
+                )
+                size += 46 if kept else 46 - reasoned
+                self.assertLess(abs(session._engine._off - 1), 0.1, f"{kept} {n}")
+            flow = session._engine.flow
+            self.assertLess(abs(flow.size - size), 600 if kept else 2_100)
+            self.assertEqual(session._engine._keeps_thoughts, kept)
+
+    def test_a_turn_that_is_tried_again_starts_from_where_it_did(self):
+        session = self.policy().session("t")
+        turn = session.prepare("Fix it", at=0.0)
+        session.complete(turn, "fixed", at=5.0)
+        turn = session.prepare("And this?", at=10.0)
+        for k in range(6):
+            turn = session.extend(turn, ["content " * 500], at=20.0 + k)
+        self.assertIn("t:2:retrieval:1", turn.archived_ids)
+        turn = session.prepare("And this?", at=40.0)
+        self.assertFalse(turn.archived_ids)
+        turn = session.extend(turn, ["something new " * 500], at=45.0)
+        self.assertFalse(turn.archived_ids)
+        self.assertIn("something new", turn.parts[-1].text)
+        self.assertEqual(session._engine.flow.size, sum(session._engine.flow.shown))
+        self.assertEqual(session._engine.flow.rounds, 1)
+
     def test_a_session_can_branch(self):
         session = self.policy().session("t")
         turn = session.prepare("Fix it", at=0.0)
@@ -708,6 +917,46 @@ class StepTests(unittest.TestCase):
         self.assertEqual(len(thread.runs), 2)
         self.assertIn("reminder", thread.runs[0].input.text)
         self.assertEqual(thread.runs[0].calls, 2)
+
+    def test_a_question_after_a_tool_of_the_client_s_is_a_turn_of_its_own(self):
+        messages = []
+        for k in range(3):
+            at = 1_790_000_000 + 3_600 * k
+            messages += [
+                {"role": "user", "content": f"Question {k}?", "at": at},
+                {
+                    "role": "assistant",
+                    "content": "Here is the chart.",
+                    "at": at + 4,
+                    "tool_calls": [{"id": f"c{k}", "function": {"arguments": "{}"}}],
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": f"c{k}",
+                    "content": "shown",
+                    "at": at + 5,
+                },
+            ]
+        (thread,) = compache.load_threads([{"thread_id": "t", "messages": messages}])
+        self.assertEqual(len(thread.runs), 3)
+
+    def test_tool_calls_and_times_of_other_shapes_are_read_past(self):
+        shapes = (
+            [{"id": "c", "function": "search", "arguments": {}}],
+            {"search": {}},
+            "search(x)",
+            1,
+        )
+        for calls in shapes:
+            messages = [
+                {"role": "user", "content": "Find it", "at": 1},
+                {"role": "assistant", "content": "", "at": 2, "tool_calls": calls},
+                {"role": "tool", "content": "found", "at": "just now"},
+                {"role": "assistant", "content": "Found.", "at": 4},
+            ]
+            rows = [{"thread_id": "t", "messages": messages}]
+            (thread,) = compache.load_threads(rows)
+            self.assertEqual(thread.runs[0].calls, 2)
 
     def test_steps_that_contradict_the_run_are_refused(self):
         run = {

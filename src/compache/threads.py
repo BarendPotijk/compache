@@ -502,7 +502,8 @@ def reasoning_tokens(usage: Any) -> int | None:
             count = found.get(name) if isinstance(found, dict) else None
             if type(count) is int and count >= 0:
                 return count
-    return None
+    count = usage.get("thoughtsTokenCount")
+    return count if type(count) is int and count >= 0 else None
 
 
 def long_writes(usage: Any) -> int:
@@ -669,23 +670,25 @@ def _turn_usage(usages: list) -> dict | None:
     counted = [u for u in map(canonical_usage, usages) if u is not None]
     if not counted:
         return None
+    last = counted[-1]
+    # A request can be shorter than the one before it, where something was taken out.
+    read = min(counted[0]["cache_read"], last["input"])
     return {
-        "input": counted[-1]["input"],
+        "input": last["input"],
         "output": sum(u["output"] for u in counted),
-        "cache_read": counted[0]["cache_read"],
-        "cache_write": min(
-            counted[-1]["cache_write"],
-            counted[-1]["input"] - counted[0]["cache_read"],
-        ),
+        "cache_read": read,
+        "cache_write": min(last["cache_write"], last["input"] - read),
     }
 
 
 def _called(message: dict) -> list:
     """The arguments of the tool calls a message makes, in either provider's shape."""
     found = []
-    for call in message.get("tool_calls") or ():
-        if isinstance(call, dict):
-            found.append((call.get("function") or {}).get("arguments"))
+    calls = message.get("tool_calls")
+    for call in calls if isinstance(calls, list) else ():
+        made = call.get("function") if isinstance(call, dict) else None
+        if isinstance(made, dict):
+            found.append(made.get("arguments"))
     content = message.get("content")
     for block in content if isinstance(content, list) else ():
         if isinstance(block, dict) and str(block.get("type")).endswith("tool_use"):
@@ -702,6 +705,14 @@ def _reasoned(message: dict) -> bool:
     )
 
 
+def _timed(value: Any) -> bool:
+    """Whether a time can be read."""
+    try:
+        return bool(_iso(value, "at"))
+    except ContractError:
+        return False
+
+
 def _runs_from_messages(messages: Any, thread_id: str) -> list[dict]:
     """Group a chat log into runs: a user message, what was retrieved, the answer."""
     if not isinstance(messages, list):
@@ -711,8 +722,6 @@ def _runs_from_messages(messages: Any, thread_id: str) -> list[dict]:
     waiting: list[dict] = []
     exposed_ids: set[str] = set()
     quotes = Quotes()
-    # Whether the model has not answered yet to what its tools returned.
-    loops = False
 
     def close():
         nonlocal current
@@ -726,7 +735,7 @@ def _runs_from_messages(messages: Any, thread_id: str) -> list[dict]:
                     "output": "\n\n".join(current["answers"]),
                     # Every assistant message is one model call.
                     "calls": current["calls"],
-                    **({"steps": current["steps"]} if current["calls"] > 1 else {}),
+                    "steps": current["steps"],
                     **(
                         {"cited_part_ids": list(current["cited"])}
                         if current["cited"]
@@ -766,13 +775,9 @@ def _runs_from_messages(messages: Any, thread_id: str) -> list[dict]:
             if "part_id" in message:
                 part["part_id"] = _id(message["part_id"], "part_id")
             found.append(part)
-        answering = bool(results) or (
-            role in ("tool", "function") and bool(message.get("tool_call_id"))
-        )
-        loops = answering or (loops and role == "user")
         if role == "user" and text:
             # What is said along with the results of tools is a remark in the same turn.
-            if current is not None and current["answers"] and not loops:
+            if current is not None and current["answers"] and not results:
                 close()
             if current is None:
                 if at is None:
@@ -843,7 +848,7 @@ def _runs_from_messages(messages: Any, thread_id: str) -> list[dict]:
                 name = part.get("part_id", f"{thread_id}:{len(runs) + 1}:retrieval:{k}")
                 exposed_ids.add(name)
                 quotes.result(name, part["text"])
-            if found and at is not None:
+            if found and _timed(at):
                 # The results are in: the call that reads them goes out then.
                 current["heard"] = at
             current["retrievals"].extend(found)
@@ -852,6 +857,10 @@ def _runs_from_messages(messages: Any, thread_id: str) -> list[dict]:
     close()
     if not runs:
         raise ContractError("messages hold no answered user message")
+    if all(run["calls"] < 2 for run in runs):
+        # One call a turn: the turns say it all.
+        for run in runs:
+            del run["steps"]
     return runs
 
 
@@ -925,7 +934,13 @@ def normalize_thread(data: Any, *, model: str | None = None) -> dict:
     thread_id = _id(data.get("thread_id"), "thread_id")
     default_model = data.pop("model", None)
     # What `recorded` reads: about the record, not part of the conversation.
-    for key in ("tools", "observed_until", "system_bytes", "tools_bytes"):
+    for key in (
+        "tools",
+        "observed_until",
+        "system_bytes",
+        "tools_bytes",
+        "requested_model",
+    ):
         data.pop(key, None)
     if "messages" in data:
         if "runs" in data:

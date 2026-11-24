@@ -303,6 +303,8 @@ class _Conversation:
     reopens: bool = False
     # Whether its policy decides call by call.
     agentic: bool = False
+    # The model its requests name.
+    requested: str | None = None
     # The model it began with and the policy that gave it, where policies are learned.
     model: str | None = None
     policy: Any = None
@@ -357,18 +359,19 @@ class _Call:
 def _segments(slots) -> list[_Segment]:
     """Turns of a request: a question opens one, and everything up to the next question is its.
 
-    What is said along with the results of tools, before the model has answered
-    to them, is a remark in the same turn.
+    What is said in the same message as the results of tools is a remark in the
+    same turn.
     """
     turns: list[_Segment] = []
     waiting = []
-    loops = False
+    results = None
     for slot in slots:
-        loops = slot.answers or (loops and slot.kind == "input")
+        if slot.answers:
+            results = slot.message
         if not slot.text and not slot.closes:
             continue
         if slot.kind == "input":
-            if not turns or (turns[-1].outputs and not loops):
+            if not turns or (turns[-1].outputs and slot.message != results):
                 turns.append(_Segment(retrievals=waiting))
                 waiting = []
             turns[-1].inputs.append(slot)
@@ -458,11 +461,13 @@ def _turn_usage(first, last) -> dict | None:
     if first is None or last is None or first == last:
         return first or last
     left = min(last["cache_read"] + last["cache_write"], last["input"])
+    # A policy that cut while the turn went on left less than the first call read.
+    read = min(first["cache_read"], last["input"])
     return {
         "input": last["input"],
         "output": first["output"] + last["output"],
-        "cache_read": first["cache_read"],
-        "cache_write": max(0, left - first["cache_read"]) if last["cache_write"] else 0,
+        "cache_read": read,
+        "cache_write": max(0, left - read) if last["cache_write"] else 0,
     }
 
 
@@ -575,7 +580,7 @@ class Live:
             if found is None and (thread or done):
                 found = self._by_chain.get(chains[-1])
                 if found is not None and self._elsewhere(found, turns):
-                    found = self._branch(found, chains[-1], done, thread)
+                    found = self._branch(found, chains[-1], turns, thread)
             if found is None and done:
                 # Its last turn may have been answered without the answer passing here.
                 earlier = self._by_chain.get(chains[-2]) if thread or done > 1 else None
@@ -588,7 +593,7 @@ class Live:
             if found is None and done and chains[-1] in self._by_base:
                 # It goes on from where another request, such as a host's own, branched off.
                 found = self._branch(
-                    self._by_base[chains[-1]], chains[-1], done, thread
+                    self._by_base[chains[-1]], chains[-1], turns, thread
                 )
             if found is None:
                 name = record = thread or "c-" + uuid.uuid4().hex[:16]
@@ -667,9 +672,10 @@ class Live:
         )
 
     def _branch(
-        self, other: _Conversation, chain: str, done: int, thread: str | None
+        self, other: _Conversation, chain: str, turns: list, thread: str | None
     ) -> _Conversation | None:
         """A conversation that goes on from where another stood. None where that is not known."""
+        done = len(turns) - 1
         if other.base is None or other.base[0] != chain:
             return None
         _, session, inserts, reopens = other.base
@@ -679,16 +685,20 @@ class Live:
             count = self._names[thread] = self._names.get(thread, 0) + 1
             record = f"{thread}~{count}"
         made = _Conversation(other.thread_id, chain, record)
-        made.session, made.agentic = session.copy(), True
+        made.agentic, made.left_alone = other.agentic, other.left_alone
         made.inserts, made.reopens = list(inserts), reopens
         made.lifetime, made.five_minutes = other.lifetime, other.five_minutes
         made.header_lifetime = other.header_lifetime
         made.default_lifetime = other.default_lifetime
         made.model, made.policy = other.model, other.policy
+        made.requested = other.requested
         made.turns, made.at = done, other.at
-        made.session.follows(other.session)
+        if session is not None and other.session is not None:
+            made.session = session.copy()
+            made.session.follows(other.session)
         # What they share is kept warm for the newest of them.
         other.pings_off = True
+        self._remember(made, turns[:done])
         if thread or done:
             self._index(made, chain)
         return made
@@ -989,6 +999,11 @@ class Live:
     ) -> _Call:
         """Bring the conversation up to this request and work out what to send for it."""
         now, number, current = self._now(conversation), len(turns), turns[-1]
+        if scan.model and conversation.requested not in (None, scan.model):
+            # Another model has a cache of its own, and nothing of this conversation is in it.
+            if conversation.session is not None:
+                conversation.session.lost()
+        conversation.requested = scan.model or conversation.requested
         conversation.system_bytes = _size(scan.system)
         conversation.tools_bytes = _size(json.dumps(scan.tools)) if scan.tools else 0
         plain = body
@@ -1158,10 +1173,7 @@ class Live:
                 # Behind the same instructions and tools as now, or they would look changed.
                 turn = self._shown(conversation, segment, at, scan)
                 conversation.session.complete(turn, segment.answer, at=at)
-        if self.recorder is not None:
-            for k, segment in enumerate(turns[:done], 1):
-                self._heard(conversation, k, segment.question, segment.retrievals)
-                self._quotes(conversation).said(segment.answer)
+        self._remember(conversation, turns[:done])
         conversation.turns = done
         self._index(conversation, chains[done])
 
@@ -1211,10 +1223,10 @@ class Live:
     def _begin(self, conversation, chains, current, number, now, scan) -> _Pending:
         """Open the turn a request asks about."""
         session, found = conversation.session, current.retrievals
-        if conversation.agentic and session is not None:
+        if conversation.left_alone or (conversation.agentic and session is not None):
             conversation.base = (
                 chains[-1],
-                session.copy(),
+                session.copy() if session is not None else None,
                 tuple(conversation.inserts),
                 conversation.reopens,
             )
@@ -1254,6 +1266,14 @@ class Live:
         quotes.own(question)
         for j, part in enumerate(found, first):
             quotes.result(f"R{number}.{j}", part.text)
+
+    def _remember(self, conversation, turns) -> None:
+        """The same for turns that were answered before."""
+        if self.recorder is None:
+            return
+        for k, segment in enumerate(turns, 1):
+            self._heard(conversation, k, segment.question, segment.retrievals)
+            self._quotes(conversation).said(segment.answer)
 
     def _stand_down(self, conversation, number, now) -> None:
         """Stop applying the policy to a conversation. It is still recorded."""
@@ -1866,8 +1886,9 @@ class Live:
                     segment.answer,
                     at=pending.ended_at,
                     usage=pending.first_usage if counted else None,
+                    # What the model fetched back stays in an agent's conversation.
                     last_usage=pending.last_usage
-                    if counted and pending.calls > 1
+                    if counted and (pending.calls > 1 or conversation.agentic)
                     else None,
                     place=pending.place if counted else None,
                     cited_part_ids=[i for i in pending.cited if i in visible],
@@ -1894,6 +1915,7 @@ class Live:
             started_at=pending.started_at,
             ended_at=ended_at,
             model=pending.model,
+            requested=conversation.requested,
             sizes={
                 "input": _size(segment.question),
                 "retrievals": [_size(s.text) for s in segment.retrievals],
@@ -1907,7 +1929,10 @@ class Live:
             asked=pending.asked,
             refs=self._named(pending),
             older=pending.older,
-            steps=pending.steps if len(pending.steps) > 1 else (),
+            # A chat's turn of one call says it all. An agent's may quote what it had read before.
+            steps=pending.steps
+            if len(pending.steps) > 1 or conversation.tools_bytes
+            else (),
             carries=conversation.carries,
             cut=pending.cut,
         )
@@ -1945,6 +1970,7 @@ class Live:
             kind,
             at=self.clock() if conversation.when is None else conversation.when,
             model=source.model,
+            requested=conversation.requested,
             usage=canonical_usage(source.usage),
             cost=source.cost,
             archived=archived,

@@ -163,6 +163,12 @@ def fit(
     header = {"system_prompt": system_prompt, "default_tools": tools}
     agentic = options.pop("agent", None)
     if agent.is_agentic(threads) if agentic is None else agentic:
+        unknown = sorted(set(options) - {"floor", "reserve", "pings"})
+        if unknown:
+            raise ContractError(
+                f"a policy that decides call by call is not fitted with {', '.join(unknown)}: "
+                "give agent=False for one that decides per message"
+            )
         artifact = agent.fit_agent(
             threads,
             spec,
@@ -833,7 +839,7 @@ class Session:
             text=text,
             calls=calls,
             output_tokens=counted.get("output"),
-            thought=_thought(usage) if place is not None else 0,
+            thought=_thought(usage),
             place=place,
             **_counters(usage),
         )
@@ -855,6 +861,11 @@ class Session:
         """Say that fetched-back text now stands at the end of the conversation, under `name`."""
         if self.policy.agentic:
             self._engine.reopened(name, self.policy.spec.part_tokens(text))
+
+    def lost(self) -> None:
+        """Say that the provider has nothing of the conversation in its cache any more."""
+        if self.policy.agentic:
+            self._engine.flow.at = None
 
     def warm(self, at: float) -> bool:
         """Whether the provider is taken to have the conversation in its cache."""
