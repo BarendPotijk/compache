@@ -278,6 +278,76 @@ class FitTests(unittest.TestCase):
         self.assertEqual(fitted["model_spec"]["cache_ttl_seconds"], 3600)
         self.assertEqual(fitted["standard_spec"]["cache_ttl_seconds"], 300)
 
+    def prompts(self, pause, count=10, header=0, tokens=3_000):
+        """Sessions of short prompts with a user in between, behind instructions of some size."""
+        rows = []
+        for i in range(count):
+            at, messages = 1_790_000_000.0 + 1e6 * i, []
+            messages.append({"role": "system", "content": "s" * 4 * header})
+            for p in range(6):
+                messages.append({"role": "user", "content": f"Part {p}", "at": at})
+                for k in range(8):
+                    at += 8
+                    call = {
+                        "id": f"{p}-{k}",
+                        "function": {"name": "r", "arguments": "{}"},
+                    }
+                    messages.append(
+                        {
+                            "role": "assistant",
+                            "content": "",
+                            "tool_calls": [call],
+                            "at": at,
+                        }
+                    )
+                    at += 3
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": f"{p}-{k}",
+                            "content": f"{i}-{p}-{k} " + "x" * 4 * tokens,
+                            "at": at,
+                        }
+                    )
+                at += 8
+                messages.append({"role": "assistant", "content": "Done.", "at": at})
+                at += pause
+            rows.append({"thread_id": f"s{i}", "messages": messages})
+        return rows
+
+    def test_instructions_and_tools_may_be_cached_for_longer_than_the_rest(self):
+        hour = replace(SPEC, cache_ttl_seconds=3600, write_multiplier=2.0)
+        rows = self.prompts(900, header=20_000)
+        threads = compache.load_threads(rows, model=SPEC.model_id)
+        fitted = agent.fit_agent(threads, SPEC, lifetimes=[hour], header_tokens=20_000)
+        solved = fitted["solve"]
+        rows_ = solved["candidates"]
+        both = [r for r in rows_ if r["header_ttl_seconds"] > r["cache_ttl_seconds"]]
+        plain = [r for r in rows_ if r["header_ttl_seconds"] == r["cache_ttl_seconds"]]
+        self.assertLess(min(r["cost"] for r in both), min(r["cost"] for r in plain))
+        self.assertEqual(fitted["header_spec"]["cache_ttl_seconds"], 3600)
+        self.assertEqual(fitted["model_spec"]["cache_ttl_seconds"], 300)
+        held = agent.replay_agent(fitted, threads, header_tokens=20_000)
+        self.assertAlmostEqual(held["policy_cost"], solved["chosen"]["cost"])
+
+    def test_small_instructions_are_left_at_the_default(self):
+        hour = replace(SPEC, cache_ttl_seconds=3600, write_multiplier=2.0)
+        rows = self.prompts(20, tokens=500)
+        threads = compache.load_threads(rows, model=SPEC.model_id)
+        fitted = agent.fit_agent(threads, SPEC, lifetimes=[hour], header_tokens=500)
+        self.assertNotIn("header_spec", fitted)
+
+    def test_what_another_conversation_left_in_the_cache_is_read(self):
+        talk = agent.Talk(
+            [agent.Call(1_000.0, 1_001.0, 9_000, (), 10, frozenset(), False)]
+        )
+        talk.header = 8_000
+        talk.times = [900.0, 1_000.0]
+        warm = agent.simulate([talk], AgentRecipe(), SPEC)["cost"]
+        talk.times = [100.0, 1_000.0]
+        cold = agent.simulate([talk], AgentRecipe(), SPEC)["cost"]
+        self.assertAlmostEqual(cold - warm, 8_000 * (1.25 - 0.1))
+
     def test_labels_say_what_a_turn_relied_on_too(self):
         silent = compache.load_threads(runs(1, quotes=0.0), model=SPEC.model_id)
         row = {
@@ -342,6 +412,15 @@ class PolicyTests(unittest.TestCase):
             report = compache.replay(path and again, runs(4, seed=9))
         self.assertGreater(report["saving"], 0)
         self.assertIn("policy", report["cost_per_1000_calls"])
+
+    def test_the_header_s_lifetime_is_said_and_can_be_dropped(self):
+        rows = FitTests().prompts(900, header=20_000)
+        policy = compache.fit(rows, model="claude-sonnet-5-5")
+        self.assertEqual(policy.header_lifetime, 3600)
+        self.assertIn("instructions and tools", policy.describe())
+        plain = policy.at_default_lifetime()
+        self.assertIsNone(plain.header_lifetime)
+        self.assertEqual(plain.recipe, policy.recipe)
 
     def test_a_chat_s_policy_stays_what_it_was(self):
         rows = [

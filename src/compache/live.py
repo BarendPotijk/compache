@@ -45,7 +45,7 @@ from .learn import Learner
 from .optimizer.recovery import REOPEN_TOOL
 from .quotes import Quotes, spoken
 from .record import Recorder
-from .threads import cache_read_reported, canonical_usage
+from .threads import cache_read_reported, canonical_usage, long_writes
 
 __all__ = ["Live", "Result"]
 
@@ -279,6 +279,8 @@ class _Conversation:
     session: Any = None
     # The cache lifetime its requests ask for, where the policy was fitted for another than the default.
     lifetime: float | None = None
+    # The same for its instructions and tools alone.
+    header_lifetime: float | None = None
     # Whether it is planned under a cache that lives five minutes.
     five_minutes: bool = False
     # Whether it can only be planned under the default, and whether its session still has to be made anew for that.
@@ -671,6 +673,7 @@ class Live:
         made.session, made.agentic = session.copy(), True
         made.inserts, made.reopens = list(inserts), reopens
         made.lifetime, made.five_minutes = other.lifetime, other.five_minutes
+        made.header_lifetime = other.header_lifetime
         made.default_lifetime = other.default_lifetime
         made.model, made.policy = other.model, other.policy
         made.turns, made.at = done, other.at
@@ -886,30 +889,35 @@ class Live:
         conversation.session = policy.session(name)
         conversation.agentic = policy.agentic
         conversation.lifetime = policy.cache_lifetime
+        conversation.header_lifetime = policy.header_lifetime
         conversation.five_minutes = policy.spec.cache_ttl_seconds == _FIVE_MINUTES
         return policy
 
     @staticmethod
-    def _asking(conversation, body):
+    def _asking(conversation, dialect, body):
         """A request made here, asking for the cache lifetime the conversation is planned under."""
         if conversation.session is None:
             return body
         if conversation.lifetime is not None:
             return wire.with_lifetime(body, conversation.lifetime)
-        return wire.with_default_lifetime(body) if conversation.five_minutes else body
+        if conversation.five_minutes:
+            body = wire.with_default_lifetime(body)
+        if conversation.header_lifetime is not None:
+            body = dialect.with_header_lifetime(body, conversation.header_lifetime)
+        return body
 
     @staticmethod
     def _plan_default(conversation) -> None:
         """Plan a conversation under the provider's default lifetime, from its next turn on."""
         conversation.default_lifetime = conversation.stale = True
-        conversation.lifetime = None
+        conversation.lifetime = conversation.header_lifetime = None
 
     def _lifetime_refused(self, conversation) -> None:
         """The provider takes a request only under its default lifetime: so is everything planned from now on."""
         logger.warning(
             "compache: cache entries of %g seconds are refused, "
             "planning on the provider's default from now on",
-            conversation.lifetime,
+            conversation.lifetime or conversation.header_lifetime,
         )
         self._plan_default(conversation)
         if self.learner is not None:
@@ -1011,7 +1019,7 @@ class Live:
             marked = dialect.with_cache_mark(plain)
             for place in conversation.pending.marks:
                 marked = dialect.with_boundary(marked, place)
-            marked = self._asking(conversation, marked)
+            marked = self._asking(conversation, dialect, marked)
         call = _Call(
             conversation,
             dialect,
@@ -1075,7 +1083,8 @@ class Live:
         Only that tells whether the lifetime was why: what a provider says about it differs.
         """
         conversation = call.conversation
-        if result.status not in _REFUSED or conversation.lifetime is None:
+        asked = conversation.lifetime or conversation.header_lifetime
+        if result.status not in _REFUSED or asked is None:
             return result
         self.stats["retried"] += 1
         marked = wire.without_lifetime(call.marked)
@@ -1219,6 +1228,7 @@ class Live:
         if conversation.session is not None:
             self.stats["stood_down"] += 1
         conversation.session = conversation.lifetime = None
+        conversation.header_lifetime = None
         conversation.stale = False
         if conversation.pending is None or conversation.pending.index != number:
             conversation.pending = _Pending(number, now)
@@ -1439,7 +1449,7 @@ class Live:
                     break
                 answers = self._reopen(conversation, reply.calls, call, data)
                 sent = self._asking(
-                    conversation, dialect.after_tools(sent, data, answers)
+                    conversation, dialect, dialect.after_tools(sent, data, answers)
                 )
                 again = call.send(sent)
                 if again.status >= 400 or again.json is None:
@@ -1544,6 +1554,7 @@ class Live:
                         )
                         sent = self._asking(
                             conversation,
+                            dialect,
                             dialect.after_tools(sent, editor.said, answers),
                         )
                         again, kind = call.send(sent), "reopen"
@@ -1744,7 +1755,8 @@ class Live:
             )
             if body is None:
                 return
-            reply = self._whole(dialect, call.send(self._asking(conversation, body)))
+            asked = self._asking(conversation, dialect, body)
+            reply = self._whole(dialect, call.send(asked))
             if reply is None:
                 self._note_refused(call)
                 return
@@ -1883,6 +1895,8 @@ class Live:
             archived=archived,
             left=left,
             lifetime=conversation.lifetime,
+            header_lifetime=conversation.header_lifetime,
+            long_write=long_writes(source.usage),
             left_alone=conversation.left_alone,
         )
 
@@ -1947,7 +1961,7 @@ class Live:
             conversation.pings_off = True
             return 0
         reply, usage = (
-            self._whole(dialect, send(self._asking(conversation, body))),
+            self._whole(dialect, send(self._asking(conversation, dialect, body))),
             None,
         )
         if reply is not None:

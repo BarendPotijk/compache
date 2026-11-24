@@ -11,8 +11,10 @@ the newest rounds always go out in full, older ones as a notice once that pays.
     again. That pays once what goes is large next to what stays behind it.
   - While a tool runs or a user is away, a ping keeps the cache if that costs
     less than losing it.
+  - What opens every request, the instructions and the tools, may be cached for
+    longer than the conversation behind it: that stays the same for a day.
 
-How many rounds, how large, how many pings and which cache lifetime is fitted
+How many rounds, how large, how many pings and which cache lifetimes is fitted
 on recorded conversations. `Flow` holds what a conversation sends and what the
 provider has cached of it. The fit, the replay and the runtime all run on it,
 so what was priced is what happens.
@@ -21,6 +23,7 @@ so what was priced is what happens.
 from __future__ import annotations
 
 import json
+from bisect import bisect_left
 from dataclasses import asdict, dataclass, replace
 
 from .errors import ContractError
@@ -99,6 +102,20 @@ class Call:
     needs: frozenset | None
     # Whether the reply waits for a tool. Otherwise it waits for the user.
     tool: bool
+
+
+class Talk(list):
+    """The calls of one conversation, in order."""
+
+    # Tokens of the instructions and tools that open every request.
+    header: int = 0
+    # When calls were made behind the same ones, in any conversation.
+    times: list[float] = []
+
+    def header_used(self, at: float) -> float | None:
+        """When a call was last made behind these instructions and tools before `at`."""
+        k = bisect_left(self.times, at)
+        return self.times[k - 1] if k else None
 
 
 class Flow:
@@ -292,15 +309,15 @@ def _steps(run, spec):
         yield at, done, seen, said, said, (), None
 
 
-def calls_of(thread, spec: ModelSpec, header_tokens: int = 0) -> list[Call]:
+def calls_of(thread, spec: ModelSpec, header_tokens: int = 0) -> Talk:
     """A thread as the calls it was made of.
 
     Where the provider's count of a request is on record, what had joined since
     the one before it is taken to hold what the count grew by. Elsewhere sizes
     are off by as much as they were there.
     """
-    calls: list[Call] = []
-    said = header_tokens
+    calls = Talk()
+    calls.header = said = header_tokens
     held = known = measured = 0
     for run in thread.runs:
         said += spec.part_tokens(run.input.text or "")
@@ -327,7 +344,12 @@ def calls_of(thread, spec: ModelSpec, header_tokens: int = 0) -> list[Call]:
                 found = tuple((name, round(tokens * off)) for name, tokens in found)
             if grown > 0:
                 # What no size accounts for, such as instructions the log leaves out, was said.
-                said = max(0, grown - sum(tokens for _, tokens in found))
+                counted_said = max(0, grown - sum(tokens for _, tokens in found))
+                if not calls and said:
+                    calls.header = min(
+                        counted_said, round(header_tokens * counted_said / said)
+                    )
+                said = counted_said
             held += said + sum(tokens for _, tokens in found)
             calls.append(
                 Call(
@@ -363,16 +385,27 @@ def is_agentic(threads) -> bool:
 # -- pricing ---------------------------------------------------------------------
 
 
-def simulate(conversations, recipe: AgentRecipe, spec: ModelSpec, reserve: int = 0):
+def simulate(
+    conversations,
+    recipe: AgentRecipe,
+    spec: ModelSpec,
+    reserve: int = 0,
+    header: ModelSpec | None = None,
+):
     """What conversations cost under a recipe, every call and ping by the provider's cache rules.
 
-    What fetching back costs is seen on the calls whose needs are known, and
-    taken to be as much on the others.
+    `header` is the lifetime that instructions and tools are cached for, where
+    that is another than the conversation's. What fetching back costs is seen
+    on the calls whose needs are known, and taken to be as much on the others.
     """
     cost = fetched = 0.0
     calls = known = asked = missed = pings = cuts = peak = 0
+    lasting = header or spec
     for conversation in conversations:
         flow = Flow(spec, recipe, reserve)
+        opens = getattr(conversation, "header", 0)
+        if opens < spec.cache_min_tokens or lasting.cache_ttl_seconds <= 0:
+            opens = 0
         for i, call in enumerate(conversation):
             flow.add(call.said)
             if call.found:
@@ -380,6 +413,14 @@ def simulate(conversations, recipe: AgentRecipe, spec: ModelSpec, reserve: int =
                 for name, tokens in call.found:
                     flow.add(tokens, name)
             cuts += bool(flow.cut(call.at))
+            if opens and not flow.warm(call.at):
+                # The conversation has gone from the cache. What opens it may be there still.
+                used = conversation.header_used(call.at)
+                there = used is not None and call.at - used < lasting.cache_ttl_seconds
+                flow.sent(call.at, opens if there else 0)
+                if header is not None and not there:
+                    more = header.write_multiplier - spec.write_multiplier
+                    cost += opens * more * spec.input_price_factor(flow.size)
             if flow.size > flow.cap:
                 return None
             peak = max(peak, flow.size)
@@ -421,7 +462,10 @@ def simulate(conversations, recipe: AgentRecipe, spec: ModelSpec, reserve: int =
 
 
 def _conversations(threads, spec, header_tokens, labels=()):
-    """Threads as calls, with what their labels say a turn needed on the turn's last call."""
+    """Threads as calls, with what their labels say a turn needed on the turn's last call.
+
+    `header_tokens` is the size of instructions and tools, or one by thread ID.
+    """
     wanted: dict = {}
     for row in labels or ():
         needs = row.get("needs")
@@ -430,9 +474,12 @@ def _conversations(threads, spec, header_tokens, labels=()):
             if first:
                 wanted[row["thread_id"], row["run"]] = first
     named = {thread_id for thread_id, _ in wanted}
-    made = []
+    made: list[Talk] = []
     for thread in threads:
-        calls = calls_of(thread, spec, header_tokens)
+        opens = header_tokens
+        if isinstance(header_tokens, dict):
+            opens = header_tokens.get(thread.thread_id, 0)
+        calls = calls_of(thread, spec, opens)
         if thread.thread_id in named:
             at = 0
             for run in thread.runs:
@@ -443,6 +490,14 @@ def _conversations(threads, spec, header_tokens, labels=()):
                     needs = (last.needs or frozenset()) | frozenset(more)
                     calls[at - 1] = replace(last, needs=needs)
         made.append(calls)
+    # Conversations that open with as many tokens are taken to open with the same.
+    behind: dict[int, list[float]] = {}
+    for calls in made:
+        behind.setdefault(calls.header // 256, []).extend(c.at for c in calls)
+    for times in behind.values():
+        times.sort()
+    for calls in made:
+        calls.times = behind[calls.header // 256]
     return made
 
 
@@ -479,14 +534,16 @@ def fit_agent(
     *,
     labels=(),
     lifetimes=(),
-    header_tokens: int = 0,
+    header_tokens: int | dict = 0,
     floor: float = FLOOR,
     reserve: int = 8192,
 ) -> dict:
     """Fit what an agent's conversations keep, on recorded ones. Returns a policy artifact.
 
     `floor` is the least share of calls that rely on an earlier result and find
-    it in view. The rest are priced as fetching it back.
+    it in view. The rest are priced as fetching it back. Every lifetime is
+    priced for the whole request, and the longer ones for its instructions and
+    tools alone.
     """
     conversations = _conversations(threads, spec, header_tokens, labels)
     if sum(map(len, conversations)) < 2:
@@ -497,13 +554,14 @@ def fit_agent(
     known = len(cuts) > 1
     rows = []
 
-    def price(recipe, asked):
-        result = simulate(conversations, recipe, asked, reserve)
+    def price(recipe, asked, header=None):
+        result = simulate(conversations, recipe, asked, reserve, header)
         if result is not None:
             rows.append(
                 {
                     "recipe": asdict(recipe),
                     "cache_ttl_seconds": asked.cache_ttl_seconds,
+                    "header_ttl_seconds": (header or asked).cache_ttl_seconds,
                     "cost": result["cost"],
                     "coverage": result["coverage"],
                     "missed_calls": result["missed"],
@@ -528,6 +586,9 @@ def fit_agent(
         best.setdefault(row["cache_ttl_seconds"], []).append(
             AgentRecipe(**row["recipe"])
         )
+    longer = {
+        ttl: [s for s in specs.values() if s.cache_ttl_seconds > ttl] for ttl in specs
+    }
     for ttl, recipes in best.items():
         for recipe in {*recipes[:4], AgentRecipe()}:
             paid = {}
@@ -536,9 +597,12 @@ def fit_agent(
                 if result is not None:
                     paid[tool] = result["cost"]
             tool = min(paid, key=paid.get) if paid else 0
-            for user in _USER_PINGS[1:]:
-                for some in {0, tool}:
-                    price(replace(recipe, tool_pings=some, user_pings=user), specs[ttl])
+            for header in (None, *longer[ttl]):
+                for some in sorted({0, tool}):
+                    for user in _USER_PINGS:
+                        if header is not None or user:
+                            pinged = replace(recipe, tool_pings=some, user_pings=user)
+                            price(pinged, specs[ttl], header)
 
     def cheapest(some):
         return min(
@@ -547,6 +611,7 @@ def fit_agent(
                 r["cost"],
                 -(r["coverage"] or 0),
                 r["cache_ttl_seconds"],
+                r["header_ttl_seconds"],
                 r["recipe"]["tool_pings"] + r["recipe"]["user_pings"],
             ),
         )
@@ -562,15 +627,18 @@ def fit_agent(
         r
         for r in whole
         if r["cache_ttl_seconds"] == spec.cache_ttl_seconds
+        and r["header_ttl_seconds"] == spec.cache_ttl_seconds
         and not r["recipe"]["tool_pings"]
         and not r["recipe"]["user_pings"]
     ]
     keep = plain[0]["cost"] if plain else None
     asked = specs[chosen["cache_ttl_seconds"]]
+    header = specs[chosen["header_ttl_seconds"]]
     return {
         "schema_version": SCHEMA,
         "model_spec": asked.to_dict(),
         **({} if asked is spec else {"standard_spec": spec.to_dict()}),
+        **({} if header is asked else {"header_spec": header.to_dict()}),
         "recipe": chosen["recipe"],
         "reserve_tokens": reserve,
         "solve": {
@@ -589,7 +657,9 @@ def fit_agent(
     }
 
 
-def replay_agent(artifact: dict, threads, *, labels=(), header_tokens: int = 0) -> dict:
+def replay_agent(
+    artifact: dict, threads, *, labels=(), header_tokens: int | dict = 0
+) -> dict:
     """What a policy would have cost on other conversations, next to keeping everything."""
     spec = ModelSpec.from_dict(artifact["model_spec"])
     standard = ModelSpec.from_dict(
@@ -597,7 +667,14 @@ def replay_agent(artifact: dict, threads, *, labels=(), header_tokens: int = 0) 
     )
     conversations = _conversations(threads, spec, header_tokens, labels)
     reserve = artifact.get("reserve_tokens", 0)
-    ours = simulate(conversations, AgentRecipe(**artifact["recipe"]), spec, reserve)
+    header = artifact.get("header_spec")
+    ours = simulate(
+        conversations,
+        AgentRecipe(**artifact["recipe"]),
+        spec,
+        reserve,
+        ModelSpec.from_dict(header) if header else None,
+    )
     keep = simulate(conversations, AgentRecipe(), standard, reserve)
     if ours is None:
         raise ContractError("a conversation does not fit the context window")

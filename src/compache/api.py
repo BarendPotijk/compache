@@ -25,11 +25,13 @@ from .profile import header_size, measure, workload
 from .record import SIZES_ONLY, is_record
 from .record import load as load_record
 from .threads import (
+    Thread,
     cache_read_reported,
     canonical_usage,
     load_threads,
     read_jsonl,
     recorded,
+    system_prompt_of,
 )
 from .wire import TTLS, cache_mark
 
@@ -70,7 +72,28 @@ def _threads(source, model=None):
                 "the threads do not record which model answered: name it with --model or model="
             )
     spec = model_spec(model)
+    found["headers"] = _headers(rows, spec)
     return load_threads(rows, model=spec.model_id), spec, found, model
+
+
+def _headers(rows, spec) -> dict:
+    """Tokens of the instructions and tools that each thread says it opened its requests with."""
+    sizes = {}
+    for row in rows:
+        row = row.to_dict() if isinstance(row, Thread) else row
+        if not isinstance(row, dict) or not isinstance(row.get("thread_id"), str):
+            continue
+        tokens = sum(
+            spec.text_tokens("." * row[key])
+            for key in ("system_bytes", "tools_bytes")
+            if type(row.get(key)) is int
+        )
+        if not tokens:
+            prompt, tools = system_prompt_of(row), row.get("tools")
+            tools = tools if isinstance(tools, list) else ()
+            tokens = header_size(spec, prompt or "", tools)
+        sizes[row["thread_id"].strip()] = tokens
+    return sizes
 
 
 def _calls(threads):
@@ -132,6 +155,7 @@ def fit(
             raise ContractError(
                 f"no request can ask for cache entries of {other.cache_ttl_seconds:g} seconds"
             )
+    opens = found["headers"] if system_prompt is None and tools is None else {}
     if system_prompt is None:
         system_prompt = found["system_prompt"] or ""
     tools = list(found["tools"] or ()) if tools is None else list(tools)
@@ -143,7 +167,7 @@ def fit(
             spec,
             labels=labels,
             lifetimes=lifetimes,
-            header_tokens=header_size(spec, system_prompt, tools),
+            header_tokens=opens or header_size(spec, system_prompt, tools),
             **options,
         )
         return Policy({**artifact, "header": header, "pricing": pricing(model)})
@@ -213,11 +237,12 @@ def replay(policy, threads, labels=None, *, observed_until=None, **options) -> d
     header = policy.artifact.get("header") or {}
     if policy.agentic:
         prompt, tools = header.get("system_prompt", ""), header.get("default_tools")
+        opens = header_size(spec, prompt, tools or ())
         report = agent.replay_agent(
             policy.artifact,
             threads,
             labels=labels,
-            header_tokens=header_size(spec, prompt, tools or ()),
+            header_tokens={k: v or opens for k, v in found["headers"].items()},
         )
         calls = report["calls"]
         costs = {"policy": report["policy_cost"]}
@@ -359,12 +384,20 @@ class Policy:
         """The cache mark for a Claude request you assemble yourself."""
         return cache_mark(self.cache_lifetime)
 
+    @property
+    def header_lifetime(self) -> float | None:
+        """How long the provider is asked to keep instructions and tools, where that is longer than the rest."""
+        spec = self.artifact.get("header_spec")
+        return spec["cache_ttl_seconds"] if spec else None
+
     def at_default_lifetime(self) -> Policy:
         """The same cut and pings, planned under the provider's default cache lifetime."""
-        if self.cache_lifetime is None:
+        if self.cache_lifetime is None and self.header_lifetime is None:
             return self
-        artifact = {k: v for k, v in self.artifact.items() if k != "standard_spec"}
-        return Policy({**artifact, "model_spec": self.artifact["standard_spec"]})
+        dropped = ("standard_spec", "header_spec")
+        artifact = {k: v for k, v in self.artifact.items() if k not in dropped}
+        standard = self.artifact.get("standard_spec", self.artifact["model_spec"])
+        return Policy({**artifact, "model_spec": standard})
 
     @property
     def recipe(self) -> RetentionRecipe | agent.AgentRecipe | None:
@@ -473,6 +506,7 @@ class Policy:
             "pings": {"tool": recipe.tool_pings, "user": recipe.user_pings},
             "max_pings": self.max_pings,
             "cache_lifetime_seconds": self.cache_lifetime,
+            "header_lifetime_seconds": self.header_lifetime,
             "coverage": chosen.get("coverage"),
             "saving": solved.get("saving_fraction"),
             "cost_per_1000_calls": None
@@ -487,6 +521,12 @@ class Policy:
             lines.insert(
                 1,
                 f"Ask for {_duration(summary['cache_lifetime_seconds'])} cache entries.",
+            )
+        if summary["header_lifetime_seconds"]:
+            lines.insert(
+                1,
+                f"Ask for {_duration(summary['header_lifetime_seconds'])} cache entries for the "
+                "instructions and tools that open every request.",
             )
         if recipe.rounds is not None and summary["coverage"] is not None:
             kept = f"{summary['coverage']:.0%} of the calls that rely on an earlier result find it in view."

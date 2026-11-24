@@ -81,6 +81,14 @@ def savings(source) -> dict:
         read, written = usage["cache_read"], usage["cache_write"]
         paid = others.get(row.get("ttl"), spec)
         spent = paid.token_charge(max(0, size - read - written), written, read, output)
+        long = others.get(row.get("header_ttl"))
+        if long is not None:
+            # What opens a request is written at the price of its own lifetime.
+            more = long.write_multiplier - spec.write_multiplier
+            spent += min(row.get("long_write") or 0, written) * more
+        if row.get("cost") is not None and price:
+            # What the provider says it billed, where it says so.
+            spent = row["cost"] / dollars
         entry["spent"] += spent * dollars
         entry["input_tokens"] += size
         entry["cache_read_tokens"] += read

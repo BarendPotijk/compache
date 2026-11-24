@@ -193,6 +193,22 @@ def with_default_lifetime(body: Any) -> Any:
     return _with_marks(body, _plain_mark, ("messages", "input"))
 
 
+def _header_marked(body: dict, mark: dict, spot) -> dict:
+    """A request whose instructions and tools are cached as `mark` says, the conversation behind them as before.
+
+    What is marked there already is marked so, and else `spot` gives the place
+    for a mark: its path and the content to put there. A longer lifetime may
+    come ahead of a shorter one, so nothing else has to change.
+    """
+    found = [p for p in _marks(body) if p[0] in ("tools", "system")]
+    if found:
+        return _with_marks(body, lambda m: {**m, **mark}, ("tools", "system"))
+    if len(_marks(body)) + ("cache_control" in body) >= _MOST_MARKS:
+        return body
+    place = spot(body, mark)
+    return body if place is None else put(body, *place)
+
+
 def has_cache_mark(body: Any) -> bool:
     found: list = []
     _with_marks(body, lambda mark: found.append(mark) or mark)
@@ -464,6 +480,31 @@ class OpenAIChat:
         if "claude" not in model and "anthropic" not in model:
             return body
         return body if has_cache_mark(body) else cls._mark_last(body, _CACHE)
+
+    @staticmethod
+    def with_header_lifetime(body: dict, lifetime: float) -> dict:
+        """The request with its instructions and tools cached for a lifetime of their own."""
+        model = str(body.get("model") or "")
+        if "claude" not in model and "anthropic" not in model:
+            return body
+        mark = cache_mark(lifetime)
+        for i, message in enumerate(body["messages"]):
+            if message.get("role") not in ("system", "developer"):
+                break
+            content = message.get("content")
+            if isinstance(content, str) and content:
+                parts = [{"type": "text", "text": content, "cache_control": mark}]
+            elif isinstance(content, list) and content:
+                parts = [
+                    {**p, "cache_control": mark} if p.get("cache_control") else p
+                    for p in content
+                ]
+                if parts == content:
+                    parts[-1] = {**parts[-1], "cache_control": mark}
+            else:
+                continue
+            return put(body, ("messages", i, "content"), parts)
+        return body
 
     @staticmethod
     def said_so_far(body: dict) -> list:
@@ -870,6 +911,22 @@ class Anthropic:
 
     said_so_far = OpenAIChat.said_so_far
     with_inserted = OpenAIChat.with_inserted
+
+    @staticmethod
+    def with_header_lifetime(body: dict, lifetime: float) -> dict:
+        def spot(body, mark):
+            system = body.get("system")
+            if isinstance(system, str) and system:
+                block = {"type": "text", "text": system, "cache_control": mark}
+                return ("system",), [block]
+            if isinstance(system, list) and system:
+                return ("system", len(system) - 1, "cache_control"), mark
+            tools = body.get("tools")
+            if isinstance(tools, list) and tools:
+                return ("tools", len(tools) - 1, "cache_control"), mark
+            return None
+
+        return _header_marked(body, cache_mark(lifetime), spot)
 
     @classmethod
     def with_boundary(cls, body: dict, at: int) -> dict:
@@ -1293,6 +1350,10 @@ class OpenAIResponses:
     def with_cache_mark(body: dict) -> dict:
         return body
 
+    @staticmethod
+    def with_header_lifetime(body: dict, lifetime: float) -> dict:
+        return body
+
     @classmethod
     def said_so_far(cls, body: dict) -> list:
         return cls._items(body)
@@ -1641,6 +1702,10 @@ class Gemini:
 
     @staticmethod
     def with_cache_mark(body: dict) -> dict:
+        return body
+
+    @staticmethod
+    def with_header_lifetime(body: dict, lifetime: float) -> dict:
         return body
 
     @staticmethod

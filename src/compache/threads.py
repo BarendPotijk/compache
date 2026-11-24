@@ -485,6 +485,16 @@ def cache_read_reported(usage: Any) -> bool:
     return any(type(n) is int and n >= 0 for n in counts)
 
 
+def long_writes(usage: Any) -> int:
+    """Tokens a call wrote to entries that live an hour, where the provider counts them apart."""
+    if not isinstance(usage, dict):
+        dump = getattr(usage, "model_dump", None)
+        usage = dump() if callable(dump) else None
+    made = usage.get("cache_creation") if isinstance(usage, dict) else None
+    count = made.get("ephemeral_1h_input_tokens") if isinstance(made, dict) else None
+    return count if type(count) is int and count > 0 else 0
+
+
 def canonical_usage(usage: Any) -> dict | None:
     """Token counters in the canonical form, from that form or a provider's.
 

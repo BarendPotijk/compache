@@ -782,6 +782,106 @@ class ToolPingTests(unittest.TestCase):
         )
 
 
+class HeaderTests(unittest.TestCase):
+    """Instructions and tools cached for an hour, the conversation behind them for five minutes."""
+
+    def policy(self):
+        made = policy(rounds=2, spec=SPEC)
+        hour = {**SPEC.to_dict(), "cache_ttl_seconds": 3600, "write_multiplier": 2.0}
+        return compache.Policy({**made.artifact, "header_spec": hour})
+
+    def marks(self, body):
+        found = []
+        for path in wire._marks(body):
+            found.append((path[0], wire.get(body, path)["cache_control"].get("ttl")))
+        return found
+
+    def test_the_marks_ask_for_it(self):
+        model = FakeModel(worker(3))
+        live = compache.Live(self.policy())
+        Agent(live, Claude(), model).run("Read three files")
+        for body in model.bodies:
+            marks = self.marks(body)
+            self.assertEqual(marks[0], ("system", "1h"))
+            self.assertTrue(all(ttl is None for _, ttl in marks[1:]), marks)
+
+    def test_the_application_s_own_marks_ahead_of_the_conversation_ask_for_it(self):
+        shape = Claude()
+        body = shape.body
+
+        def marked(stream):
+            made = body(stream)
+            mark = {"type": "ephemeral"}
+            made["system"] = [
+                {"type": "text", "text": "You are", "cache_control": mark},
+                {"type": "text", "text": "an agent.", "cache_control": mark},
+            ]
+            return made
+
+        shape.body = marked
+        model = FakeModel(worker(3))
+        Agent(compache.Live(self.policy()), shape, model).run("Read three files")
+        marks = self.marks(model.bodies[-1])
+        self.assertEqual(marks[:2], [("system", "1h"), ("system", "1h")])
+        self.assertLessEqual(len(marks), 4)
+
+    def test_a_chat_completions_request_for_claude(self):
+        shape = Chat()
+        shape.model = "anthropic/claude-agent"
+        model = FakeModel(worker(3))
+        Agent(compache.Live(self.policy()), shape, model).run("Read three files")
+        first = model.bodies[-1]["messages"][0]
+        self.assertEqual(first["content"][-1]["cache_control"]["ttl"], "1h")
+        last = model.bodies[-1]["messages"][-1]
+        self.assertNotIn("ttl", last["content"][-1]["cache_control"])
+
+    def test_a_provider_that_refuses_it_is_asked_for_its_default(self):
+        def refusing(request):
+            if '"1h"' in json.dumps(request["body"]):
+                return {"status": 400, "error": "ttl"}
+            return worker(3)(request)
+
+        model = FakeModel(refusing)
+        live = compache.Live(self.policy())
+        app = Agent(live, Claude(), model)
+        self.assertEqual(app.run("Read three files"), "All done.")
+        self.assertEqual(live.stats["retried"], 1)
+        self.assertIsNone(live.policy.header_lifetime)
+
+    def test_pings_and_fetches_ask_for_it_too(self):
+        clock = Clock()
+        model = FakeModel(worker(3), clock=lambda: clock.at)
+        made = self.policy().artifact
+        made["recipe"] = {**made["recipe"], "tool_pings": 1}
+        live = compache.Live(compache.Policy(made), clock=clock)
+        app = Agent(live, Claude(), model)
+        app.shape.ask("Run")
+        app.call()
+        clock.at += 256
+        self.assertEqual(live.tick(), 1)
+        self.assertEqual(self.marks(model.bodies[-1])[0], ("system", "1h"))
+
+    def test_the_record_says_what_was_written_for_an_hour(self):
+        with tempfile.TemporaryDirectory() as folder:
+            model = FakeModel(worker(1))
+            send = model.send("/v1/messages")
+
+            def counting(body):
+                answered = send(body)
+                answered.json["usage"]["cache_creation"] = {
+                    "ephemeral_5m_input_tokens": 10,
+                    "ephemeral_1h_input_tokens": 30,
+                }
+                return answered
+
+            model.send = lambda path: counting
+            live = compache.Live(self.policy(), record=folder)
+            Agent(live, Claude(), model).run("Read a file")
+            rows = load_calls(folder)
+            self.assertEqual({r["header_ttl"] for r in rows}, {3600})
+            self.assertEqual({r["long_write"] for r in rows}, {30})
+
+
 class RecordTests(unittest.TestCase):
     def test_a_record_of_loops_says_how_each_call_went_and_fits_an_agent_s_policy(self):
         def extra(request, seen):

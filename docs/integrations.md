@@ -6,16 +6,18 @@ compache goes in at two places: where your model calls leave, and where your tra
 
 | Your stack | compache goes in with |
 |---|---|
+| Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code, Aider, Goose, or any other agent on the command line | `compache wrap claude`, see [Agents](agents.md) |
 | OpenAI SDK (Chat Completions, Responses), Anthropic SDK, Google GenAI SDK, sync or async | `client = compache.wrap(client, "policy.json")` |
 | A Python framework on one of these SDKs: OpenAI Agents SDK, Pydantic AI, LlamaIndex, Agno, AutoGen, Strands, Haystack, Instructor, Langfuse's OpenAI drop-in | The wrapped client, or an HTTP client: [one line each](#python-frameworks) |
-| LangChain and LangGraph on `ChatOpenAI` | `ChatOpenAI(..., **compache.langchain.clients(live))` and `middleware=[compache.langchain.middleware()]` |
+| LangChain and LangGraph, any chat model | `create_agent(..., middleware=[compache.langchain.middleware(live)])` |
 | LiteLLM, and what is built on it | `compache.litellm.install(live)`, or a [callback](#litellm) that records in your LiteLLM proxy |
 | Hermes Agent | Its [context engine](#hermes): `context.engine: compache` |
-| Anything with a base URL: the Vercel AI SDK, Claude Code, Codex, OpenCode, OpenClaw, Aider, CrewAI, Cline, Goose, `ChatAnthropic` | `compache proxy --policy policy.json`, and the base URL set to it |
+| A LiteLLM proxy or another gateway | `compache proxy --policy policy.json --upstream http://localhost:4000` in front of it |
+| Anything else with a base URL: the Vercel AI SDK, OpenClaw, CrewAI, Cline | `compache proxy --policy policy.json`, and the base URL set to it |
 | Your own HTTP client | `compache.Live(...).exchange(path, body, send)` |
 | Your own prompt assembly | `policy.session(thread_id)`, see the [guide](guide.md#5-apply) |
 
-All of them run the same code on the JSON that goes over the wire, so a request leaves the same whichever way compache went in.
+All of them run the same code on the JSON that goes over the wire, so a request leaves the same whichever way compache went in. Wherever a policy file can be given, `learn="compache-record"` (`--learn`) can be given instead: the policy then [follows from your traffic](agents.md#how-it-learns).
 
 | On every model call | |
 |---|---|
@@ -58,13 +60,14 @@ with compache.thread("conversation-17"):
 ### LangChain and LangGraph
 
 ```python
-live = compache.Live("policy.json", record="compache-record", sample=0.1)
-model = ChatOpenAI(model="gpt-6-luna", **compache.langchain.clients(live))
-agent = create_agent(model, tools, middleware=[compache.langchain.middleware()], checkpointer=saver)
+live = compache.Live(learn="compache-record")          # or a policy file
+agent = create_agent(model, tools, middleware=[compache.langchain.middleware(live)], checkpointer=saver)
 agent.invoke({"messages": [...]}, {"configurable": {"thread_id": "conversation-17"}})
 ```
 
-The middleware names each model call's conversation after the graph's thread ID and changes nothing else.
+Any chat model. The graph keeps its messages whole, archived results reach the model as a notice, and the agent gets a `reopen` tool that runs like any other. The thread ID names the conversation. compache makes no request of its own here, so it sends no keep-warm pings and asks no notes.
+
+With `ChatOpenAI` it can sit in the HTTP client instead, with pings and notes and fetching back unseen by the graph: `ChatOpenAI(..., **compache.langchain.clients(live))`, and `middleware()` without arguments to name the conversations.
 
 ### LiteLLM
 
@@ -75,7 +78,7 @@ with compache.thread("conversation-17"):
     litellm.completion(model="openrouter/anthropic/claude-haiku-5.5", messages=messages)
 ```
 
-Providers that LiteLLM calls over handlers of its own, such as Anthropic's Messages API, go through `compache proxy` with `api_base="http://127.0.0.1:8787"`.
+Providers that LiteLLM calls over handlers of its own, such as Anthropic's Messages API, go through `compache proxy` with `api_base="http://127.0.0.1:8787"`. A LiteLLM proxy takes compache in front: `compache proxy --policy policy.json --upstream http://localhost:4000`, whatever providers it routes to.
 
 To learn first, record in a LiteLLM proxy you already run, whatever the provider:
 
@@ -116,11 +119,8 @@ It serves `/v1/chat/completions`, `/v1/responses`, `/v1/messages` and Gemini's `
 
 | Harness | Setting |
 |---|---|
-| Claude Code | `ANTHROPIC_BASE_URL=http://127.0.0.1:8787` |
-| Codex | In `~/.codex/config.toml`, `model_provider = "compache"` and a `[model_providers.compache]` with `base_url = "http://127.0.0.1:8787/v1"`, `wire_api = "responses"` and `env_key = "OPENAI_API_KEY"`. It does not read `OPENAI_BASE_URL` |
-| Aider | `OPENAI_API_BASE=http://127.0.0.1:8787/v1` |
+| Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code, Aider, Goose | `compache wrap <agent>` starts the proxy and sets this for one run. `compache wrap --print <agent>` shows it, to set it yourself |
 | CrewAI | `LLM(model="openai/...", base_url="http://127.0.0.1:8787/v1")`, or `OPENAI_BASE_URL` |
-| OpenCode | In `opencode.json`, a provider with `npm: "@ai-sdk/openai-compatible"` and `options: {baseURL: "http://127.0.0.1:8787/v1"}` |
 | OpenClaw | In `~/.openclaw/openclaw.json`, a provider under `models.providers` with `baseUrl: "http://127.0.0.1:8787/v1"` and `api: "openai-completions"`, or `baseUrl: "http://127.0.0.1:8787"` and `api: "anthropic-messages"`. Add `compat: { sendSessionAffinityHeaders: true }` to its models so that sessions are named |
 | Hermes | In `~/.hermes/config.yaml`, an entry under `providers` with `api: http://127.0.0.1:8787/v1` and `session_affinity_header: x-compache-thread`, selected by `model.provider: custom:<name>` |
 | Vercel AI SDK | `createAnthropic({baseURL: "http://127.0.0.1:8787/v1"})`, `createOpenAI(...)` the same. The conversation's name goes in `headers: {"x-compache-thread": id}`. OpenAI's Responses API needs `store: false`: with it on, the SDK sends earlier answers as references, which nothing can trim |
@@ -128,7 +128,7 @@ It serves `/v1/chat/completions`, `/v1/responses`, `/v1/messages` and Gemini's `
 
 ### Naming a conversation
 
-In order: `compache.thread(...)` around the call, the header `x-compache-thread`, a session header a harness already sends (`x-session-affinity`, `session_id`, `session-id`, `x-session-id`, `x-claude-code-session-id`, `x-opencode-session-id`, `agent-session-id`), the body's `prompt_cache_key`. Without any of them a conversation is recognized by what it has said so far, from its second turn on.
+In order: `compache.thread(...)` around the call, the header `x-compache-thread`, a session header a harness already sends (`x-session-affinity`, `session_id`, `session-id`, `x-session-id`, `x-claude-code-session-id`, `x-opencode-session-id`, `agent-session-id`), the body's `prompt_cache_key`. Without any of them a conversation is recognized by its tool calls, and by what it has said so far from its second turn on. Agents that share a name, such as a main agent and the ones it starts, are kept apart.
 
 ## Where the traces are kept
 
@@ -152,6 +152,7 @@ In order: `compache.thread(...)` around the call, the header `x-compache-thread`
 | Hermes 0.23.3 | The released agent with a local model. The engine, installed with Hermes' own installer: a conversation trimmed once its cache had expired, and a passage fetched back. The proxy, with the settings above |
 | Live providers | Chat Completions whole and streamed, Responses and Messages through the SDKs, the proxy and a LangChain agent, on Claude Haiku 5.5, GPT-6 Luna and Gemini 3.5 Flash Lite through OpenRouter. See [the live runs](../benchmarks/live/README.md) |
 | Gemini's own API | The stand-in only: OpenRouter does not serve it |
-| Claude Code, OpenCode 1.19 | The released harness through the proxy with a local model: a conversation trimmed, and a passage fetched back. Both name their sessions themselves |
-| OpenClaw 2026.11.7, Codex 0.172, Aider 0.86, CrewAI 1.15 | The released harness through the proxy with a local model, with the settings above. OpenClaw and Codex name their sessions themselves |
-| Cline, Goose, `ChatAnthropic` | Taken from each one's documentation. Not run here |
+| Claude Code 2.1, Codex 0.172, OpenCode 1.19 | Started with `compache wrap`, on Claude Haiku 5.5 and GPT-6 Luna: a small repository repaired by each. [Sessions of real issues](../benchmarks/agents/README.md) with Claude Code and Codex |
+| OpenClaw 2026.11.7, Aider 0.86, CrewAI 1.15 | The released harness through the proxy with a local model, with the settings above. OpenClaw names its sessions itself |
+| LangChain 1.5 | An agent on a scripted chat model with the middleware, on every test run: results trimmed, one fetched back, sync and async |
+| Gemini CLI, Qwen Code, Goose, Cline | Taken from each one's documentation. Not run here |

@@ -131,6 +131,8 @@ class Recorder:
         archived=None,
         left=None,
         lifetime=None,
+        header_lifetime=None,
+        long_write: int = 0,
         left_alone: bool = False,
     ) -> None:
         """One model call: an `answer`, a `reopen`, a `ping`, a `note` asked apart, or a `retry`.
@@ -138,7 +140,9 @@ class Recorder:
         `archived` are the labels of the parts that went out as a notice, and
         `left` how many bytes of text compache left out of the request, less
         what it added, and how many were sent. `lifetime` is the cache lifetime
-        it asked for, where that is not the provider's default. `left_alone`
+        it asked for, where that is not the provider's default, and
+        `header_lifetime` the one for instructions and tools alone, with
+        `long_write` the tokens that were written for an hour. `left_alone`
         marks a conversation that a learner leaves as the application wrote it.
         """
         row = {
@@ -159,6 +163,10 @@ class Recorder:
             row["left_bytes"], row["sent_bytes"] = left
         if lifetime is not None:
             row["ttl"] = lifetime
+        if header_lifetime is not None:
+            row["header_ttl"] = header_lifetime
+        if long_write:
+            row["long_write"] = long_write
         if left_alone:
             row["left_alone"] = True
         self._append(_CALLS, row)
