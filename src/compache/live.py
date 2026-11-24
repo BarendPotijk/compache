@@ -857,7 +857,8 @@ class Live:
         # One that is met for the first time, perhaps in the middle.
         return pending is None and not conversation.turns
 
-    def _point(self, conversation, chain, scan, pending=None) -> _Point | None:
+    @staticmethod
+    def _point(conversation, chain, pending=None) -> _Point | None:
         """How a conversation stands, for one that branches off. Only an agent's can be copied."""
         session = conversation.session
         if not (conversation.left_alone or (conversation.agentic and session)):
@@ -869,7 +870,7 @@ class Live:
             tuple(conversation.inserts),
             conversation.reopens,
             conversation.requested,
-            self._opens(scan),
+            (conversation.system_bytes, conversation.tools_bytes),
         )
 
     @staticmethod
@@ -1303,9 +1304,7 @@ class Live:
                         )
                     self.learner.opened(conversation.model, now)
                 plain = self._apply(conversation, dialect, body, scan, turns)
-            conversation.here = self._point(
-                conversation, conversation.chain, scan, pending
-            )
+            conversation.here = self._point(conversation, conversation.chain, pending)
         except Exception:
             # The policy cannot be applied here. From now on this conversation is only recorded.
             logger.warning(
@@ -1505,7 +1504,7 @@ class Live:
     def _begin(self, conversation, chains, current, number, now, scan) -> _Pending:
         """Open the turn a request asks about."""
         session, found = conversation.session, current.retrievals
-        conversation.base = self._point(conversation, chains[-1], scan)
+        conversation.base = self._point(conversation, chains[-1])
         if conversation.base is not None and number > 1:
             with self._lock:
                 self._by_base[chains[-1]] = conversation
