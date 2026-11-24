@@ -824,6 +824,10 @@ class Session:
         if self.policy.agentic:
             self._engine.reopened(name, self.policy.spec.part_tokens(text))
 
+    def warm(self, at: float) -> bool:
+        """Whether the provider is taken to have the conversation in its cache."""
+        return self.policy.agentic and self._engine.flow.warm(at)
+
     def shows_again(self, name: str) -> bool:
         """Whether text that was fetched back under `name` still stands where it was put."""
         return self.policy.agentic and self._engine.shows_again(name)

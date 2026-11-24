@@ -127,6 +127,44 @@ class LearnerTests(unittest.TestCase):
             Agent(live, Named(), model).run("Read forty files")
             self.assertTrue(any(noticed(b["contents"]) for b in model.bodies))
 
+    def test_the_header_is_cached_for_longer_once_that_would_have_helped(self):
+        clock = Clock()
+        with tempfile.TemporaryDirectory() as folder:
+
+            def task(live, app=None):
+                model = FakeModel(worker(2), clock=lambda: clock.at)
+                app = app or Agent(live, Haiku(), model, clock=clock)
+                app.model = model
+                app.run("Read two files")
+                marked = ['"1h"' in json.dumps(b["system"]) for b in model.bodies]
+                return app, marked
+
+            live = compache.Live(learn=Learner(folder, clock=clock), clock=clock)
+            app, marked = task(live)
+            self.assertFalse(any(marked), "nothing speaks for it yet")
+            clock.at += 100
+            _, marked = task(live, app)
+            self.assertFalse(any(marked), "the short entry was there")
+            clock.at += 900
+            app, marked = task(live, app)
+            self.assertTrue(all(marked), "it had to be written again")
+            # From then on every conversation begins that way, in the next process too.
+            clock.at += 50_000
+            live = compache.Live(learn=Learner(folder, clock=clock), clock=clock)
+            _, marked = task(live)
+            self.assertTrue(all(marked))
+
+    def test_a_session_that_begins_after_a_pause_counts_too(self):
+        clock = Clock()
+        with tempfile.TemporaryDirectory() as folder:
+            for k, pause in enumerate((0, 600)):
+                clock.at += pause
+                live = compache.Live(learn=Learner(folder, clock=clock), clock=clock)
+                model = FakeModel(worker(2), clock=lambda: clock.at)
+                Agent(live, Haiku(), model, clock=clock).run("Read two files")
+                marked = ['"1h"' in json.dumps(b["system"]) for b in model.bodies]
+                self.assertEqual(set(marked), {k == 1})
+
     def test_a_provider_that_refuses_the_lifetime_is_remembered(self):
         with tempfile.TemporaryDirectory() as folder:
             learner = Learner(folder)

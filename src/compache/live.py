@@ -985,6 +985,8 @@ class Live:
         plain = body
         try:
             conversation.went = []
+            session = conversation.session
+            warm = session is not None and session.warm(now)
             self._catch_up(conversation, chains, turns, now, scan)
             pending, found = conversation.pending, current.retrievals
             earlier = None
@@ -1006,6 +1008,13 @@ class Live:
             conversation.last = None
             pending.sent_at = now
             if conversation.session is not None:
+                if self.learner is not None and conversation.agentic:
+                    if not warm:
+                        # Nothing is there to be read, so what opens it may as well be kept for longer.
+                        conversation.header_lifetime = self.learner.header_lifetime(
+                            conversation.model, now
+                        )
+                    self.learner.opened(conversation.model, now)
                 plain = self._apply(conversation, dialect, body, scan, turns)
         except Exception:
             # The policy cannot be applied here. From now on this conversation is only recorded.

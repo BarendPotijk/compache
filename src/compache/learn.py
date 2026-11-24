@@ -11,6 +11,10 @@ A policy that takes results out of view hides that they would have been needed.
 So one conversation in ten is left as the application wrote it. Those say what
 replies rely on when everything is there, and what the others save.
 
+Until there is a fit, instructions and tools are cached for an hour from the
+first time that would have helped: when somebody comes back, or begins anew,
+after the short entry has gone and before the long one would have.
+
     turns.jsonl, calls.jsonl      the record (`compache.record`)
     policies/<model>.<kind>.json  what was fitted on it
     policies/state.json           on how much of it, and when
@@ -28,10 +32,11 @@ from pathlib import Path
 from typing import Callable
 
 from . import record
+from .agent import default_header
 from .api import Policy, fit
 from .defaults import default_policy
 from .errors import ContractError
-from .models import model_spec
+from .models import cache_lifetimes, model_spec
 from .optimizer.contracts import seconds
 
 __all__ = ["Learner"]
@@ -66,6 +71,8 @@ class Learner:
         self._begun: dict[str, int] | None = None
         self._unknown: set[str] = set()
         self._state = self._read_state()
+        # When a request last went out, by key.
+        self._opened: dict[str, float | None] = {}
         self._since = 0
         self._worker: threading.Thread | None = None
         # Set where a provider takes a request only under its default cache lifetime.
@@ -150,6 +157,10 @@ class Learner:
                 policy = self._load(key)
                 if policy is None and tools:
                     policy = default_policy(model_id, agent=True)
+                    # Whether its header is to live longer shows as it is used.
+                    artifact = dict(policy.artifact)
+                    artifact.pop("header_spec", None)
+                    policy = Policy(artifact)
                 self._policies[key] = policy
             policy = self._policies[key]
             if policy is None or not policy.agentic:
@@ -160,6 +171,60 @@ class Learner:
         if begun % CONTROL_EVERY == 0:
             return None, True
         return policy.at_default_lifetime() if self.default_lifetime else policy, False
+
+    def _last_call(self, key: str) -> float | None:
+        """When the record last saw a call of a model."""
+        try:
+            with open(self.folder / "calls.jsonl", "rb") as stream:
+                stream.seek(0, os.SEEK_END)
+                stream.seek(max(0, stream.tell() - 65_536))
+                lines = stream.read().decode("utf-8", "replace").splitlines()
+        except OSError:
+            return None
+        for line in reversed(lines):
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            found = self._key(row.get("model"), key.endswith(".agent"))
+            if found is not None and found[0] == key:
+                return row.get("at")
+        return None
+
+    def header_lifetime(self, model, at: float) -> float | None:
+        """How long to have instructions and tools cached, for a request that goes out now and finds none.
+
+        None for the provider's default.
+        """
+        found = self._key(model, True)
+        if found is None or self.default_lifetime:
+            return None
+        key, model_id = found
+        spec = model_spec(model_id)
+        longer = default_header(spec, cache_lifetimes(model_id))
+        with self._lock:
+            policy = self._policies.get(key)
+            if key in self._state or policy is None or longer is None:
+                return policy.header_lifetime if policy is not None else None
+            last = self._opened.get(key)
+            if key not in self._opened:
+                last = self._last_call(key)
+            lasting = self._state.get("lasting", [])
+            if key not in lasting:
+                if last is None or not (
+                    spec.cache_ttl_seconds < at - last < longer.cache_ttl_seconds
+                ):
+                    return None
+                self._state = {**self._read_state(), "lasting": [*lasting, key]}
+                self._write("state.json", json.dumps(self._state, indent=2) + "\n")
+        return longer.cache_ttl_seconds
+
+    def opened(self, model, at: float) -> None:
+        """A request went out at that time."""
+        found = self._key(model, True)
+        if found is not None:
+            with self._lock:
+                self._opened[found[0]] = at
 
     def fitted_on(self, model, tools: bool = True) -> dict | None:
         """On how much a model's policy was fitted and when, or None while it is the default."""

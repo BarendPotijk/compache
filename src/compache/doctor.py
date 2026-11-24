@@ -171,7 +171,7 @@ def checked(env: dict | None = None, port: int = 8787) -> list[dict]:
             if last
             else ""
         )
-        learned = sorted(Learner(folder)._state)
+        learned = sorted(k for k in Learner(folder)._state if k != "lasting")
         taught = f", policies for {', '.join(learned)}" if learned else ""
         say("ok", f"{folder}: {len(rows):,} calls on record{when}{taught}")
         if last and last > time.time() + 86_400:

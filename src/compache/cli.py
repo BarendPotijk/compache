@@ -733,7 +733,9 @@ def _learn(args):
     learner = Learner(args.folder)
     before = dict(learner._state)
     learner.refit(wait=True)
-    new = {k: v for k, v in learner._state.items() if before.get(k) != v}
+    new = {
+        k: v for k, v in learner._state.items() if k != "lasting" and before.get(k) != v
+    }
     lines = [
         f"Fitted {key} on {entry['calls']:,} calls: {entry['saving']:.0%} less than keeping everything."
         for key, entry in new.items()
