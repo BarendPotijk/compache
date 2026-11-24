@@ -692,6 +692,77 @@ class PolicyTests(unittest.TestCase):
                 # Nothing was archived, so the model was never handed the tool to fetch it back.
                 self.assertNotIn("reopen", json.dumps(self.model.bodies))
 
+    def test_a_new_process_takes_the_cache_to_have_expired(self):
+        app = self.start(gap=5)
+        self.play(app, 4)
+        # Users were back while the cache was warm, so nothing was cut.
+        self.assertEqual(sum(map(sum, map(gone, self.model.bodies))), 0)
+        # After a deploy, on the command line or in a function, a process meets a conversation in
+        # the middle. It cannot know that the cache is warm, and a cut is made at once.
+        before = len(self.model.bodies)
+        app.live = Live(compache.Policy(self.policy.artifact), clock=self.clock)
+        app.turn("Question 5?", passage(5))
+        self.assertEqual(gone(self.model.bodies[before]), [True, True, True, False])
+        # From there it knows what it sent: the next turn sends the same start and reads it from the cache.
+        self.clock.at += 5
+        app.turn("Question 6?", passage(6))
+        self.assertEqual(
+            gone(self.model.bodies[-1]), [True, True, True, False, False, False]
+        )
+        answered, returned = (reply["usage"] for reply in app.seen[-3:-1])
+        self.assertGreater(
+            returned["prompt_tokens_details"]["cached_tokens"],
+            0.9 * answered["prompt_tokens"],
+        )
+
+    def test_a_turn_asked_again_finds_the_cache_as_this_process_left_it(self):
+        app = self.start(gap=5)
+        self.play(app, 5)
+        # The user asks the last turn again: the same history, and a cache that is seconds old.
+        app.messages = app.messages[
+            : app.messages.index({"role": "user", "content": "Question 5?"})
+        ]
+        before = len(self.model.bodies)
+        app.turn("Question 5, put differently?", passage(5))
+        self.assertEqual(gone(self.model.bodies[before]), [False] * 4)
+        self.assertGreater(
+            app.seen[-2]["usage"]["prompt_tokens_details"]["cached_tokens"], 1000
+        )
+        # Where the request was already trimmed, what is cached is not the whole history anyway.
+        app = self.start()
+        self.play(app, 5)
+        app.messages = app.messages[
+            : app.messages.index({"role": "user", "content": "Question 5?"})
+        ]
+        before = len(self.model.bodies)
+        app.turn("Question 5, put differently?", passage(5))
+        self.assertEqual(gone(self.model.bodies[before]), [True, True, True, False])
+
+    def test_instructions_inside_a_conversation_do_not_hide_it(self):
+        """A harness may end every request on an instruction of its own, as Claude Code does."""
+
+        def script(request):
+            said = [m for m in request["body"]["messages"] if m["role"] != "system"]
+            return claude_looping({**request, "body": {"messages": said}})
+
+        app = self.start(ClaudeApp, script)
+        send = app.live.exchange
+
+        def told(path, body, *args, **options):
+            note = {"role": "system", "content": f"The time is {self.clock.at}."}
+            return send(
+                path, {**body, "messages": [*body["messages"], note]}, *args, **options
+            )
+
+        app.live.exchange = told
+        self.play(app, 4)
+        self.assertEqual(
+            [gone(b) for b in self.model.bodies[::2]],
+            [[], [False], [True, False], [True, True, False]],
+        )
+        self.assertEqual(self.live.stats["passed_through"], 0)
+        self.assertEqual(self.live.stats["turns"], 4)
+
     def test_a_model_without_a_cache_to_mark_gets_no_mark(self):
         app = self.start(ChatApp)
         app.name = "gpt-6-luna"
@@ -1201,6 +1272,114 @@ class ApartTests(unittest.TestCase):
             Live(sample=0.5)
         with self.assertRaises(ValueError):
             Live(notes="sometimes")
+
+
+class ObservedTests(unittest.TestCase):
+    """A call that something else made, such as LiteLLM: there is nothing to change, only books to keep."""
+
+    def turns(self, live, count, *, ask=None, at=None):
+        messages = []
+        start = 1_900_000_000.0
+        for n in range(1, count + 1):
+            messages.append({"role": "user", "content": f"Question {n}?"})
+            body = {"model": "claude-sonnet-5-5", "messages": list(messages)}
+            reply = {
+                "model": "claude-sonnet-5-5",
+                "choices": [
+                    {
+                        "message": {"role": "assistant", "content": f"Answer {n}."},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 100 * n,
+                    "completion_tokens": 10,
+                    "prompt_tokens_details": {
+                        "cached_tokens": 60,
+                        "cache_write_tokens": 5,
+                    },
+                    "cost": 0.001 * n,
+                },
+            }
+            begin = start + 600 * n
+            live.observe(
+                "/v1/chat/completions",
+                body,
+                reply,
+                thread="talk",
+                at=(begin, begin + 4.0),
+                ask=ask,
+            )
+            messages.append({"role": "assistant", "content": f"Answer {n}."})
+        live.drain()
+
+    def test_an_observed_call_is_recorded_at_the_time_it_happened(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            live = Live(record=tmp, clock=Clock(1_950_000_000.0))
+            self.turns(live, 3)
+            threads, labels = load(tmp)
+            self.assertEqual([len(t["runs"]) for t in threads], [3])
+            # The call's own times, not the time it was told: the gap between turns is real.
+            runs = threads[0]["runs"]
+            self.assertAlmostEqual(
+                runs[1]["started_at"] - runs[0]["ended_at"], 596.0, delta=0.01
+            )
+            self.assertAlmostEqual(
+                runs[0]["ended_at"] - runs[0]["started_at"], 4.0, delta=0.01
+            )
+            self.assertEqual(
+                runs[2]["usage"],
+                {"input": 300, "output": 10, "cache_read": 60, "cache_write": 5},
+            )
+            calls = load_calls(tmp)
+            self.assertEqual(sum(c["cost"] for c in calls), 0.006)
+            self.assertEqual([c["kind"] for c in calls], ["answer"] * 3)
+
+    def test_notes_are_asked_only_when_something_can_ask_them(self):
+        def ask(body):
+            self.asked.append(body)
+            return Result(
+                200, json={"choices": [{"message": {"content": "<!-- refs: {Q1} -->"}}]}
+            )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            self.asked = []
+            live = Live(record=tmp, sample=1.0, clock=Clock(1_951_000_000.0))
+            self.turns(live, 2)
+            # No way to ask: not one request was made, and none is counted as refused.
+            self.assertEqual((live.stats["asked"], live.stats["noted"]), (0, 0))
+            self.assertFalse(live._notes_off)
+            live = Live(record=tmp + "/b", sample=1.0, clock=Clock(1_952_000_000.0))
+            self.turns(live, 2, ask=ask)
+            self.assertEqual(len(self.asked), 1)
+            self.assertEqual((live.stats["asked"], live.stats["noted"]), (1, 1))
+            self.assertIn("<!-- refs:", json.dumps(self.asked[0]["messages"][-1]))
+            name = load(tmp + "/b")[0][0]["thread_id"]
+            self.assertEqual(load(tmp + "/b")[1][1]["needs"], [[f"{name}:1:input"]])
+
+    def test_a_note_in_the_reply_is_not_possible_once_the_call_was_made(self):
+        def ask(body):
+            self.asked.append(body)
+            return Result(
+                200, json={"choices": [{"message": {"content": "<!-- refs: {Q1} -->"}}]}
+            )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            self.asked = []
+            live = Live(
+                record=tmp, sample=1.0, notes="inline", clock=Clock(1_953_000_000.0)
+            )
+            self.turns(live, 2, ask=ask)
+            # One request of its own, after the second reply: the call itself is not made again.
+            self.assertEqual(len(self.asked), 1)
+            self.assertIn("Answer 2.", json.dumps(self.asked[0]["messages"][-2]))
+            answers = [c for c in load_calls(tmp) if c["kind"] == "answer"]
+            self.assertEqual([c["usage"]["input"] for c in answers], [100, 200])
+
+    def test_a_policy_has_nothing_to_change_in_an_observed_call(self):
+        live = Live(fitted())
+        with self.assertRaisesRegex(ValueError, "already made"):
+            live.observe("/v1/chat/completions", {"messages": []}, {})
 
 
 class ClockTests(unittest.TestCase):

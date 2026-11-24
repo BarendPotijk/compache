@@ -1,22 +1,57 @@
 [project]
 name = "compache"
-version = "0.13.0"
+version = "0.14.0"
 description = "Fit prompt caching and context compaction to your own conversation traces."
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENCE.md"]
-authors = [
-    { name = "Richard Debets", email = "rrd.technl@gmail.com" }
-]
+authors = [{ name = "Richard Debets" }]
 requires-python = ">=3.11"
+keywords = [
+    "llm",
+    "prompt-caching",
+    "context-compaction",
+    "context-engineering",
+    "token-cost",
+    "openai",
+    "anthropic",
+    "claude",
+    "gemini",
+    "langchain",
+    "litellm",
+    "hermes-agent",
+    "langfuse",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
+]
 dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/BarendPotijk/compache"
+Documentation = "https://github.com/BarendPotijk/compache/blob/main/docs/guide.md"
+Calculator = "https://barendpotijk.github.io/compache/"
+Source = "https://github.com/BarendPotijk/compache"
+Issues = "https://github.com/BarendPotijk/compache/issues"
 
 [project.scripts]
 compache = "compache.cli:main"
+
+[project.entry-points."hermes_agent.plugins"]
+compache = "compache.hermes:register"
 
 [build-system]
 requires = ["uv_build>=0.13.7,<0.14.0"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
-source-include = ["docs/**", "examples/**", "scripts/**", "skills/**", "benchmarks/**", "tests/**", "site/**"]
+source-include = ["docs/**", "examples/**", "integrations/**", "scripts/**", "skills/**", "benchmarks/**", "tests/**", "site/**"]

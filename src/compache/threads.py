@@ -439,7 +439,8 @@ def canonical_usage(usage: Any) -> dict | None:
         read = count("cache_read_input_tokens") or 0
         write = count("cache_creation_input_tokens") or 0
         fresh = count("input_tokens")
-        total = None if fresh is None else fresh + read + write
+        # LiteLLM adds these names to the OpenAI shape, whose prompt total counts them already.
+        total = count("prompt_tokens") if fresh is None else fresh + read + write
     elif "promptTokenCount" in usage:
         # Gemini: the prompt count includes what was cached, and thoughts are billed as output.
         total = count("promptTokenCount")

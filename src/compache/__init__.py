@@ -11,9 +11,9 @@ client = compache.wrap(client, record="compache-record", sample=0.1)
 policy = compache.fit("compache-record")
 """
 
-__version__ = "0.13.0"
+__version__ = "0.14.0"
 
-from . import langchain, langfuse, mlflow, otel
+from . import langchain, langfuse, litellm, mlflow, otel
 from .api import Policy, Session, Turn, fit, replay
 from .defaults import default_policy
 from .errors import ContractError
@@ -42,6 +42,7 @@ __all__ = [
     "known_models",
     "langchain",
     "langfuse",
+    "litellm",
     "load_threads",
     "mlflow",
     "model_spec",

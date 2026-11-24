@@ -2,7 +2,7 @@
 """Draw the figures under docs/assets from the data files in docs/assets/data.
 
     python scripts/figures.py              # every figure
-    python scripts/figures.py map thread   # some of: headline, requests, map, thread, openclaw, live, workflow
+    python scripts/figures.py map thread   # some of: headline, requests, map, thread, openclaw, preview, live, compare, workflow
 
 Every figure paints its own surface and carries a light and a dark palette, so it
 reads on either GitHub theme. The palette, typeface and marks are the calculator's.
@@ -14,6 +14,7 @@ Where the data comes from:
     live.json          python benchmarks/live/run.py report --work <folder> --figure docs/assets/data/live.json
     answers.json       the graded answers on benchmarks/live/README.md
     requests.json      python scripts/request_sizes.py
+    compare.json       python benchmarks/compare/run.py price --data <fast> <mixed> <slow> --sizes ... --output ...
 """
 
 from __future__ import annotations
@@ -570,6 +571,69 @@ def openclaw(data):
     )
 
 
+# -- the calculator's link preview ------------------------------------------------
+
+
+def preview(data):
+    """What a shared calculator link shows: the calculator's default workload, priced both ways.
+
+    Link previews need a bitmap. `site/preview.png` is this figure, taken with a browser:
+
+        chrome --headless --window-size=1200,630 --screenshot=site/preview.png docs/assets/preview.svg
+    """
+    row = data["rows"][0]
+    width, height, x0, full, bar = 1200, 630, 80, 820, 74
+    longest = max(row["openclaw"], row["compache"])
+    style = (
+        'text{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;fill:#0b0b0b}'
+        ".two{fill:#52514e}.c{fill:#2a78d6}.n{fill:#898781}"
+    )
+
+    def line(x, y, size, content, cls="", weight=400):
+        return (
+            f'<text x="{x:.0f}" y="{y}" font-size="{size}" font-weight="{weight}"'
+            f"{f' class={chr(34)}{cls}{chr(34)}' if cls else ''}>{escape(content)}</text>"
+        )
+
+    body = [
+        f'<rect class="c" x="{x0}" y="66" width="30" height="30" rx="8"/>',
+        line(x0 + 46, 94, 36, "compache", weight=650),
+        line(x0, 186, 58, "What would your long chats cost?", weight=650),
+        line(
+            x0,
+            238,
+            28,
+            f"{data['model']} · {row['turns']}-turn threads · 25k retrieved tokens per turn",
+            "two",
+        ),
+    ]
+    for i, (key, name, cls) in enumerate(
+        (("openclaw", "OpenClaw’s defaults", "n"), ("compache", "compache", "c"))
+    ):
+        top = 306 + i * 118
+        length = row[key] / longest * full
+        body += [
+            line(x0, top - 10, 24, name, "two"),
+            f'<rect class="{cls}" x="{x0}" y="{top}" width="{length:.1f}" height="{bar}" rx="8"/>',
+            line(x0 + length + 22, top + 52, 44, dollars(row[key]), weight=650),
+        ]
+    saving = 1 - row["compache"] / row["openclaw"]
+    body += [
+        line(x0, 568, 32, f"{saving:.0%} less per 1,000 turns, modeled.", weight=650),
+        line(x0 + 562, 568, 32, "Put in your own numbers.", "two"),
+    ]
+    return (
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
+        f'viewBox="0 0 {width} {height}" role="img" aria-labelledby="t">\n'
+        f'<title id="t">compache cost calculator: {escape(data["model"])}, {row["turns"]}-turn threads, '
+        f"OpenClaw {dollars(row['openclaw'])}, compache {dollars(row['compache'])} per 1,000 turns</title>\n"
+        f"<style>{style}</style>\n"
+        f'<rect width="{width}" height="{height}" fill="#f9f9f7"/>\n'
+        + "\n".join(body)
+        + "\n</svg>\n"
+    )
+
+
 # -- live model calls ---------------------------------------------------------
 
 
@@ -636,6 +700,83 @@ def live(data):
         height,
         "What the provider billed per 1,000 turns through every way in, with and without a compache policy",
         f"{data['subtitle']} {'. '.join(described)}.",
+        body,
+    )
+
+
+# -- other tools ----------------------------------------------------------------
+
+
+def compare(data):
+    """One group of bars per return pattern: what each tool's requests cost, and compache's."""
+    clocks = data["clocks"]
+    rows = sum(len(clock["arms"]) for clock in clocks)
+    bar, pitch, gap, top = 14, 21, 26, 92
+    width, height = 880, top + rows * pitch + len(clocks) * gap + 4
+    x0, full = 388, 372
+    longest = max(arm["cost"] for clock in clocks for arm in clock["arms"])
+    body = [
+        text(24, 30, "Cost per 1,000 turns of document chats, by tool", "big"),
+        text(
+            24,
+            49,
+            f"DocChat's held-out chats on {data['model']}, priced by the provider's cache rules. Headroom and Kompressor were",
+            "t2",
+        ),
+        text(
+            24,
+            65,
+            "run on the retrieved text. Cache kept warm is the cheapest of ten settings. compache's price includes fetching back.",
+            "t2",
+        ),
+    ]
+    described, y0 = [], top
+    for clock in clocks:
+        arms, base = clock["arms"], clock["arms"][0]["cost"]
+        body.append(
+            text(
+                24,
+                y0 + bar - 2.5,
+                f"Users back after {away(clock['away_seconds'])}",
+                "b",
+            )
+        )
+        body.append(text(24, y0 + bar + 13.5, "at the median", "tm"))
+        body.append(
+            f'<line class="axis" x1="{x0}" x2="{x0}" y1="{y0 - 5}" y2="{y0 + len(arms) * pitch - 2}"/>'
+        )
+        said = []
+        for j, arm in enumerate(arms):
+            ours = arm["name"] == "compache"
+            yy, length = y0 + j * pitch, max(6, arm["cost"] / longest * full)
+            body.append(
+                text(x0 - 12, yy + bar - 2.5, arm["name"], "b" if ours else "t2", "end")
+            )
+            body.append(
+                f'<path class="{"c" if ours else "n"}" d="M{x0},{yy} h{length - 4:.1f} a4,4 0 0 1 4,4 '
+                f'v{bar - 8} a4,4 0 0 1 -4,4 h-{length - 4:.1f} z"/>'
+            )
+            body.append(
+                text(
+                    x0 + length + 8,
+                    yy + bar - 2.5,
+                    dollars(arm["cost"]),
+                    "b" if ours else "t2",
+                )
+            )
+            if j:
+                change = f"{arm['cost'] / base - 1:+.0%}".replace("-", "\u2212")
+                body.append(text(x0 + length + 54, yy + bar - 2.5, change, "t2"))
+            said.append(f"{arm['name']} {dollars(arm['cost'])}")
+        described.append(
+            f"Users back after {away(clock['away_seconds'])}: " + ", ".join(said)
+        )
+        y0 += len(arms) * pitch + gap
+    return svg(
+        width,
+        height,
+        "Cost per 1,000 turns of document chats: other tools against compache",
+        f"DocChat's held-out chats on {data['model']}. {'. '.join(described)}.",
         body,
     )
 
@@ -708,7 +849,9 @@ FIGURES = {
     "map": ("policy-map.svg", "policy-grid.json", policy_map),
     "thread": ("thread-dependencies.svg", "thread.json", thread),
     "openclaw": ("openclaw-cost.svg", "openclaw.json", openclaw),
+    "preview": ("preview.svg", "openclaw.json", preview),
     "live": ("live-cost.svg", "live.json", live),
+    "compare": ("compare-cost.svg", "compare.json", compare),
     "workflow": ("workflow.svg", None, workflow),
 }
 

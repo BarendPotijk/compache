@@ -205,8 +205,124 @@ class ScanTests(unittest.TestCase):
             "messages": [*CLAUDE["messages"], {"role": "assistant", "content": "The"}],
         }
         self.assertFalse(wire.Anthropic.scan(prefilled).awaiting)
-        with self.assertRaises(ValueError):
-            wire.OpenAIResponses.scan({"previous_response_id": "r1", "input": "next"})
+        stored = [
+            {"role": "user", "content": "First?"},
+            {"type": "item_reference", "id": "msg_1"},
+            {"role": "user", "content": "Next?"},
+        ]
+        for kept in (
+            {"previous_response_id": "r1", "input": "next"},
+            {"input": stored},
+        ):
+            with self.assertRaises(ValueError):
+                wire.OpenAIResponses.scan(kept)
+
+    def test_an_instruction_inside_a_conversation_is_nobody_s_turn(self):
+        # As Claude Code sends it: after the user's message, with the cache mark of the request.
+        told = {
+            "role": "system",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "Today is Tuesday.",
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
+        }
+        body = {**CLAUDE, "messages": [*CLAUDE["messages"], told]}
+        before, after = wire.Anthropic.scan(CLAUDE), wire.Anthropic.scan(body)
+        self.assertEqual(before.slots, after.slots)
+        self.assertEqual(before.awaiting, after.awaiting)
+        self.assertIn("Today is Tuesday.", after.system)
+        if not after.awaiting:
+            body = {
+                **body,
+                "messages": [
+                    *body["messages"],
+                    {"role": "user", "content": "Go on."},
+                    told,
+                ],
+            }
+        noted = wire.Anthropic.with_note(body, "[ask]")
+        self.assertEqual(noted["messages"][-1], told)
+        self.assertIn("[ask]", json.dumps(noted["messages"][-2]))
+        # Without a mark of the application's, the last thing said is marked: the instruction may
+        # be another one on the next request. A note added to it comes after the mark.
+        plain = {"role": "system", "content": "Today is Tuesday."}
+        asked = {
+            "model": "claude-sonnet-5-5",
+            "messages": [{"role": "user", "content": "Question?"}, plain],
+        }
+        marked = wire.Anthropic.with_cache_mark(asked)
+        self.assertEqual(marked["messages"][1], plain)
+        self.assertIn("cache_control", marked["messages"][0]["content"][-1])
+        for pinned in (
+            wire.Anthropic.with_note(marked, "[ask]"),
+            wire.Anthropic.with_note(
+                {**asked, "cache_control": {"type": "ephemeral"}}, "[ask]"
+            ),
+        ):
+            self.assertEqual(
+                ["cache_control" in b for b in pinned["messages"][0]["content"]],
+                [True, False],
+            )
+
+    def test_a_request_that_waits_for_a_tool_says_so(self):
+        call = {
+            "id": "c",
+            "type": "function",
+            "function": {"name": "f", "arguments": "{}"},
+        }
+        waiting = {
+            wire.OpenAIChat: {
+                "messages": [
+                    {"role": "assistant", "content": "Wait.", "tool_calls": [call]}
+                ]
+            },
+            wire.Anthropic: {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {"type": "text", "text": "Wait."},
+                            {"type": "tool_use", "id": "c", "name": "f", "input": {}},
+                        ],
+                    }
+                ]
+            },
+            wire.OpenAIResponses: {
+                "input": [
+                    {
+                        "type": "function_call",
+                        "call_id": "c",
+                        "name": "f",
+                        "arguments": "{}",
+                    }
+                ]
+            },
+            wire.Gemini: {
+                "contents": [
+                    {
+                        "role": "model",
+                        "parts": [
+                            {"text": "Wait."},
+                            {"functionCall": {"name": "f", "args": {}}},
+                        ],
+                    }
+                ]
+            },
+        }
+        for dialect, body in waiting.items():
+            with self.subTest(dialect=dialect.name):
+                self.assertTrue(dialect.waits_for_tools(body))
+                key = next(iter(body))
+                said = {
+                    "role": "user",
+                    "content": "Go on.",
+                    "parts": [{"text": "Go on."}],
+                }
+                self.assertFalse(dialect.waits_for_tools({key: [*body[key], said]}))
+                self.assertFalse(dialect.waits_for_tools({key: []}))
 
     def test_replacing_text_copies_only_what_changes(self):
         for path, body in BODIES.items():

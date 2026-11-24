@@ -213,6 +213,10 @@ class _Conversation:
     tools_bytes: int = 0
     # The latest time this conversation has seen.
     at: float = float("-inf")
+    # When a call that was made elsewhere really happened: its start while it is prepared, then its end.
+    when: float | None = None
+    # When this process last sent the conversation this one takes up again, whole.
+    sent_whole: float | None = None
 
 
 @dataclass
@@ -232,6 +236,8 @@ class _Call:
     carrier: str | None = None
     # Ask for the note in a request of its own, once the reply is in.
     apart: bool = False
+    # Whether a note can be asked of this call at all.
+    asks: bool = True
 
 
 def _segments(slots) -> list[_Segment]:
@@ -371,6 +377,8 @@ class Live:
         self._lock = threading.RLock()
         self._by_chain: OrderedDict[str, _Conversation] = OrderedDict()
         self._names: dict[str, int] = {}
+        # The conversation a name was last seen in, for a host that tells us about it by name.
+        self._latest: OrderedDict[str, _Conversation] = OrderedDict()
         self._bad_schemas: set[str] = set()
         self._refusals = 0
         self._notes_off = False
@@ -427,6 +435,9 @@ class Live:
                         name = f"{thread}#{count}"
                         record = thread if done else f"{thread}~{count}"
                 found = _Conversation(name, chains[0], record)
+                earlier = self._latest.get(thread) if thread else None
+                if earlier is not None and not earlier.reopens:
+                    found.sent_whole = earlier.at
                 if self.policy is not None:
                     found.session = self.policy.session(name)
                 if thread:
@@ -435,11 +446,17 @@ class Live:
                     self._index(found, chains[0])
             else:
                 self._by_chain.move_to_end(found.chain)
+            if thread:
+                self._latest[thread] = found
+                self._latest.move_to_end(thread)
+                while len(self._latest) > self._limit:
+                    self._latest.popitem(last=False)
             return found, chains
 
     def _now(self, conversation: _Conversation) -> float:
         """The time, and never one this conversation has already passed: a clock can step back."""
-        conversation.at = max(self.clock(), conversation.at + 1e-3)
+        now = self.clock() if conversation.when is None else conversation.when
+        conversation.at = max(now, conversation.at + 1e-3)
         return conversation.at
 
     def _index(self, conversation: _Conversation, chain: str) -> None:
@@ -467,6 +484,138 @@ class Live:
         the conversation. Without a name the conversation is recognized by what
         it has said so far.
         """
+        return self._exchange(path, body, send, thread)
+
+    def observe(
+        self,
+        path: str,
+        body: Any,
+        reply: Any,
+        *,
+        thread: str | None = None,
+        at: tuple[float, float] | None = None,
+        ask: Callable[[Any], Result] | None = None,
+    ) -> None:
+        """Keep the books on a model call that something else made.
+
+        `body` is the request and `reply` the response, both as JSON. `at` is
+        when the call went out and when its reply was in, as timestamps. `ask`
+        performs a request of our own, such as a note's, and returns a
+        `Result`; without it no note is asked. There is nothing to apply a
+        policy to, so a `Live` that observes has none.
+        """
+        if self.policy is not None:
+            raise ValueError(
+                "observe: a call that was already made has no request to change"
+            )
+
+        def send(payload):
+            if payload is body:
+                return Result(200, json=reply)
+            return ask(payload) if ask is not None else Result(501)
+
+        self._exchange(path, body, send, thread, at, ask is not None)
+
+    # -- a host that makes the requests itself ---------------------------------
+
+    def view(self, path: str, body: Any, *, thread: str) -> Any:
+        """The request as the policy would send it, for a host that sends it itself.
+
+        Such a host, an agent's context engine for one, gives the application a say
+        in what a request holds and in nothing else. Parts of earlier turns the
+        policy archived come back as their notice, and how to fetch them back joins
+        the system prompt. `heard` tells what the provider billed, `reopen` answers
+        the model's calls, and `conclude` closes the turn. `thread` names the
+        conversation. The request itself is left as it was.
+        """
+        if not isinstance(body, dict):
+            return body
+        dialect = wire.dialect_for(path)
+        try:
+            scan = dialect.scan(body)
+            turns = _segments(scan.slots)
+            if not turns or not scan.awaiting:
+                return body
+            conversation, chains = self._conversation(thread, turns)
+        except Exception:
+            self.stats["passed_through"] += 1
+            return body
+        with conversation.lock:
+            try:
+                call = self._prepare(
+                    conversation, chains, dialect, body, scan, turns, None, asks=False
+                )
+            except Exception:
+                logger.warning(
+                    "compache: a request was passed on unchanged", exc_info=True
+                )
+                self.stats["passed_through"] += 1
+                return body
+            self.stats["calls"] += 1
+            return call.plain
+
+    def heard(self, thread: str, usage: Any, *, model: str | None = None) -> None:
+        """What one model call of a conversation shown to `view` was billed, as the provider counts it."""
+        conversation = self._latest.get(thread)
+        if conversation is None:
+            return
+        with conversation.lock:
+            if conversation.pending is None:
+                return
+            conversation.pending.calls += 1
+            try:
+                self._ledger(
+                    conversation, "answer", wire.Reply(usage=usage, model=model)
+                )
+            except Exception:
+                logger.warning("compache: a call was not recorded", exc_info=True)
+
+    def reopen(self, thread: str, reference: str, offset: Any = 0) -> dict:
+        """The answer to the model's `reopen` call in a conversation shown to `view`, as it is to be read."""
+        conversation = self._latest.get(thread)
+        if conversation is None or conversation.session is None:
+            return {
+                "status": "error",
+                "message": "there is nothing archived in this conversation",
+            }
+        with conversation.lock:
+            answers = self._reopen(
+                conversation,
+                [
+                    {
+                        "id": "reopen",
+                        "arguments": {"reference": reference, "offset": offset},
+                    }
+                ],
+            )
+        return json.loads(answers["reopen"])
+
+    def conclude(self, path: str, body: Any, *, thread: str) -> None:
+        """Close the turn that `body` ends on, where the host's own reply ended it.
+
+        `body` holds the conversation up to and including that answer. A
+        conversation that was never shown to `view` is not recorded, and a
+        turn that still waits for a tool goes on.
+        """
+        try:
+            dialect = wire.dialect_for(path)
+            scan = dialect.scan(body)
+            turns = _segments(scan.slots)
+            if not turns or not turns[-1].outputs or dialect.waits_for_tools(body):
+                return
+            conversation, chains = self._conversation(thread, turns)
+            with conversation.lock:
+                now = self._now(conversation)
+                self._catch_up(conversation, chains, turns, now, scan)
+                pending = conversation.pending
+                if pending is not None and pending.index == len(turns):
+                    self._finish(
+                        conversation, _link(chains[-1], turns[-1]), turns[-1], now
+                    )
+        except Exception:
+            logger.warning("compache: a turn was not recorded", exc_info=True)
+
+    def _exchange(self, path, body, send, thread, at=None, asks=True) -> Result:
         self.stats["calls"] += 1
         dialect = wire.dialect_for(path)
         try:
@@ -486,25 +635,33 @@ class Live:
             return send(body)
         with conversation.lock:
             try:
-                call = self._prepare(
-                    conversation, chains, dialect, body, scan, turns, send
-                )
-            except Exception:
-                logger.warning(
-                    "compache: a request was passed on unchanged", exc_info=True
-                )
-                self.stats["passed_through"] += 1
-                return send(body)
-            return self._carry(call, scan)
+                conversation.when = at[0] if at is not None else None
+                try:
+                    call = self._prepare(
+                        conversation, chains, dialect, body, scan, turns, send, asks
+                    )
+                except Exception:
+                    logger.warning(
+                        "compache: a request was passed on unchanged", exc_info=True
+                    )
+                    self.stats["passed_through"] += 1
+                    return send(body)
+                if at is not None:
+                    conversation.when = at[1]
+                return self._carry(call, scan)
+            finally:
+                conversation.when = None
 
-    def _prepare(self, conversation, chains, dialect, body, scan, turns, send) -> _Call:
+    def _prepare(
+        self, conversation, chains, dialect, body, scan, turns, send, asks=True
+    ) -> _Call:
         """Bring the conversation up to this request and work out what to send for it."""
         now, number, current = self._now(conversation), len(turns), turns[-1]
         conversation.system_bytes = _size(scan.system)
         conversation.tools_bytes = _size(json.dumps(scan.tools)) if scan.tools else 0
         plain = body
         try:
-            self._catch_up(conversation, chains, turns, now)
+            self._catch_up(conversation, chains, turns, now, scan)
             pending, found = (
                 conversation.pending,
                 [slot.text for slot in current.retrievals],
@@ -543,7 +700,16 @@ class Live:
             else plain
         )
         call = _Call(
-            conversation, dialect, turns, chains, send, body, plain, marked, marked
+            conversation,
+            dialect,
+            turns,
+            chains,
+            send,
+            body,
+            plain,
+            marked,
+            marked,
+            asks=asks,
         )
         try:
             call.outgoing, call.asked, call.carrier = self._with_note(call, scan)
@@ -577,7 +743,7 @@ class Live:
             return replace(result, events=self._stream(call, result))
         return self._settle(call, result)
 
-    def _catch_up(self, conversation, chains, turns, now) -> None:
+    def _catch_up(self, conversation, chains, turns, now, scan) -> None:
         """Bring a conversation's state up to the turns a request shows as answered."""
         done = len(turns) - 1
         if conversation.turns == done:
@@ -597,11 +763,21 @@ class Live:
         conversation.pending, conversation.turns = None, 0
         if self.policy is not None:
             conversation.session = self.policy.session(conversation.thread_id)
+            # When it was said is not known, and a process that meets a conversation in the middle
+            # has usually just been started: the provider's cache is taken to have expired. It has
+            # not where this process sent the conversation itself, before a turn was asked again.
+            before = now - self.policy.spec.cache_ttl_seconds - 60
+            if conversation.sent_whole is not None:
+                before = max(before, min(conversation.sent_whole, now - 1e-3))
             for k, segment in enumerate(turns[:done]):
-                # When it was said is not known: just before now, each turn after the one before.
-                at = now - (done - k) * 1e-3
+                at = before - (done - k) * 1e-3
+                # Behind the same instructions and tools as now, or they would look changed.
                 turn = conversation.session.prepare(
-                    segment.question, [s.text for s in segment.retrievals], at=at
+                    segment.question,
+                    [s.text for s in segment.retrievals],
+                    at=at,
+                    system_prompt=scan.system,
+                    tools=scan.tools,
                 )
                 conversation.session.complete(turn, segment.answer, at=at)
         conversation.turns = done
@@ -667,7 +843,7 @@ class Live:
         is always asked apart.
         """
         dialect, marked, conversation = call.dialect, call.marked, call.conversation
-        if not self.sample or self._notes_off:
+        if not self.sample or self._notes_off or not call.asks:
             return marked, False, None
         sampled = notes_.sampled(
             conversation.record_id, len(call.turns), self.sample, self.salt
@@ -677,6 +853,8 @@ class Live:
         if (
             self.notes == "apart"
             or scan.stream
+            # A call that was made elsewhere has gone out: only a note after it is possible.
+            or conversation.when is not None
             # A schema that cannot take the property, or that the provider refused with it.
             or (schema is not None and extended is None)
             or (schema is not None and _digest(schema) in self._bad_schemas)
@@ -1105,7 +1283,7 @@ class Live:
             conversation.record_id,
             turn,
             kind,
-            at=self.clock(),
+            at=self.clock() if conversation.when is None else conversation.when,
             model=source.model,
             usage=canonical_usage(source.usage),
             cost=source.cost,

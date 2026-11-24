@@ -259,6 +259,18 @@ class OpenAIChat:
         return scan
 
     @staticmethod
+    def waits_for_tools(body: dict) -> bool:
+        """Whether the last thing said is a tool call whose result has not come in."""
+        said = [
+            m
+            for m in body.get("messages") or ()
+            if m.get("role") not in ("system", "developer")
+        ]
+        return bool(said) and bool(
+            said[-1].get("tool_calls") or said[-1].get("function_call")
+        )
+
+    @staticmethod
     def tool_names(body: dict) -> set:
         return {(t.get("function") or {}).get("name") for t in body.get("tools") or ()}
 
@@ -555,13 +567,15 @@ class Anthropic:
     def scan(body: dict) -> Scan:
         scan = Scan(model=body.get("model"), stream=body.get("stream") is True)
         scan.tools = list(body.get("tools") or ())
-        scan.system = "\n\n".join(
-            t for _, t in _text_parts(body.get("system"), ("system",))
-        )
+        system = [t for _, t in _text_parts(body.get("system"), ("system",))]
         messages = body["messages"]
         for i, message in enumerate(messages):
-            mine = "input" if message.get("role") == "user" else "output"
             content, base = message.get("content"), ("messages", i, "content")
+            if message.get("role") == "system":
+                # An instruction given in the middle of the conversation. Nobody said it.
+                system += [t for _, t in _text_parts(content, base)]
+                continue
+            mine = "input" if message.get("role") == "user" else "output"
             if isinstance(content, str):
                 scan.slots.append(
                     Slot(
@@ -585,8 +599,20 @@ class Anthropic:
                         scan.slots.append(Slot("retrieval", path, text, i, (i, j)))
             if mine == "output" and not said and not called:
                 scan.slots.append(Slot("output", base, "", i, closes=True))
-        scan.awaiting = bool(messages) and messages[-1].get("role") == "user"
+        scan.system = "\n\n".join(system)
+        spoken = [m for m in messages if m.get("role") != "system"]
+        scan.awaiting = bool(spoken) and spoken[-1].get("role") == "user"
         return scan
+
+    @classmethod
+    def waits_for_tools(cls, body: dict) -> bool:
+        at = cls._last_said(body)
+        content = None if at is None else body["messages"][at].get("content")
+        return isinstance(content, list) and any(
+            str(b.get("type")).endswith("tool_use")
+            for b in content
+            if isinstance(b, dict)
+        )
 
     @staticmethod
     def tool_names(body: dict) -> set:
@@ -598,11 +624,21 @@ class Anthropic:
             return [{"type": "text", "text": content}] if content else []
         return list(content or ())
 
+    @staticmethod
+    def _last_said(body: dict) -> int | None:
+        """Where the last message that somebody said is: an instruction may follow it."""
+        said = [
+            i
+            for i, m in enumerate(body.get("messages") or ())
+            if m.get("role") != "system"
+        ]
+        return said[-1] if said else None
+
     @classmethod
     def _mark_last(cls, body: dict, mark: dict) -> dict:
-        if not body.get("messages"):
+        at = cls._last_said(body)
+        if at is None:
             return body
-        at = len(body["messages"]) - 1
         blocks = cls._blocks(body["messages"][at].get("content"))
         if (
             not blocks
@@ -624,7 +660,7 @@ class Anthropic:
     @classmethod
     def with_note(cls, body: dict, text: str) -> dict:
         body = cls.pinned(body)
-        at = len(body["messages"]) - 1
+        at = cls._last_said(body)
         blocks = [
             *cls._blocks(body["messages"][at].get("content")),
             {"type": "text", "text": text},
@@ -1002,9 +1038,17 @@ class OpenAIResponses:
                 last = "tool"
             elif kind == "function_call":
                 last = "call"
+            elif kind == "item_reference":
+                # Part of the history is at the provider, and only its name is here.
+                raise ValueError("the conversation is kept by the provider")
         scan.system = "\n\n".join(system)
         scan.awaiting = last in ("user", "tool")
         return scan
+
+    @classmethod
+    def waits_for_tools(cls, body: dict) -> bool:
+        items = cls._items(body)
+        return bool(items) and items[-1].get("type") == "function_call"
 
     @staticmethod
     def tool_names(body: dict) -> set:
@@ -1199,6 +1243,12 @@ class Gemini:
                     )
         scan.awaiting = bool(contents) and contents[-1].get("role") != "model"
         return scan
+
+    @staticmethod
+    def waits_for_tools(body: dict) -> bool:
+        contents = body.get("contents") or ()
+        parts = (contents[-1].get("parts") or ()) if contents else ()
+        return any("functionCall" in p or "function_call" in p for p in parts)
 
     @staticmethod
     def tool_names(body: dict) -> set:

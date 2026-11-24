@@ -1,15 +1,18 @@
-"""The README's quickstart, the sample it runs on, and the figures drawn from committed data."""
+"""The README's quickstart, the sample it runs on, the figures drawn from committed data, and the links between pages."""
 
 import contextlib
 import io
 import os
+import re
 import runpy
 import sys
 import tempfile
 import unittest
+from importlib.resources import files
 from pathlib import Path
 
 import compache
+from compache.cli import main
 
 ROOT = Path(__file__).resolve().parents[1]
 SAMPLE = ROOT / "examples" / "quickstart"
@@ -69,6 +72,26 @@ class QuickstartTests(unittest.TestCase):
             threads[0].runs[0].input.part_id, f"{threads[0].thread_id}:1:input"
         )
 
+    def test_the_package_carries_the_sample(self):
+        packaged = files("compache").joinpath("demo")
+        for name in ("threads.jsonl.gz", "labels.jsonl"):
+            self.assertEqual(
+                packaged.joinpath(name).read_bytes(), (SAMPLE / name).read_bytes()
+            )
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(main(["demo"]), 0)
+        for line in self.policy.describe().splitlines():
+            self.assertIn(line, out.getvalue())
+        self.assertIn("Not kept", out.getvalue())
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            path = Path(tmp) / "policy.json"
+            self.assertEqual(main(["demo", "-o", str(path)]), 0)
+            self.assertEqual(compache.Policy.load(path).recipe, self.policy.recipe)
+
     def test_the_apply_example_runs(self):
         with tempfile.TemporaryDirectory() as tmp:
             self.policy.save(Path(tmp) / "policy.json")
@@ -103,6 +126,46 @@ class FigureTests(unittest.TestCase):
                 self.assertEqual(
                     draw(*args), (figures.ASSETS / target).read_text("utf-8")
                 )
+
+
+class LinkTests(unittest.TestCase):
+    LINK = re.compile(r"\]\((?!https?://|mailto:)([^)\s]+)\)")
+
+    @staticmethod
+    def anchors(page):
+        """The anchors GitHub gives a page's headings."""
+        text = re.sub(r"```.*?```", "", page.read_text("utf-8"), flags=re.S)
+        for heading in re.findall(r"^#+ +(.+?) *$", text, flags=re.M):
+            yield re.sub(r"[^\w\- ]", "", heading.lower()).replace(" ", "-")
+
+    def test_every_link_between_the_pages_leads_somewhere(self):
+        pages = [
+            page
+            for page in ROOT.rglob("*.md")
+            if not {".venv", "node_modules", ".claude"}
+            & set(page.relative_to(ROOT).parts)
+        ]
+        self.assertGreater(len(pages), 10)
+        for page in pages:
+            for target in self.LINK.findall(page.read_text("utf-8")):
+                path, _, anchor = target.partition("#")
+                with self.subTest(page=str(page.relative_to(ROOT)), link=target):
+                    found = (page.parent / path).resolve() if path else page
+                    self.assertTrue(found.exists())
+                    if anchor and found.suffix == ".md":
+                        self.assertIn(anchor, set(self.anchors(found)))
+
+    def test_the_readme_on_pypi_has_no_link_that_only_works_on_github(self):
+        sys.path.insert(0, str(ROOT / "scripts"))
+        try:
+            import pypi_readme
+        finally:
+            sys.path.pop(0)
+        text = pypi_readme.absolute((ROOT / "README.md").read_text("utf-8"), "v1.2.3")
+        self.assertEqual(self.LINK.findall(text), [])
+        self.assertIn("/compache/v1.2.3/docs/assets/headline.svg)", text)
+        self.assertIn("/compache/blob/v1.2.3/docs/guide.md)", text)
+        self.assertNotIn("git+https", text)
 
 
 if __name__ == "__main__":

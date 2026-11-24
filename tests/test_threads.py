@@ -444,6 +444,23 @@ class SimpleShapeTests(unittest.TestCase):
             ),
             {"input": 100, "output": 4, "cache_read": 70, "cache_write": 20},
         )
+        # LiteLLM reports both names: its prompt total counts what was cached already.
+        self.assertEqual(
+            canonical_usage(
+                {
+                    "prompt_tokens": 100,
+                    "completion_tokens": 4,
+                    "total_tokens": 104,
+                    "cache_read_input_tokens": 70,
+                    "cache_creation_input_tokens": 20,
+                    "prompt_tokens_details": {
+                        "cached_tokens": 70,
+                        "cache_write_tokens": 20,
+                    },
+                }
+            ),
+            {"input": 100, "output": 4, "cache_read": 70, "cache_write": 20},
+        )
         same = {"input": 9, "output": 1, "cache_read": 2, "cache_write": 3}
         self.assertEqual(canonical_usage(same), same)
         self.assertIsNone(canonical_usage({"tokens": 5}))
