@@ -22,6 +22,8 @@ from .models import model_spec, pricing
 from .optimizer.contracts import seconds
 from .optimizer.distribution import measure_cache_reads
 from .optimizer.parts import Source, placeholder
+from .record import is_record
+from .record import load as load_record
 from .threads import load_threads, read_jsonl, recorded
 
 __all__ = ["CALCULATOR_URL", "history_resent", "profile"]
@@ -457,6 +459,8 @@ def profile(
     Without labels the calculator keeps its own defaults for what later turns
     need, and the profile says so.
     """
+    if labels is None and is_record(threads):
+        labels = load_record(threads)[1]
     rows = _rows(threads)
     found = recorded(rows)
     if model is None:

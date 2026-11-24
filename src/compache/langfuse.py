@@ -17,7 +17,6 @@ import base64
 import json
 import os
 import re
-import ssl
 import time
 import urllib.error
 import urllib.parse
@@ -26,6 +25,7 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Iterator
 
+from . import _tls
 from .errors import ContractError
 from .threads import Thread, cache_read_reported, canonical_usage, normalize_thread
 
@@ -54,42 +54,18 @@ _RESENT_SHARE = 0.8
 # -- reading ---------------------------------------------------------------
 
 
-_CERTIFICATES: dict[str, Any] = {"context": None}
-
-
-def _other_certificates() -> ssl.SSLContext | None:
-    """Root certificates from certifi or the system bundle, for a Python that ships none."""
-    try:
-        import certifi
-
-        return ssl.create_default_context(cafile=certifi.where())
-    except ImportError:
-        pass
-    for bundle in (
-        "/etc/ssl/cert.pem",
-        "/etc/ssl/certs/ca-certificates.crt",
-        "/etc/pki/tls/certs/ca-bundle.crt",
-    ):
-        if os.path.exists(bundle):
-            return ssl.create_default_context(cafile=bundle)
-    return None
-
-
 def _get(url: str, headers: dict, timeout: float):
     request = urllib.request.Request(url, headers=headers)
     try:
         with urllib.request.urlopen(
-            request, timeout=timeout, context=_CERTIFICATES["context"]
+            request, timeout=timeout, context=_tls.FOUND["context"]
         ) as response:
             return response.status, dict(response.headers), response.read()
     except urllib.error.HTTPError as error:
         return error.code, dict(error.headers), error.read()
     except urllib.error.URLError as error:
-        unverified = "CERTIFICATE_VERIFY_FAILED" in str(error.reason)
-        if unverified and _CERTIFICATES["context"] is None:
-            _CERTIFICATES["context"] = _other_certificates()
-            if _CERTIFICATES["context"] is not None:
-                return _get(url, headers, timeout)
+        if _tls.unverified(error) and _tls.fall_back():
+            return _get(url, headers, timeout)
         raise
 
 

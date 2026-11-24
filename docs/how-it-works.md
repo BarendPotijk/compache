@@ -45,6 +45,29 @@ The winner is the cheapest policy the fit priced on your threads, and keeping ev
 
 A request that should have hit the cache and read nothing suspends pings for that conversation and records which part of the prefix changed.
 
+## In the request path
+
+`compache.wrap` and `compache proxy` run that session on the JSON of every model call. Your application keeps sending its whole history.
+
+| Step | What happens |
+|---|---|
+| Read the request | A user message opens a turn. Tool results are its retrieved text, assistant text its answer. The text blocks of one tool result are one part, as in a recorded thread |
+| Find the conversation | By its name, or by what it has said so far |
+| Decide | A new user message: the session decides as above. Another call of the same turn, as in a tool loop: the decision stands, and what the tools returned joins the turn |
+| Rewrite a copy | Archived parts get their notice, and from the first notice on the model has a `reopen` tool. A part no larger than its notice stays. Tool calls, images, thinking blocks and anything unknown stay as they were |
+| Read the reply | The model's `reopen` calls are answered and the model asked again, inside a stream too. A model still fetching after three rounds, or saying nothing, gets the application's own request instead, and a conversation where that happens twice is left alone. Of a turn with several calls, the first call's usage says what the turn found cached and the last call's what it leaves |
+
+## Notes from the model
+
+Labels normally come from reading past conversations. Where those cannot be read, the model that answered is asked, on a sample of turns.
+
+- **What is asked.** Once the reply is in, one short request continues the conversation: the reply, a list of the conversation's parts with a label and the first words of each, and the request to name the parts the reply needed. A part is needed if a fact came from it, or if the user's message only makes sense with it. The application's own request and reply are not touched.
+- **What comes back.** One line of labels, such as `R3.1` for the first text retrieved in turn 3 or `A2` for the answer of turn 2. No text.
+- **What they become.** For that turn, a label that it needed those earlier parts. A part the model fetched back while answering counts too.
+- **What it costs.** Everything before the reply is read from the cache. On Claude Haiku 5.5 a note cost about half of what a turn does, most of it the model thinking before it writes the line.
+
+A model names what helped as readily as what the turn could not do without, so notes are looser than a measurement. [The live runs](../benchmarks/live/README.md#the-models-notes) compare both on the same conversations, and the policies fitted on each.
+
 ## Assumptions
 
 - One model call per user message, unless the threads record more.

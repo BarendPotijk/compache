@@ -38,20 +38,17 @@ $16.10 per 1,000 turns against $50.25 keeping everything: 68% less.
 Wrote policy.json
 ```
 
-Then apply the policy on every request:
+Then put it where your model calls leave:
 
 ```python
 import compache
 
-policy = compache.Policy.load("policy.json")
-session = policy.session("thread-17")        # one per conversation
-
-turn = session.prepare(question, retrieved)   # the request to send: turn.messages
-session.complete(turn, answer, usage=response.usage)
-session.next_ping_at                          # when a keep-warm ping is due, if one pays
+client = compache.wrap(client, "policy.json")          # an OpenAI, Anthropic or Google GenAI client
+with compache.thread("conversation-17"):
+    client.messages.create(model=MODEL, messages=messages, max_tokens=1024)
 ```
 
-Applying a policy calls no model. The same history always gives the same request, so the cached prefix stays stable.
+Your application sends its whole history as before. On the way out, archived parts become a notice the model can reopen, the cache is kept warm when that pays, and the same history always gives the same request, so the cached prefix stays stable. For an agent harness or anything else with a base URL: `compache proxy --policy policy.json`. [Every way in](docs/integrations.md)
 
 ## What it needs from you
 
@@ -60,7 +57,9 @@ Applying a policy calls no model. The same history always gives the same request
 | Your chat log: each message with its role, text and time | When a keep-warm ping pays |
 | Plus labels for a sample of turns: which earlier parts the turn needed | What stays in view, separately for questions, answers and retrieved text |
 
-No thresholds to tune and no model to call. The log goes in as you store it, or straight from Langfuse with `compache pull langfuse`. A [coding-agent skill](skills/compache-label-dependencies/SKILL.md) writes the labels, and prices for current Claude and GPT models are built in. [Guide](docs/guide.md)
+No thresholds to tune and no model to call. The log goes in as you store it, or straight from Langfuse, MLflow or an OpenTelemetry export with `compache pull`. A [coding-agent skill](skills/compache-label-dependencies/SKILL.md) writes the labels, and prices for current Claude and GPT models are built in. [Guide](docs/guide.md)
+
+**No traces you can read?** `compache.wrap(client, record="compache-record", sample=0.1)` keeps a record as your requests pass: sizes, times and usage, never text. For one turn in ten the model is asked, once its reply is in, which earlier parts that reply needed. `compache fit compache-record` runs on that. On live calls, with every turn asked, such a policy saved what one fitted on past traces saved.
 
 ![Record threads, fit a policy, apply it on every request](docs/assets/workflow.svg)
 
@@ -76,4 +75,6 @@ Cost on held-out conversations against keeping the full history, across three re
 
 Three workloads, three different answers: that is the point of fitting. On DocChat, Claude Sonnet 5.5 answered 24 of 30 held-out turns correctly from the fitted policy's view and 25 from the full history, on a fifth of the tokens. [All results](benchmarks/README.md)
 
-[Guide](docs/guide.md) · [How it works](docs/how-it-works.md) · [Calculator](https://barendpotijk.github.io/compache/) · [Other tools compared](docs/comparisons.md) · [Issues](https://github.com/BarendPotijk/compache/issues)
+On [live calls](benchmarks/live/README.md), with held-out DocChat conversations played at their users' pace, the fitted policies cut what the provider billed for Claude Haiku 5.5 by 42% to 49% through all four ways in played on it, with as many answers right.
+
+[Guide](docs/guide.md) · [Integrations](docs/integrations.md) · [How it works](docs/how-it-works.md) · [Calculator](https://barendpotijk.github.io/compache/) · [Other tools compared](docs/comparisons.md) · [Issues](https://github.com/BarendPotijk/compache/issues)

@@ -2,7 +2,7 @@
 """Draw the figures under docs/assets from the data files in docs/assets/data.
 
     python scripts/figures.py              # every figure
-    python scripts/figures.py map thread   # some of: map, thread, openclaw, workflow
+    python scripts/figures.py map thread   # some of: map, thread, openclaw, live, workflow
 
 Every figure paints its own surface and carries a light and a dark palette, so it
 reads on either GitHub theme. The palette, typeface and marks are the calculator's.
@@ -11,6 +11,7 @@ Where the data comes from:
     policy-grid.json   python benchmarks/docchat/run.py grid --data <fast> <mixed> <slow> --output ...
     thread.json        python benchmarks/docchat/run.py thread --data <build> --thread <id> --recipe ... --output ...
     openclaw.json      node scripts/openclaw_comparison.mjs --json docs/assets/data/openclaw.json
+    live.json          python benchmarks/live/run.py report --work <folder> --figure docs/assets/data/live.json
 """
 
 from __future__ import annotations
@@ -389,6 +390,76 @@ def openclaw(data):
     )
 
 
+# -- live model calls ---------------------------------------------------------
+
+
+def live(data):
+    """One group of bars per way in: what the provider billed under no policy and under each policy."""
+    ways = data["ways"]
+    rows = sum(len(way["arms"]) for way in ways)
+    bar, pitch, gap, top = 14, 21, 26, 104
+    width, height = 880, top + rows * pitch + len(ways) * gap + 10
+    x0, full = 392, 356
+    longest = max(arm["cost"] for way in ways for arm in way["arms"])
+    body = [
+        text(
+            24,
+            30,
+            "What the provider billed per 1,000 turns, through every way in",
+            "big",
+        ),
+        text(24, 49, data["subtitle"], "t2"),
+        '<rect class="n" x="24" y="64" width="10" height="10" rx="2"/>',
+        text(
+            40, 73.5, "No policy: the application as it is, with its own caching", "t2"
+        ),
+        '<rect class="c" x="396" y="64" width="10" height="10" rx="2"/>',
+        text(412, 73.5, "With a compache policy", "t2"),
+    ]
+    described, y0 = [], top
+    for way in ways:
+        arms, base = way["arms"], way["arms"][0]["cost"]
+        body.append(text(24, y0 + bar - 2.5, way["name"], "b"))
+        body += [
+            text(24, y0 + bar + 15.5 + 16 * k, line, "tm")
+            for k, line in enumerate(way["detail"])
+        ]
+        body.append(
+            f'<line class="axis" x1="{x0}" x2="{x0}" y1="{y0 - 5}" y2="{y0 + len(arms) * pitch - 2}"/>'
+        )
+        said = []
+        for j, arm in enumerate(arms):
+            yy, length = y0 + j * pitch, max(6, arm["cost"] / longest * full)
+            body.append(text(x0 - 12, yy + bar - 2.5, arm["name"], "t2", "end"))
+            body.append(
+                f'<path class="{"c" if j else "n"}" d="M{x0},{yy} h{length - 4:.1f} a4,4 0 0 1 4,4 '
+                f'v{bar - 8} a4,4 0 0 1 -4,4 h-{length - 4:.1f} z"/>'
+            )
+            body.append(
+                text(
+                    x0 + length + 8,
+                    yy + bar - 2.5,
+                    dollars(arm["cost"]),
+                    "b" if j else "t2",
+                )
+            )
+            if j:
+                change = f"{arm['cost'] / base - 1:+.0%}".replace("-", "\u2212")
+                body.append(text(x0 + length + 54, yy + bar - 2.5, change, "t2"))
+            said.append(f"{arm['name'].lower()} {dollars(arm['cost'])}")
+        described.append(
+            f"{way['name']}, {', '.join(way['detail'])}: " + ", ".join(said)
+        )
+        y0 += len(arms) * pitch + gap
+    return svg(
+        width,
+        height,
+        "What the provider billed per 1,000 turns through every way in, with and without a compache policy",
+        f"{data['subtitle']} {'. '.join(described)}.",
+        body,
+    )
+
+
 # -- how it works -----------------------------------------------------------
 
 
@@ -455,6 +526,7 @@ FIGURES = {
     "map": ("policy-map.svg", "policy-grid.json", policy_map),
     "thread": ("thread-dependencies.svg", "thread.json", thread),
     "openclaw": ("openclaw-cost.svg", "openclaw.json", openclaw),
+    "live": ("live-cost.svg", "live.json", live),
     "workflow": ("workflow.svg", None, workflow),
 }
 

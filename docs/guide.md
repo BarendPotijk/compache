@@ -8,11 +8,12 @@ pip install git+https://github.com/BarendPotijk/compache
 
 | Step | Command | Python |
 |---|---|---|
-| Read traces from Langfuse | `compache pull langfuse -o threads.jsonl.gz` | `compache.langfuse.pull()` |
+| Read traces | `compache pull langfuse -o threads.jsonl.gz`, also `mlflow` and `otel` | `compache.langfuse.pull()` |
+| Or record going forward | `compache proxy --record compache-record --sample 0.1` | `compache.wrap(client, record=..., sample=0.1)` |
 | Check the data | `compache check threads.jsonl --labels labels.jsonl` | `compache.load_threads(path)` |
 | Fit | `compache fit threads.jsonl --labels labels.jsonl --model claude-sonnet-5-5` | `compache.fit(threads, labels, model=...)` |
 | Price on unseen threads | `compache replay heldout.jsonl --policy policy.json` | `compache.replay(policy, threads, labels)` |
-| Apply | | `policy.session(thread_id)` |
+| Apply | `compache proxy --policy policy.json` | `compache.wrap(client, policy)` |
 | Open the calculator on your workload | `compache profile threads.jsonl --model claude-sonnet-5-5` | `compache.profile(threads, labels, model=...)` |
 
 ## 1. Threads
@@ -86,6 +87,22 @@ A session becomes a thread. The file carries the model, the system prompt, the t
 - **Host.** Langfuse Cloud by default, `LANGFUSE_BASE_URL` for another region or your own Langfuse 4.
 - **Checked** on Langfuse Cloud with the OpenAI drop-in, the Anthropic SDK's own spans, the OpenTelemetry Anthropic instrumentation and `@observe` functions.
 
+### From MLflow or an OpenTelemetry export
+
+```sh
+compache pull mlflow --tracking-uri http://localhost:5000 --experiment 1 -o threads.jsonl.gz
+compache pull otel spans.jsonl -o threads.jsonl.gz
+```
+
+Both are read the way Langfuse is: a session or conversation ID makes a thread, and the same rules rebuild its turns.
+
+| Source | What is read |
+|---|---|
+| MLflow 3 | Traces over the tracking server's REST API, in the shapes its OpenAI, Anthropic and LangChain autologging record. The session is `mlflow.trace.session`. `MLFLOW_TRACKING_URI` and `MLFLOW_TRACKING_TOKEN` are used when set |
+| OpenTelemetry | An OTLP JSON export, one document or one per line, in the GenAI conventions (`gen_ai.*`) or OpenInference (`llm.*`), as Phoenix and others write |
+
+Checked against an MLflow 3.18 server with the three autologgers, whole and streamed, and with spans sent to it over OTLP.
+
 ## 2. Labels
 
 Without labels the fit tunes the keep-warm pings and keeps the whole history. Labels say what later turns needed from earlier ones, which is what lets it drop the rest. A sample is enough: an unlabelled turn counts as not sampled.
@@ -111,6 +128,44 @@ compache packets threads.jsonl --sample 200 -o packets.jsonl   # what a labeller
 # the agent labels each packet with the skill in skills/compache-label-dependencies
 compache check threads.jsonl --labels labels.jsonl             # validates and summarizes
 ```
+
+## Without past traces
+
+Traces can be protected, incomplete or not kept at all. The same fit runs on a record made going forward by compache in the request path. With no policy it changes nothing in your requests.
+
+```python
+client = compache.wrap(client, record="compache-record", sample=0.1)
+```
+
+```sh
+compache fit compache-record --model claude-sonnet-5-5    # threads and labels both come from the folder
+```
+
+| The record holds | |
+|---|---|
+| For every turn | When it started and ended, the size in bytes of its question, of each retrieved text and of its answer, the model, its calls and the provider's usage |
+| For a sampled turn | The labels of the earlier parts its reply named, such as `R3.1` or `A2` |
+| Never | Any text of a conversation. A conversation's ID is kept as a hash |
+
+`sample` is the share of turns that are asked. Once a sampled reply is in, compache sends one short request of its own: the conversation, the reply, and the conversation's parts by label and first words, with the request to name the parts the reply needed in one line, `<!-- refs: {R3.1} {A2} -->`. Your application's request and its reply are untouched, whatever their form. On Claude Haiku 5.5 a note cost about half of what a turn does, so one turn in ten adds some 5%.
+
+`notes="inline"` asks in the reply itself and saves that request. The reply then answers a request with one more paragraph in it, and that can change the answer: in the [live runs](../benchmarks/live/README.md#a-note-after-the-reply-or-in-it) a fact was wrong in 3 of 8 conversations on Gemini 3.5 Flash Lite and in 2 of 10 on Claude Haiku 5.5 through the Messages API, against none of them when the note was asked afterwards or not at all.
+
+| With `notes="inline"`, a reply that is | Carries the note as |
+|---|---|
+| Text | A last line, taken out before your application sees the reply |
+| JSON under a schema | One more property, cut out of the JSON text. The schema is widened on every turn, so the provider caches one schema |
+| Streamed | Nothing: what has been shown cannot be taken back, so it is asked after the reply all the same |
+
+| If, with the note in the reply, | Then |
+|---|---|
+| The provider refuses the request | It is sent again without. After three refusals notes are switched off |
+| The reply names a label where its reader would see it, is cut off by the output limit, or holds nothing but the note | The request is sent again without the note, and that reply is the one returned |
+| The property cannot be cut out of the JSON | The same, with the application's own schema |
+
+Either way, a reply that ignores the request leaves its turn unlabelled, and a part the model fetched back while answering counts as one the turn needed.
+
+For a policy from the first day, `compache default --model claude-sonnet-5-5` writes the one fitted to the default workload of the calculator. Refit on your record as it grows.
 
 ## 3. Fit
 
@@ -146,9 +201,31 @@ It prices the policy and keeping everything on the same arrivals, including ever
 
 ## 5. Apply
 
+Put compache where your model calls leave. Your application keeps its own message list and sends it whole, as before.
+
 ```python
 import compache
 
+client = compache.wrap(client, "policy.json")          # an OpenAI, Anthropic or Google GenAI client
+with compache.thread("conversation-17"):
+    response = client.messages.create(model=MODEL, system=SYSTEM, messages=messages, max_tokens=1024)
+```
+
+```sh
+compache proxy --policy policy.json                    # for anything that lets its base URL be set
+```
+
+On the way out, the parts the policy archives are replaced by a notice, the end of the conversation is marked cacheable, and the model is given a `reopen` tool whose calls are answered before your application sees the reply. A background thread sends the keep-warm pings. [Integrations](integrations.md) lists every way in, LangChain and agent harnesses included.
+
+- **Record and apply together.** `record=` and `sample=` work with a policy too, so the next fit has fresher threads.
+- **No long-lived process.** Pings need one. Where there is none, fit with `ping_counts=(0,)`.
+- **Retrieved text pasted into the question.** The request path sees one message, so it can only keep or archive the two together. Fit such an application on a record made going forward, which sees it the same way.
+
+### By hand
+
+When you assemble prompts yourself, a session gives you the request for each turn:
+
+```python
 policy = compache.Policy.load("policy.json")
 session = policy.session("thread-17")          # one per conversation, kept while it is active
 
@@ -171,7 +248,7 @@ if session.next_ping_at:                         # epoch seconds, or None
 - **Cited sources.** For a policy fitted with them, pass `session.complete(turn, answer, cited_part_ids=[...])`. The IDs are the `part_id` of items given to `prepare`, or the generated ones in `turn.parts`, and must be in view in that request. They add nothing to what the model is sent.
 - **Archived parts.** A cut replaces a part with a notice that carries a handle. Give the model `compache.REOPEN_TOOL` and `compache.REOPEN_INSTRUCTIONS`, and pass its tool calls to `session.reopen`.
 - **Placement.** `turn.messages` puts answers under `assistant` and everything else under `user`. If your application sends retrieved text another way, build the request from `turn.parts` and keep that mapping fixed.
-- **Tool loops.** Call `prepare` once per user message and append the calls of that turn yourself.
+- **Tool loops.** Call `prepare` once per user message, append the calls of that turn yourself, and hand what the tools returned to `session.extend(turn, results)` before `complete`. With several calls, pass the first call's usage as `usage` and the last call's as `last_usage`.
 - **Determinism.** No model is called. The same history, times and usage give the same request, so a session can be rebuilt after a restart by feeding the stored turns through `prepare` and `complete` again.
 - **Time.** Both calls take `at=` in epoch seconds and default to now.
 

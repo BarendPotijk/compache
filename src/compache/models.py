@@ -40,12 +40,18 @@ def _lookup(name: str):
     for model_id, entry in models.items():
         if entry.get("preset") == name:
             return model_id, entry
-    # A dated or routed name of a known model, such as "anthropic/claude-sonnet-5-5-20261001".
+    # A dated or routed name of a known model, such as "anthropic/claude-sonnet-5-5-20261001",
+    # or one that a gateway writes with a dot, such as "anthropic/claude-haiku-5.5".
     tail = name.rsplit("/", 1)[-1]
-    matches = [m for m in models if tail.startswith(m)]
-    if matches:
-        model_id = max(matches, key=len)
-        return model_id, models[model_id]
+    for spelled in (tail, tail.replace(".", "-")):
+        matches = [
+            m
+            for m in models
+            if spelled.startswith(m) or spelled.startswith(m.replace(".", "-"))
+        ]
+        if matches:
+            model_id = max(matches, key=len)
+            return model_id, models[model_id]
     return None
 
 

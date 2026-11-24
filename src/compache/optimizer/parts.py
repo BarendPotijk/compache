@@ -140,6 +140,10 @@ def placeholder(thread_id: str, source: Source) -> str:
     return f"[Compacted passage; expand {handle(thread_id, source)} before relying on its contents.]"
 
 
+# Every placeholder is this long: a handle is always 28 characters.
+NOTICE_BYTES = len("[Compacted passage; expand  before relying on its contents.]") + 28
+
+
 def wire_part(source: Source) -> str:
     return source.wire
 

@@ -622,6 +622,50 @@ class WorkloadSession:
         )
         return plan
 
+    def extend(self, plan, parts):
+        """Add parts that arrived while the pending run was being answered.
+
+        A tool loop learns what it retrieved only after its first call. The
+        choice `prepare` made stands: the history goes out as chosen and the
+        new parts follow it verbatim. Pass the returned plan to `complete`.
+        """
+        if self._pending is None or self._pending[0] is not plan:
+            raise ContractError("expected the current pending request")
+        parts, req = tuple(parts), plan.request
+        if any(
+            not isinstance(p, Source)
+            or p.kind != "retrieval"
+            or p.run_index != req.run_index
+            or p.text is None
+            for p in parts
+        ):
+            raise ContractError("expected retrieved parts of the pending run")
+        if not parts:
+            return plan
+        request = replace(req, parts=req.parts + parts)
+        view = render_recipe(
+            request,
+            self.policy.spec,
+            RetentionRecipe(),
+            archived_ids=plan.view.archived_ids,
+            cut=False,
+            overhead_tokens=plan.view.overhead_tokens,
+            part_meter=self._part_meter,
+        )
+        estimate = estimate_input(view, self._anchor)
+        if estimate.tokens != view.tokens:
+            view = replace(view, tokens=estimate.tokens)
+        extended = replace(
+            plan,
+            request=request,
+            view=view,
+            arrival_tokens=plan.arrival_tokens
+            + sum(self.policy.spec.part_tokens(p.text) for p in parts),
+        )
+        _, system, tools, upper_bound, _, edit_class = self._pending
+        self._pending = (extended, system, tools, upper_bound, estimate, edit_class)
+        return extended
+
     @staticmethod
     def _tool_fingerprint(default_tools, dynamic_tools):
         from .cache_breaks import _fingerprint

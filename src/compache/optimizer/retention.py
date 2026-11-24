@@ -10,6 +10,7 @@ from compache.errors import ContractError
 from .contracts import ModelSpec, number
 from .edit_accounting import PartMeter
 from .parts import (
+    NOTICE_BYTES,
     Request,
     Source,
     placeholder,
@@ -287,13 +288,14 @@ def _checkpoint(request, recipe, archived, pins, spec):
         and len(retrieval_turns) >= recipe.retrieval_runs
     ):
         thresholds["retrieval"] = retrieval_turns[-recipe.retrieval_runs]
-    small = recipe.keep_under_tokens
+    # A part no larger than the notice that would stand for it is never worth archiving.
+    small = max(recipe.keep_under_tokens, spec.part_tokens("." * NOTICE_BYTES))
     archived.update(
         p.part_id
         for p in request.parts
         if p.part_id not in pins
         and p.run_index < thresholds[p.kind]
-        and (not small or spec.part_tokens(p.text) > small)
+        and spec.part_tokens(p.text) > small
     )
     return archived
 
@@ -488,8 +490,11 @@ def _thread_windows(thread, spec, recipes):
         full[n] += full[n - 1]
     table = {"input": {}, "output": {}, "retrieval": {}}
 
+    # A part no larger than the notice that would stand for it is never archived.
+    floor = spec.part_tokens("." * NOTICE_BYTES)
+
     def large(parts, small):
-        return [p for p in parts if not small or size[p.part_id] > small]
+        return [p for p in parts if size[p.part_id] > max(small, floor)]
 
     for kind, name in (("input", "input_runs"), ("output", "output_runs")):
         for window, small in {_key(getattr(r, name), r) for r in recipes}:
@@ -536,7 +541,7 @@ def _thread_windows(thread, spec, recipes):
             {}
             if window is None
             else {
-                p: t for p, t in leaving[window].items() if not small or size[p] > small
+                p: t for p, t in leaving[window].items() if size[p] > max(small, floor)
             }
         )
         if flag or age != 0:

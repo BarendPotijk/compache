@@ -16,7 +16,17 @@ from compache.optimizer.retention import (
 )
 from compache.optimizer.session import WorkloadPolicy, fit_workload
 from compache.threads import ContractError, Thread
-from helpers import END, labels_for, thread
+from helpers import ANSWER, END, QUESTION, labels_for
+from helpers import thread as short_thread
+
+
+def thread(**options):
+    """The shared thread, with questions and answers large enough to be worth a notice."""
+    options.setdefault(
+        "question", QUESTION + " In full, please, with every detail." * 2
+    )
+    options.setdefault("answer", ANSWER + " It is given at length and in full." * 3)
+    return short_thread(**options)
 
 
 class RecipeTests(unittest.TestCase):
@@ -61,6 +71,24 @@ class RecipeTests(unittest.TestCase):
             [handle("t", p) for p in self.req.parts],
             [handle("t", p) for p in observed.parts],
         )
+
+    def test_a_part_no_larger_than_its_notice_is_never_archived(self):
+        brief = short_thread(n=5)
+        request = Request.from_thread(brief, brief.runs[-1].run_id)
+        everything = RetentionRecipe(0, 0, 0)
+        view = render_recipe(request, self.spec, everything)
+        # The questions and answers here are shorter than a notice. Only the documents go.
+        archived = [p for p in request.parts if p.part_id in view.archived_ids]
+        self.assertEqual({p.kind for p in archived}, {"retrieval"})
+        self.assertEqual(len(archived), 4)
+        for part, shown in zip(request.parts, view.parts):
+            if part.kind != "retrieval":
+                self.assertIs(shown, part)
+        # The fit counts the same.
+        rows = labels_for(brief)
+        scored = fit_recipe([brief], rows, self.spec, everything)
+        documents = fit_recipe([brief], rows, self.spec, RetentionRecipe(None, None, 0))
+        self.assertEqual(scored["projected_tokens"], documents["projected_tokens"])
 
     def test_typed_cut_keeps_current_and_complete_retrieval_groups(self):
         # No retrieval at run four. The last completed retrieval group is run three.
@@ -329,7 +357,7 @@ class RecipeTests(unittest.TestCase):
             recipe_grid(10, kinds={"summary"})
 
     def long_answers(self):
-        data = thread(n=5).to_dict()
+        data = short_thread(n=5).to_dict()
         for run in data["runs"]:
             run["output"]["text"] = "An observed final answer. " * 40
         return Thread.from_dict(data)
@@ -343,8 +371,8 @@ class RecipeTests(unittest.TestCase):
         admitted = [s for s in scores if s["eligible"]]
         self.assertEqual(len(admitted), 1)
         # Every later turn needs the first document, so no retrieval window passes.
-        # Dropping the long answers saves tokens. Dropping the short questions
-        # would cost some, because a placeholder outweighs each of them.
+        # Dropping the long answers saves tokens. The short questions stay
+        # whatever the window: a part no larger than its notice is never archived.
         self.assertEqual(
             admitted[0]["recipe"],
             {
@@ -370,21 +398,31 @@ class RecipeTests(unittest.TestCase):
             {
                 "admitted",
                 "cheaper_recipe_selected",
-                "saves_no_tokens",
+                "cut_met_no_assessed_requirement",
                 "below_retention_floor",
             },
         )
-        # With short messages every passing cut costs more than it removes,
-        # because a placeholder outweighs the message it replaces.
+        # With short messages no passing cut removes anything, so none is admitted.
+        brief = short_thread(n=5)
         short = fit_recipes(
-            [self.thread],
-            labels_for(self.thread, need_old=True),
+            [brief],
+            labels_for(brief, need_old=True),
             self.spec,
             grid,
             select="cheapest",
         )
         self.assertFalse(any(s["eligible"] for s in short))
-        self.assertIn("saves_no_tokens", {s["admission"] for s in short})
+        self.assertEqual(
+            {s["admission"] for s in short if s["individual_eligible"]},
+            {"cut_met_no_assessed_requirement"},
+        )
+        self.assertTrue(
+            all(
+                s["projected_tokens"] == s["canonical_tokens"]
+                for s in short
+                if s["individual_eligible"]
+            )
+        )
         # A window that first cuts on an unlabelled turn was never tested.
         untested = fit_recipes(
             [subject],
@@ -422,10 +460,10 @@ class RecipeTests(unittest.TestCase):
         rows[3]["task_requirements"][0]["historical_context_needed"] = "unknown"
         del rows[5]
         by_run = {row["target_run_id"]: row for row in rows}
-        # Questions are 15 tokens, answers 13 and documents 31, so each size
-        # threshold spares a different kind.
-        grid = recipe_grid(len(subject.runs), keep_under_tokens=(0, 14, 20))
-        self.assertEqual(size_ladder([subject], self.spec), (0, 13, 15))
+        # Documents are 31 tokens, questions 33 and answers 39, all above the 28
+        # of a notice, so each size threshold spares one more kind.
+        grid = recipe_grid(len(subject.runs), keep_under_tokens=(0, 32, 36))
+        self.assertEqual(size_ladder([subject], self.spec), (0, 31, 33))
         scores = fit_recipes([subject], rows, self.spec, grid)
         parts = Request.from_thread(subject, subject.runs[-1].run_id).parts
         for recipe, score in zip(grid, scores):
@@ -470,13 +508,13 @@ class RecipeTests(unittest.TestCase):
             tokens[RetentionRecipe(None, None, 2, True)],
             tokens[RetentionRecipe(None, None, 2, False)],
         )
-        # Sparing the short answers changes what a cut of both removes.
+        # Sparing the questions changes what a cut of questions and answers removes.
         self.assertNotEqual(
             tokens[RetentionRecipe(0, 0, None, False)],
-            tokens[RetentionRecipe(0, 0, None, False, 14)],
+            tokens[RetentionRecipe(0, 0, None, False, 36)],
         )
         self.assertEqual(
-            tokens[RetentionRecipe(None, 0, None, False, 14)],
+            tokens[RetentionRecipe(0, None, None, False, 36)],
             scores[0]["canonical_tokens"],
         )
 
@@ -519,7 +557,7 @@ class RecipeTests(unittest.TestCase):
         self.assertEqual(len(WorkloadPolicy(supplied).recipes), 2)
 
     def test_a_recipe_under_the_floor_must_pay_for_what_it_loses(self):
-        subject = thread(n=7)
+        subject = short_thread(n=7)
         rows = labels_for(subject)
         # Each turn needs the previous document, and the last needs the first again.
         for row, needed in zip(rows[1:], (1, 2, 3, 4, 5, 1)):

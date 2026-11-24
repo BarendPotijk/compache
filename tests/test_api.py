@@ -2,8 +2,12 @@
 
 import json
 import tempfile
+import threading
+import time
 import unittest
+from datetime import datetime, timedelta
 from pathlib import Path
+from unittest import mock
 from urllib.parse import parse_qs, urlsplit
 
 import compache
@@ -260,24 +264,43 @@ class ReplayTests(unittest.TestCase):
         self.assertIsNone(empty["cost_per_1000_turns"]["policy"])
 
     def test_deferred_cuts_keep_sources_that_an_every_turn_cut_would_lose(self):
+        def needing(sample, back):
+            """Labels in which every turn needs the text retrieved `back` turns earlier."""
+            rows = labels_for(sample)
+            for label, earlier in zip(rows[back:], sample.runs):
+                source = earlier.retrievals[0]
+                req = label["task_requirements"][0]
+                req["historical_context_needed"] = "yes"
+                req["alternatives"] = [
+                    {"sources": [{"part_id": source.part_id, "quote": source.text}]}
+                ]
+            return rows
+
         train = threads(gap=400)
         policy = compache.fit(
-            train, [r for t in train for r in labels_for(t)], model=SPEC
+            train, [r for t in train for r in needing(t, 1)], model=SPEC
         )
-        self.assertEqual(policy.recipe.retrieval_runs, 0)
-        held = thread(tid="held", n=6, gap=40)
-        rows = labels_for(held)
-        for label, earlier in zip(rows[1:], held.runs):
-            source = earlier.retrievals[0]
-            req = label["task_requirements"][0]
-            req["historical_context_needed"] = "yes"
-            req["alternatives"] = [
-                {"sources": [{"part_id": source.part_id, "quote": source.text}]}
-            ]
-        report = compache.replay(policy, [held], rows)
+        # Retrieved text stays for one turn. A turn that needs it from two turns back is out of luck.
+        self.assertEqual(policy.recipe.retrieval_runs, 1)
+        # The user is back within the cache's lifetime every time but once, before the fifth turn.
+        data = thread(tid="held", n=8, gap=40).to_dict()
+        for run in data["runs"][4:]:
+            for holder in (run, run["generation"]):
+                for key in ("started_at", "ended_at"):
+                    late = datetime.fromisoformat(holder[key]) + timedelta(seconds=400)
+                    holder[key] = late.isoformat()
+        held = Thread.from_dict(data)
+        report = compache.replay(policy, [held], needing(held, 2))
         answers = [
             r for r in report["detail"]["candidate"]["ledger"] if r["role"] == "answer"
         ]
+        # The cut waits for the return that finds the cache cold, and only that turn misses its source.
+        self.assertEqual(
+            [r["action"] for r in answers], ["keep"] * 4 + ["cut-0"] + ["keep"] * 3
+        )
+        self.assertEqual(
+            [r["historical_retained"] for r in answers[2:]], [1, 1, 0, 1, 1, 1]
+        )
         self.assertGreater(report["coverage"], 0)
         self.assertLess(report["coverage"], 1)
         self.assertTrue(
@@ -365,6 +388,34 @@ class SessionTests(unittest.TestCase):
         self.assertTrue(reopened["text"].startswith("An observed final answer."))
         self.assertEqual(session.reopen("no such thing")["status"], "not_found")
 
+    def test_conversations_that_open_at_the_same_moment_all_get_the_policy(self):
+        policy = compache.Policy(fitted().artifact)
+        made = compache.api.CacheBreakChecker
+
+        def slow(*args, **kwargs):
+            # Long enough for every other thread to arrive while the policy is being set up.
+            time.sleep(0.05)
+            return made(*args, **kwargs)
+
+        failures = []
+
+        def open_one(i):
+            try:
+                session = policy.session(f"at-once-{i}")
+                session.prepare(
+                    "Describe item 1.", ["A document. " + "x " * 500], at=1e6
+                )
+            except Exception as error:
+                failures.append(error)
+
+        with mock.patch("compache.api.CacheBreakChecker", slow):
+            workers = [threading.Thread(target=open_one, args=(i,)) for i in range(8)]
+            for worker in workers:
+                worker.start()
+            for worker in workers:
+                worker.join()
+        self.assertEqual(failures, [])
+
     def test_session_accepts_source_ids_after_the_answer(self):
         session = fitted().session("with-tools")
         turn = session.prepare("Total?", [{"part_id": "row-xyz", "text": "12"}], at=1)
@@ -375,6 +426,54 @@ class SessionTests(unittest.TestCase):
         answer = next(p for p in follow.plan.request.parts if p.kind == "output")
         self.assertEqual(answer.cited_part_ids, ("row-xyz",))
         self.assertFalse(any("cited_part_ids" in m for m in follow.messages))
+
+    def test_a_tool_loop_adds_what_it_retrieved_during_the_turn(self):
+        session = fitted().session("loop")
+        at, left, turns = 1_000_000.0, 0, []
+        for k in range(1, 5):
+            asked = session.prepare(f"Describe item {k}.", at=at)
+            # The first call asks for a tool, and its result joins the turn.
+            turn = session.extend(asked, [f"Unique document {k}. " + "x " * 1000])
+            self.assertEqual(turn.parts[-1].part_id, f"loop:{k}:retrieval:1")
+            self.assertEqual(turn.archived_ids, asked.archived_ids)
+            self.assertGreater(turn.tokens, asked.tokens + 400)
+            with self.assertRaisesRegex(compache.ContractError, "no prepared turn"):
+                session.complete(asked, ANSWER, at=at + 30)
+            first = {
+                "input_tokens": asked.tokens - left,
+                "output_tokens": 20,
+                "cache_read_input_tokens": left,
+                "cache_creation_input_tokens": 0,
+            }
+            last = {
+                "input_tokens": 8,
+                "output_tokens": 300,
+                "cache_read_input_tokens": asked.tokens,
+                "cache_creation_input_tokens": turn.tokens - asked.tokens,
+            }
+            left = turn.tokens
+            due = session.complete(
+                turn, ANSWER, at=at + 30, usage=first, last_usage=last
+            )
+            # The ping keeps warm what the last call left: the tool result and the answer too.
+            ping = session.ping(at=due)
+            self.assertEqual(
+                [p.part_id for p in ping.parts[-3:]],
+                [f"loop:{k}:input", f"loop:{k}:retrieval:1", f"loop:{k}:output"],
+            )
+            turns.append(turn)
+            at += 400
+        # Later turns carry the earlier tool results as retrieved text of their turns.
+        kinds = [(p.run_index, p.kind) for p in turns[-1].plan.request.parts]
+        self.assertEqual(
+            kinds[:4], [(1, "input"), (1, "retrieval"), (1, "output"), (2, "input")]
+        )
+        self.assertEqual(turns[-1].action, "cut")
+        self.assertEqual(
+            turns[-1].archived_ids, {"loop:1:output", "loop:2:output", "loop:3:output"}
+        )
+        with self.assertRaises(compache.ContractError):
+            session.extend(turns[-1], ["Too late."])
 
     def test_retry_missing_usage_and_misuse(self):
         policy = fitted()
@@ -418,6 +517,9 @@ class ModelTests(unittest.TestCase):
         )
         self.assertEqual(model_spec("sonnet"), spec)
         self.assertEqual(model_spec("anthropic/claude-sonnet-5-5-20261001"), spec)
+        # A gateway writes the version with a dot.
+        self.assertEqual(model_spec("anthropic/claude-sonnet-5.5"), spec)
+        self.assertEqual(model_spec("openai/gpt-5-6-terra").model_id, "gpt-5.6-terra")
         luna = model_spec("gpt-6-luna")
         self.assertEqual(
             (luna.context_tokens, luna.long_input_threshold, luna.long_input_factor),

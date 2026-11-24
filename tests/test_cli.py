@@ -195,6 +195,29 @@ class CommandTests(unittest.TestCase):
         status, out, _ = run("models", "--json")
         self.assertIn("gpt-6-luna", json.loads(out))
 
+    def test_traces_kept_in_mlflow_or_an_opentelemetry_export_become_a_threads_file(
+        self,
+    ):
+        from test_mlflow import tool_loop
+        from test_otel import export, genai_spans
+
+        traces = [t for n in range(3) for t in tool_loop(session=f"s{n}")]
+        (self.base / "traces.json").write_text(json.dumps({"traces": traces}))
+        spans = [s for n in range(3) for s in genai_spans(session=f"visit-{n}")]
+        (self.base / "spans.jsonl").write_text(json.dumps(export(spans)))
+        for source, name in (("mlflow", "traces.json"), ("otel", "spans.jsonl")):
+            pulled = self.base / f"{source}.jsonl.gz"
+            status, out, err = run("pull", source, self.base / name, "-o", pulled)
+            self.assertEqual((status, err), (0, ""))
+            self.assertIn("model calls in 3 sessions.", out)
+            self.assertIn("Wrote 3 threads, 6 turns", out)
+            self.assertIn(f"Next: compache fit {pulled}", out)
+            status, out, _ = run("check", pulled)
+            self.assertIn("3 threads, 6 turns.", out)
+        status, _, err = run("pull", "otel")
+        self.assertEqual(status, 1)
+        self.assertIn("compache pull otel spans.jsonl", err)
+
     def test_an_unknown_model_is_an_error_not_a_guess(self):
         status, _, err = run(
             "fit", self.base / "threads.jsonl", "--model", "no-such-model"
