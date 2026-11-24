@@ -10,9 +10,11 @@ import os
 import stat
 import sys
 import tempfile
+import threading
 import unittest
 import urllib.error
 import urllib.request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import compache
@@ -76,7 +78,8 @@ class SetupTests(unittest.TestCase):
     def test_codex_with_a_key(self):
         changes, ahead, upstreams = self.told("codex", {"OPENAI_API_KEY": "sk-x"})
         said = " ".join(ahead)
-        self.assertEqual((changes, upstreams), ({}, {}))
+        self.assertEqual(changes, {})
+        self.assertEqual(upstreams, {"openai": "https://api.openai.com"})
         self.assertIn('base_url="http://127.0.0.1:9999/v1"', said)
         self.assertIn('env_key="OPENAI_API_KEY"', said)
         self.assertIn("supports_websockets=false", said)
@@ -88,7 +91,7 @@ class SetupTests(unittest.TestCase):
             auth.write_text(json.dumps({"auth_mode": "apikey"}))
             _, ahead, upstreams = self.told("codex", {"CODEX_HOME": folder})
             self.assertIn("requires_openai_auth=true", " ".join(ahead))
-            self.assertEqual(upstreams, {})
+            self.assertEqual(upstreams, {"openai": "https://api.openai.com"})
             for found in ({"auth_mode": "chatgpt"}, {"tokens": {"id_token": "x"}}):
                 auth.write_text(json.dumps(found))
                 _, ahead, upstreams = self.told("codex", {"CODEX_HOME": folder})
@@ -101,6 +104,66 @@ class SetupTests(unittest.TestCase):
             auth.write_text("{")
             _, ahead, _ = self.told("codex", {"CODEX_HOME": folder})
             self.assertIn("model_provider", " ".join(ahead))
+
+    def test_the_sign_in_of_a_plan_goes_to_its_own_place_and_nowhere_else(self):
+        others = (
+            {},
+            {"OPENAI_BASE_URL": "https://openrouter.ai/api/v1"},
+            {"OPENAI_API_BASE": "http://localhost:11434/v1"},
+        )
+        with tempfile.TemporaryDirectory() as folder:
+            (Path(folder) / "auth.json").write_text('{"auth_mode": "chatgpt"}')
+            for word in ("codex", "/opt/homebrew/bin/codex"):
+                for env in others:
+                    name, agent, _ = launch._given([word])
+                    env = {"HOME": "/none", "CODEX_HOME": folder, **env}
+                    _, ahead, upstreams = launch.prepared(agent, "http://h:1", env)
+                    self.assertEqual(upstreams, {"openai": "https://chatgpt.com"})
+                    self.assertIn(
+                        'openai_base_url="http://h:1/backend-api/codex"', ahead
+                    )
+
+    def test_codex_with_a_provider_of_its_own(self):
+        with tempfile.TemporaryDirectory() as folder:
+            (Path(folder) / "config.toml").write_text(
+                'profile = "work"\n'
+                '[profiles.work]\nmodel_provider = "gateway"\n'
+                "[model_providers.gateway]\n"
+                'base_url = "https://gateway.example/openai/v1"\nenv_key = "KEY"\n'
+            )
+            _, ahead, upstreams = self.told("codex", {"CODEX_HOME": folder})
+            said = " ".join(ahead)
+            self.assertIn(
+                'model_providers.gateway.base_url="http://127.0.0.1:9999/openai/v1"',
+                said,
+            )
+            self.assertNotIn("model_provider=", said)
+            self.assertEqual(upstreams, {"openai": "https://gateway.example"})
+            (Path(folder) / "config.toml").write_text(
+                'openai_base_url = "https://eu.example/v2"'
+            )
+            _, ahead, upstreams = self.told("codex", {"CODEX_HOME": folder})
+            self.assertIn('base_url="http://127.0.0.1:9999/v2"', " ".join(ahead))
+            self.assertEqual(upstreams, {"openai": "https://eu.example"})
+
+    def test_goose_s_own_hosts_are_where_its_requests_go_on_to(self):
+        changes, _, upstreams = self.told(
+            "goose",
+            {
+                "OPENAI_HOST": "https://gateway.example",
+                "OPENAI_BASE_URL": "https://others.example/v1",
+            },
+        )
+        self.assertEqual(changes["OPENAI_HOST"], "http://127.0.0.1:9999")
+        self.assertEqual(upstreams, {"openai": "https://gateway.example"})
+
+    def test_behind_a_proxy_of_the_machine_s_this_one_is_reached_directly(self):
+        self.assertNotIn("NO_PROXY", self.told("claude")[0])
+        changes, _, _ = self.told(
+            "claude", {"HTTPS_PROXY": "http://proxy:3128", "NO_PROXY": "intranet"}
+        )
+        for name in ("no_proxy", "NO_PROXY"):
+            self.assertEqual(changes[name], "intranet,127.0.0.1,localhost")
 
     def test_opencode_keeps_the_configuration_it_is_given(self):
         given = {"autoupdate": False, "provider": {"openai": {"options": {"x": 1}}}}
@@ -131,7 +194,7 @@ class SetupTests(unittest.TestCase):
         self.assertEqual(changes["ANTHROPIC_BASE_URL"], "http://127.0.0.1:9999")
         self.assertEqual(changes["OPENAI_BASE_URL"], "http://127.0.0.1:9999/v1")
         name, found, words = launch._given(["claude", "--", "-p", "hi"])
-        self.assertIs(found, launch.AGENTS["claude"])
+        self.assertEqual(found, launch.AGENTS["claude"])
         self.assertEqual(words, ["-p", "hi"])
         # A path to a known agent is that agent.
         name, found, _ = launch._given(["/opt/bin/codex"])
@@ -252,6 +315,11 @@ class DoctorTests(Wrapped):
         (folder / "calls.jsonl").write_text("not json\n")
         found = doctor.checked(port=1)
         self.assertTrue(any(f["level"] == "problem" for f in found))
+        row = {"v": 1, "thread": "t", "turn": 1, "kind": "answer", "at": 1.0}
+        (folder / "calls.jsonl").write_text(json.dumps(row) + "\nnot json\n")
+        found = doctor.checked(port=1)
+        self.assertFalse(any(f["level"] == "problem" for f in found))
+        self.assertTrue(any("1 lines cannot be read" in f["text"] for f in found))
 
 
 class ProxyTests(unittest.TestCase):
@@ -262,8 +330,6 @@ class ProxyTests(unittest.TestCase):
         self.server = proxied(compache.Live(), port=0, upstream=url)
         self.addCleanup(self.server.server_close)
         self.addCleanup(self.server.shutdown)
-        import threading
-
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         self.base = f"http://127.0.0.1:{self.server.server_address[1]}"
         self.body = {"model": "m", "messages": [{"role": "user", "content": "hi"}]}
@@ -282,6 +348,103 @@ class ProxyTests(unittest.TestCase):
         self.assertEqual(_decoded(b"{}", None), b"{}")
         with self.assertRaises(ValueError):
             _decoded(b"", "br")
+
+    def test_a_body_that_cannot_be_read_goes_on_as_it_came(self):
+        heard = []
+
+        class Other(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def answer(self):
+                size = int(self.headers.get("Content-Length") or 0)
+                heard.append((self.command, self.rfile.read(size)))
+                self.send_response(400)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+            do_POST = do_GET = do_DELETE = answer
+
+        other = ThreadingHTTPServer(("127.0.0.1", 0), Other)
+        self.addCleanup(other.server_close)
+        self.addCleanup(other.shutdown)
+        threading.Thread(target=other.serve_forever, daemon=True).start()
+        self.server.forward(f"http://127.0.0.1:{other.server_address[1]}", {})
+        path = "/v1/chat/completions"
+        for encoding in ("gzip", "zstd", "br"):
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                self.post(b"not that", {"Content-Encoding": encoding})
+            self.assertEqual(caught.exception.code, 400, "the provider's own answer")
+            caught.exception.close()
+        for method in ("GET", "DELETE"):
+            request = urllib.request.Request(self.base + path + "/x", method=method)
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                urllib.request.urlopen(request)
+            caught.exception.close()
+        self.assertEqual(
+            heard, [("POST", b"not that")] * 3 + [("GET", b""), ("DELETE", b"")]
+        )
+
+    def test_a_machine_s_proxy_is_gone_through(self):
+        asked = []
+
+        class Machine(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_POST(self):
+                size = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(size))
+                asked.append((self.path, self.headers["Proxy-Authorization"], body))
+                status, reply = FakeModel().chat(body)
+                data = json.dumps(reply).encode()
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+            def do_CONNECT(self):
+                asked.append(self.path)
+                self.send_response(403)
+                self.end_headers()
+
+        machine = ThreadingHTTPServer(("127.0.0.1", 0), Machine)
+        self.addCleanup(machine.server_close)
+        self.addCleanup(machine.shutdown)
+        threading.Thread(target=machine.serve_forever, daemon=True).start()
+        name = f"http://me:it%40s@127.0.0.1:{machine.server_address[1]}"
+        given = {"http_proxy": name, "https_proxy": name, "no_proxy": ""}
+        before = {k: os.environ.get(k) for k in given}
+        os.environ.update(given)
+
+        def restore():
+            for key, value in before.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+        self.addCleanup(restore)
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+        def ask():
+            request = urllib.request.Request(
+                self.base + "/v1/chat/completions",
+                json.dumps(self.body).encode(),
+                {"Content-Type": "application/json"},
+            )
+            return json.load(opener.open(request))
+
+        self.server.forward("http://provider.example", {})
+        self.assertTrue(ask()["choices"])
+        self.server.forward("https://provider.example", {})
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            ask()
+        caught.exception.close()
+        path = "http://provider.example/v1/chat/completions"
+        self.assertEqual(asked[0], (path, "Basic bWU6aXRAcw==", self.body))
+        self.assertEqual(asked[1], "provider.example:443")
 
     def test_a_request_in_chunks_is_read(self):
         pieces = iter(

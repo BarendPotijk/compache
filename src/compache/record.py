@@ -204,25 +204,36 @@ def is_record(source: Any) -> bool:
     return isinstance(source, (str, Path)) and (Path(source) / _TURNS).is_file()
 
 
-def _lines(file: Path) -> list[dict]:
-    """The rows of a file. A line that a process which died left unfinished is passed over."""
-    rows = []
+def _read(file: Path) -> tuple[list[dict], int]:
+    """The rows of a file, and how many lines of it are none."""
+    rows, others = [], 0
     if not file.is_file():
-        return rows
+        return rows, others
     with open(file, encoding="utf-8", errors="replace") as stream:
         for line in stream:
             try:
-                row = json.loads(line)
+                row = json.loads(line) if line.strip() else None
             except ValueError:
+                others += 1
                 continue
             if isinstance(row, dict) and row.get("v") == _VERSION:
                 rows.append(row)
-    return rows
+    return rows, others
+
+
+def _lines(file: Path) -> list[dict]:
+    """The rows of a file. A line that a process which died left unfinished is passed over."""
+    return _read(file)[0]
 
 
 def load_calls(path: str | Path) -> list[dict]:
     """Every model call of a record, as written."""
     return _lines(Path(path) / _CALLS)
+
+
+def unreadable(path: str | Path) -> int:
+    """How many lines of a record cannot be read."""
+    return sum(_read(Path(path) / file)[1] for file in (_TURNS, _CALLS))
 
 
 def _ids(name: str, labels, last: int, counts: list[int]) -> tuple[list, list]:

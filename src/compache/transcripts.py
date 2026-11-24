@@ -357,9 +357,11 @@ def imported(folder: str | Path, agent: str, source=None, **window) -> dict:
                     "results": step.results,
                     "bytes": step.bytes,
                     "output_tokens": step.output_tokens,
-                    "needs": [
+                    "needs": None
+                    if step.needs is None
+                    else [
                         "R{}.{}".format(*need.split(":")[-3::2])
-                        for need in step.needs or ()
+                        for need in step.needs
                         if ":retrieval:" in need
                     ],
                     "input_tokens": step.input_tokens,
@@ -384,7 +386,7 @@ def imported(folder: str | Path, agent: str, source=None, **window) -> dict:
                 },
                 usage=dict(usage) if usage else None,
                 calls=run.calls or max(1, len(steps)),
-                steps=steps if len(steps) > 1 else (),
+                steps=steps,
                 carries=True,
             )
     return {**report, "added": added}

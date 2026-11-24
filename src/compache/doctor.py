@@ -20,7 +20,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import metadata
 
 from . import record
-from .errors import ContractError
 from .launch import AGENTS, home
 from .learn import Learner
 from .live import Live
@@ -155,16 +154,20 @@ def checked(env: dict | None = None, port: int = 8787) -> list[dict]:
     say("note", f"keys set: {', '.join(keys)}" if keys else "no API key is set here")
     for name in _BASES:
         if env.get(name):
-            say("note", f"{name} is set: compache wrap forwards there")
+            say("note", f"{name} is set: agents that read it are forwarded there")
     running = _running(port)
     if running is not None:
         say("ok", f"a proxy on port {port} has carried {running['calls']:,} calls")
     for folder in sorted(f.parent for f in home().glob("*/turns.jsonl")):
         try:
-            rows = record.load_calls(folder)
-        except (ContractError, OSError) as error:
+            rows, lost = record.load_calls(folder), record.unreadable(folder)
+        except OSError as error:
             say("problem", f"{folder} could not be read: {error}")
             continue
+        if lost:
+            # A process that dies leaves a line unfinished. Nothing that can be read is no record.
+            level = "note" if rows else "problem"
+            say(level, f"{folder}: {lost:,} lines cannot be read and are passed over")
         last = max((row["at"] for row in rows), default=None)
         when = (
             f", last on {datetime.fromtimestamp(last, timezone.utc).date()}"

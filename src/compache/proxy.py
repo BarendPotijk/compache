@@ -21,14 +21,17 @@ run beside the application it serves.
 
 from __future__ import annotations
 
+import base64
 import gzip
 import http.client
 import importlib
+import io
 import json
 import logging
 import os
 import ssl
 import urllib.parse
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from . import _tls, wire
@@ -102,13 +105,38 @@ def _decoded(raw: bytes, encoding: str | None) -> bytes:
     if encoding == "zstd":
         for name in ("compression.zstd", "backports.zstd", "zstandard"):
             try:
-                return importlib.import_module(name).decompress(raw)
+                found = importlib.import_module(name)
             except ImportError:
                 continue
+            if name == "zstandard":
+                # It may not say how large it is, which the plain call needs.
+                found = found.ZstdDecompressor()
+                return found.stream_reader(io.BytesIO(raw)).read()
+            return found.decompress(raw)
         raise ValueError("no zstd here")
     if encoding != "identity":
         raise ValueError(f"unknown encoding {encoding}")
     return raw
+
+
+def _proxy(url: urllib.parse.SplitResult) -> urllib.parse.SplitResult | None:
+    """What this machine reaches a host through, as `HTTPS_PROXY` names it. None where it needs nothing."""
+    host = url.hostname or ""
+    if host == "localhost" or host.startswith("127.") or host == "::1":
+        return None
+    given = urllib.request.getproxies().get(url.scheme)
+    if not given or urllib.request.proxy_bypass(host):
+        return None
+    found = urllib.parse.urlsplit(given if "://" in given else f"http://{given}")
+    return found if found.scheme in ("http", "https") and found.hostname else None
+
+
+def _credentials(proxy: urllib.parse.SplitResult) -> dict:
+    if not proxy.username:
+        return {}
+    name = urllib.parse.unquote(proxy.username)
+    said = f"{name}:{urllib.parse.unquote(proxy.password or '')}".encode()
+    return {"Proxy-Authorization": "Basic " + base64.b64encode(said).decode()}
 
 
 def _thread(headers, body) -> str | None:
@@ -133,18 +161,23 @@ class _Upstream:
 
     def _sent(self, body: bytes | None, headers: dict):
         """A connection to the provider with the request on its way."""
+        target = self.url.path + ("?" + self.url.query if self.url.query else "")
+        host, port, proxy = self.url.hostname, self.url.port, _proxy(self.url)
+        if proxy is not None:
+            host, port = proxy.hostname, proxy.port or 80
         if self.url.scheme == "https":
             connection = http.client.HTTPSConnection(
-                self.url.hostname,
-                self.url.port,
-                timeout=self.timeout,
-                context=_tls.FOUND["context"],
+                host, port, timeout=self.timeout, context=_tls.FOUND["context"]
             )
+            if proxy is not None:
+                connection.set_tunnel(
+                    self.url.hostname, self.url.port, _credentials(proxy)
+                )
         else:
-            connection = http.client.HTTPConnection(
-                self.url.hostname, self.url.port, timeout=self.timeout
-            )
-        target = self.url.path + ("?" + self.url.query if self.url.query else "")
+            connection = http.client.HTTPConnection(host, port, timeout=self.timeout)
+            if proxy is not None:
+                target = f"http://{self.url.netloc}{target}"
+                headers = {**headers, "Host": self.url.netloc, **_credentials(proxy)}
         try:
             connection.request(self.method, target, body=body, headers=headers)
         except ssl.SSLError as error:
@@ -156,7 +189,9 @@ class _Upstream:
         return connection
 
     def __call__(self, payload, raw: bytes | None = None) -> Result:
-        body = raw if raw is not None else json.dumps(payload).encode()
+        body = raw
+        if raw is None and payload is not None:
+            body = json.dumps(payload).encode()
         headers = {k: v for k, v in self.headers}
         headers["Accept-Encoding"] = "identity"
         if body is not None:
@@ -291,7 +326,8 @@ def serve(
             ):
                 try:
                     body = json.loads(_decoded(raw, headers.get("content-encoding")))
-                except ValueError:
+                except Exception:
+                    # Whatever is wrong with it is for the provider to say.
                     body = None
             if body is None:
                 result = send(None, raw)
