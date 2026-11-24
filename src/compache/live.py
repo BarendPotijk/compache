@@ -111,6 +111,33 @@ _SHOWN = (
     "matches",
     "message",
 )
+# The same for an agent, which has it from its first call on and knows what a tool is for.
+_AGENT_TOOL = {
+    "type": "function",
+    "function": {
+        "name": _REOPEN,
+        "description": (
+            "Read back a tool result that was archived to save space. Its place shows a notice with "
+            "a reference such as ctx:1a2b3c. Use it when you need what is no longer visible, rather "
+            "than running the tool again."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "reference": {
+                    "type": "string",
+                    "description": "The ctx: reference of a notice, or a few distinctive words to search for.",
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "For a long result, the next_offset of the last answer.",
+                },
+            },
+            "required": ["reference"],
+            "additionalProperties": False,
+        },
+    },
+}
 _HANDLE = re.compile(r"ctx:[0-9a-f]{24}")
 _REFUSED = (400, 422)
 # What Claude's cache marks ask for where they name no lifetime.
@@ -1223,7 +1250,10 @@ class Live:
             # A model that is offered the tool while nothing is archived calls it for nothing. So in
             # a chat it comes with the first notice, and stays: the first cut rewrites the request
             # from near its start anyway, and after that the tool never changes what is cached.
-            out = dialect.with_tool(out, _REOPEN_TOOL, _REOPEN_HOW)
+            if conversation.agentic:
+                out = dialect.with_tool(out, _AGENT_TOOL)
+            else:
+                out = dialect.with_tool(out, _REOPEN_TOOL, _REOPEN_HOW)
         if self.recorder is not None:
             pending.held = wire.volume(out)
             pending.left = wire.volume(body) - pending.held

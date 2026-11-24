@@ -521,8 +521,10 @@ class OpenAIChat:
         return out
 
     @staticmethod
-    def with_tool(body: dict, tool: dict, instructions: str) -> dict:
+    def with_tool(body: dict, tool: dict, instructions: str = "") -> dict:
         """The request with one more tool, and how to use it at the end of the system prompt."""
+        if not instructions:
+            return {**body, "tools": [*(body.get("tools") or ()), tool]}
         messages = list(body["messages"])
         for i, message in enumerate(messages):
             if message.get("role") in ("system", "developer"):
@@ -904,13 +906,15 @@ class Anthropic:
         return out
 
     @staticmethod
-    def with_tool(body: dict, tool: dict, instructions: str) -> dict:
+    def with_tool(body: dict, tool: dict, instructions: str = "") -> dict:
         function = tool["function"]
         named = {
             "name": function["name"],
             "description": function["description"],
             "input_schema": function["parameters"],
         }
+        if not instructions:
+            return {**body, "tools": [*(body.get("tools") or ()), named]}
         system = body.get("system")
         if isinstance(system, list):
             said: Any = [*system, {"type": "text", "text": instructions}]
@@ -1327,16 +1331,13 @@ class OpenAIResponses:
         return out
 
     @staticmethod
-    def with_tool(body: dict, tool: dict, instructions: str) -> dict:
-        said = body.get("instructions")
-        return {
-            **body,
-            "tools": [
-                *(body.get("tools") or ()),
-                {"type": "function", **tool["function"]},
-            ],
-            "instructions": f"{said}\n\n{instructions}" if said else instructions,
-        }
+    def with_tool(body: dict, tool: dict, instructions: str = "") -> dict:
+        named = {"type": "function", **tool["function"]}
+        out = {**body, "tools": [*(body.get("tools") or ()), named]}
+        if instructions:
+            said = body.get("instructions")
+            out["instructions"] = f"{said}\n\n{instructions}" if said else instructions
+        return out
 
     @staticmethod
     def schema(body: dict) -> dict | None:
@@ -1681,7 +1682,7 @@ class Gemini:
         return {**body, name: {**config, "maxOutputTokens": limit}}
 
     @staticmethod
-    def with_tool(body: dict, tool: dict, instructions: str) -> dict:
+    def with_tool(body: dict, tool: dict, instructions: str = "") -> dict:
         function = tool["function"]
 
         def plain(schema):
@@ -1696,17 +1697,16 @@ class Gemini:
             "description": function["description"],
             "parameters": plain(function["parameters"]),
         }
+        tools = [*(body.get("tools") or ()), {"functionDeclarations": [declared]}]
+        if not instructions:
+            return {**body, "tools": tools}
         key = (
             "system_instruction"
             if "system_instruction" in body
             else "systemInstruction"
         )
         parts = [*((body.get(key) or {}).get("parts") or ()), {"text": instructions}]
-        return {
-            **body,
-            "tools": [*(body.get("tools") or ()), {"functionDeclarations": [declared]}],
-            key: {**(body.get(key) or {}), "parts": parts},
-        }
+        return {**body, "tools": tools, key: {**(body.get(key) or {}), "parts": parts}}
 
     @staticmethod
     def _config(body: dict) -> tuple[str, dict]:

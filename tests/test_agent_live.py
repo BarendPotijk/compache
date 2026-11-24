@@ -782,7 +782,7 @@ class RecordTests(unittest.TestCase):
             left = [row.get("left_bytes", 0) for row in rows]
             # What it adds counts against what it leaves out: the tool, from the first call on.
             self.assertEqual(len(set(left[:3])), 1)
-            self.assertTrue(-2_500 < left[0] < -500)
+            self.assertTrue(-900 < left[0] < -300)
             self.assertEqual(left, sorted(left))
             self.assertGreater(left[-1], 4 * 2_000)
             self.assertGreater(rows[-1]["sent_bytes"], 0)

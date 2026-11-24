@@ -10,14 +10,18 @@ import sys
 from importlib import resources
 from pathlib import Path
 
-from . import __version__
+from . import __version__, stats
 from .api import Policy, fit, replay
 from .defaults import default_policy
 from .errors import ContractError
 from .labels import build_packet, label_index
+from .launch import AGENTS, home
+from .launch import main as run_agent
+from .learn import FIRST_CALLS, Learner
 from .models import _sheet, known_models
 from .optimizer.contracts import ModelSpec
 from .profile import history_resent, measure, profile
+from .proxy import main as run_proxy
 from .record import is_record
 from .record import load as load_record
 from .threads import load_threads, read_jsonl
@@ -178,6 +182,11 @@ def _parser() -> argparse.ArgumentParser:
         help="A folder to record conversations in, without their text",
     )
     sub.add_argument(
+        "--learn",
+        type=Path,
+        help="A folder to record in and learn the policy from, instead of both",
+    )
+    sub.add_argument(
         "--sample",
         type=float,
         default=0.0,
@@ -202,6 +211,42 @@ def _parser() -> argparse.ArgumentParser:
         help="Where Anthropic's API goes instead of api.anthropic.com",
     )
     sub.add_argument("--gemini-url", help="Where Gemini's API goes instead of Google's")
+
+    text = "Run an agent through compache, which learns its policy as it goes"
+    sub = commands.add_parser(
+        "wrap",
+        help=text,
+        description=f"{text}. Known: {', '.join(AGENTS)}. Any other command is told by the variables "
+        "that SDKs read. Put -- ahead of the agent's own flags.",
+    )
+    sub.add_argument(
+        "words", nargs=argparse.REMAINDER, help="The agent and its own arguments"
+    )
+    sub.add_argument(
+        "--print",
+        action="store_true",
+        help="Only show the proxy to start and what to set, to do it yourself",
+    )
+    sub.add_argument("--policy", type=Path, help="Apply this policy and learn none")
+    sub.add_argument(
+        "--watch", action="store_true", help="Only record, and change nothing"
+    )
+    sub.add_argument(
+        "--folder", type=Path, help="Where to record and learn. Left out, ~/.compache"
+    )
+    sub.add_argument("--port", type=int, help="The proxy's port. Left out, a free one")
+    sub.add_argument("--upstream", help="One base URL to forward everything to")
+    sub.add_argument("--quiet", action="store_true", help="Say nothing at the end")
+
+    text = "Say what was saved, from the record of the calls"
+    sub = commands.add_parser("stats", help=text, description=text)
+    sub.add_argument(
+        "folder",
+        nargs="*",
+        type=Path,
+        help="Record folders. Left out, all that `compache wrap` keeps",
+    )
+    sub.add_argument("--json", action="store_true", help="Print JSON")
 
     listing = commands.add_parser(
         "models", help="List the models with a built-in price sheet"
@@ -648,6 +693,32 @@ def _default(args):
     return summary, "\n".join(lines)
 
 
+def _stats(args):
+    folders = args.folder or sorted(f.parent for f in home().glob("*/calls.jsonl"))
+    if not folders:
+        return (
+            {},
+            f"Nothing on record in {home()} yet. Start with: compache wrap claude",
+        )
+    found, text = {}, []
+    for folder in folders:
+        report = stats.savings(folder)
+        learner = Learner(folder) if (folder / "policies").is_dir() else None
+        said = stats.lines(report)
+        policies = {}
+        for model in report["models"] if learner is not None else ():
+            fitted = learner.fitted_on(model)
+            policies[model] = fitted
+            said.append(
+                f"  policy for {model}: fitted on {fitted['calls']:,} of your calls"
+                if fitted
+                else f"  policy for {model}: the default, until there are {FIRST_CALLS} calls to fit on"
+            )
+        found[str(folder)] = {**report, "policies": policies}
+        text += [f"{folder.name}:", *said, ""]
+    return found, "\n".join(text[:-1])
+
+
 def _models(args):
     models = _sheet()["models"]
     lines = [f"Prices per million tokens, checked {_sheet()['checked']}."]
@@ -672,18 +743,17 @@ _COMMANDS = {
     "packets": _packets,
     "pull": _pull,
     "default": _default,
+    "stats": _stats,
     "models": _models,
 }
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    if args.command == "proxy":
-        # Runs until interrupted, so it is imported and started apart from the commands that report.
-        from .proxy import main as run_proxy
-
+    if args.command in ("proxy", "wrap"):
+        # These run until they are interrupted, apart from the commands that report.
         try:
-            return run_proxy(args)
+            return (run_proxy if args.command == "proxy" else run_agent)(args)
         except (ContractError, OSError, ValueError) as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 1

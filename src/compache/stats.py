@@ -4,8 +4,8 @@ Every call is on record with what the provider billed and how much text
 compache left out of it. That gives its price, and what it would have cost
 with everything in view: the same request, longer by what was left out, read
 from a cache that held all of the one before it wherever that was still alive
-under the provider's default lifetime. So the comparison is with caching at
-its best, not with no caching at all.
+under the provider's default lifetime, and whatever other conversations had
+left there. So the comparison is with caching at its best, not with none.
 """
 
 from __future__ import annotations
@@ -96,16 +96,19 @@ def savings(source) -> dict:
                 treated.add(row["thread"])
             whole = max(0, size + left)
             before = held.get(row["thread"])
-            shared = 0
+            first = before[2] if before is not None else whole
+            # What another conversation had cached, such as the same instructions, it would have read too.
+            shared = min(read, first)
             if before is not None and row["at"] - before[1] < spec.cache_ttl_seconds:
-                shared = min(before[0], whole)
+                shared = max(shared, before[0])
+            shared = min(shared, whole)
             if row.get("sent_bytes"):
                 entry["without"] += _charge(spec, whole, shared, output) * dollars
             else:
                 # Left as the application wrote it: it cost what it cost.
                 entry["without"] += spent * dollars
             entry["left_out_tokens"] += max(0, left)
-            held[row["thread"]] = (whole, row["at"])
+            held[row["thread"]] = (whole, row["at"], first)
         elif kind == "ping":
             entry["pings"] += 1
         elif kind == "reopen":

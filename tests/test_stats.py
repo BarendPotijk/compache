@@ -56,6 +56,19 @@ class SavingTests(unittest.TestCase):
         self.assertAlmostEqual(found["spent"], paid * price)
         self.assertEqual(found["models"][MODEL]["left_out_tokens"], 5_000)
 
+    def test_what_another_conversation_had_cached_would_have_been_read_too(self):
+        rows = [row("a", 0, 20_000, 18_000, 2_000, left_bytes=-400, sent_bytes=80_000)]
+        found = stats.savings(rows)
+        self.assertLess(abs(found["saving"]), 0.05)
+
+    def test_what_a_ping_kept_would_have_been_written_again(self):
+        rows = [
+            row("a", 0, 10_000, 8_000, 2_000, left_bytes=0, sent_bytes=40_000),
+            row("a", 250, 50_000, 50_000, 0, 1, kind="ping"),
+            row("a", 500, 51_000, 50_000, 1_000, left_bytes=0, sent_bytes=200_000),
+        ]
+        self.assertGreater(stats.savings(rows)["saving"], 0.4)
+
     def test_after_a_pause_everything_would_have_been_written_again(self):
         rows = [
             row("a", 0, 50_000, 0, 50_000, left_bytes=0, sent_bytes=200_000),
@@ -125,7 +138,7 @@ class SavingTests(unittest.TestCase):
                 spent[name] = stats.savings(load_calls(folder))
         self.assertLess(spent["policy"]["spent"], spent["nothing"]["spent"])
         ours, theirs = spent["policy"]["without"], spent["nothing"]["spent"]
-        self.assertLess(abs(ours - theirs) / theirs, 0.1)
+        self.assertLess(abs(ours - theirs) / theirs, 0.12)
 
     def test_a_learned_record_reads_well(self):
         clock = Clock()

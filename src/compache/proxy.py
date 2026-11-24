@@ -21,7 +21,9 @@ run beside the application it serves.
 
 from __future__ import annotations
 
+import gzip
 import http.client
+import importlib
 import json
 import logging
 import os
@@ -90,6 +92,23 @@ def _family(path: str, headers) -> str:
     ):
         return "anthropic"
     return "openai"
+
+
+def _decoded(raw: bytes, encoding: str | None) -> bytes:
+    """A request body as JSON text. One in an encoding this Python does not read passes as it came."""
+    encoding = (encoding or "identity").strip().lower()
+    if encoding == "gzip":
+        return gzip.decompress(raw)
+    if encoding == "zstd":
+        for name in ("compression.zstd", "backports.zstd", "zstandard"):
+            try:
+                return importlib.import_module(name).decompress(raw)
+            except ImportError:
+                continue
+        raise ValueError("no zstd here")
+    if encoding != "identity":
+        raise ValueError(f"unknown encoding {encoding}")
+    return raw
 
 
 def _thread(headers, body) -> str | None:
@@ -190,6 +209,7 @@ def serve(
     `openai`, `anthropic` or `gemini`. `server.live` is the `Live`.
     """
     targets = {**DEFAULTS, **(upstreams or {})}
+    forward = {"all": upstream}
 
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -227,6 +247,23 @@ def serve(
                 if closing is not None:
                     closing()
 
+        def _read(self) -> bytes | None:
+            """The request's body, whole or in chunks."""
+            if "chunked" not in (self.headers.get("Transfer-Encoding") or "").lower():
+                length = int(self.headers.get("Content-Length") or 0)
+                return self.rfile.read(length) if length else None
+            pieces = []
+            while True:
+                size = int(self.rfile.readline().split(b";")[0].strip() or b"0", 16)
+                if not size:
+                    break
+                pieces.append(self.rfile.read(size))
+                self.rfile.readline()
+            while self.rfile.readline().strip():
+                # Trailers, which nobody sends.
+                pass
+            return b"".join(pieces)
+
         def _handle(self):
             if (
                 self.path in ("/compache/stats", "/compache/health")
@@ -234,10 +271,12 @@ def serve(
             ):
                 body = json.dumps({"status": "ok", **live.stats}).encode()
                 return self._answer(200, [("Content-Type", "application/json")], body)
-            length = int(self.headers.get("Content-Length") or 0)
-            raw = self.rfile.read(length) if length else None
+            if "websocket" in (self.headers.get("Upgrade") or "").lower():
+                # An agent that tries this first, as Codex does, goes on over HTTP.
+                return self._answer(426, [], b"compache speaks HTTP")
+            raw = self._read()
             headers = {k.lower(): v for k, v in self.headers.items()}
-            base = upstream or targets[_family(self.path, headers)]
+            base = forward["all"] or targets[_family(self.path, headers)]
             kept = [
                 (k, v)
                 for k, v in self.headers.items()
@@ -251,17 +290,26 @@ def serve(
                 and wire.dialect_for(self.path) is not None
             ):
                 try:
-                    body = json.loads(raw)
+                    body = json.loads(_decoded(raw, headers.get("content-encoding")))
                 except ValueError:
                     body = None
             if body is None:
                 result = send(None, raw)
             else:
                 # The caller's bytes go out as they came whenever nothing in them was changed.
+                plain = _Upstream(
+                    base,
+                    self.command,
+                    self.path,
+                    [(k, v) for k, v in kept if k.lower() != "content-encoding"],
+                    timeout,
+                )
                 result = live.exchange(
                     self.path,
                     body,
-                    lambda payload: send(payload, raw if payload is body else None),
+                    lambda payload: (
+                        send(payload, raw) if payload is body else plain(payload)
+                    ),
                     thread=_thread(headers, body),
                 )
             if result.events is not None:
@@ -304,6 +352,12 @@ def serve(
             # A caller that hangs up is not an error worth a traceback.
             pass
 
+        @staticmethod
+        def forward(everything: str | None, named: dict) -> None:
+            """Where requests go on to, once that is known: one base URL, or one by API."""
+            forward["all"] = everything
+            targets.update(named)
+
     server = Server((host, port), Handler)
     server.live = live
     if pings:
@@ -313,7 +367,13 @@ def serve(
 
 def main(args) -> int:
     """`compache proxy`: run until interrupted."""
-    live = Live(args.policy, record=args.record, sample=args.sample, notes=args.notes)
+    live = Live(
+        args.policy,
+        record=args.record,
+        learn=args.learn,
+        sample=args.sample,
+        notes=args.notes,
+    )
     upstream = args.upstream or os.environ.get("COMPACHE_UPSTREAM")
     named = {
         key: value
@@ -331,7 +391,9 @@ def main(args) -> int:
     doing = []
     if live.policy is not None:
         doing.append(f"applying {args.policy}")
-    if live.recorder is not None:
+    if live.learner is not None:
+        doing.append(f"learning in {args.learn}")
+    elif live.recorder is not None:
         doing.append(f"recording to {args.record}")
     if live.sample:
         doing.append(f"asking {live.sample:.0%} of turns what they needed")
