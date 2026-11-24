@@ -16,7 +16,7 @@ A chat model that takes no HTTP client, such as `ChatAnthropic`, is pointed at
 from __future__ import annotations
 
 from .live import Live
-from .wrap import async_http_client, http_client, start_pings, thread
+from .wrap import async_http_client, http_client, thread
 
 __all__ = ["clients", "middleware"]
 
@@ -26,11 +26,9 @@ def clients(live: Live, *, pings: bool = True) -> dict:
 
     `pings` lets a background thread send the policy's keep-warm pings.
     """
-    if pings:
-        start_pings(live)
     return {
-        "http_client": http_client(live),
-        "http_async_client": async_http_client(live),
+        "http_client": http_client(live, pings=pings),
+        "http_async_client": async_http_client(live, pings=pings),
     }
 
 

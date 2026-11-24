@@ -347,6 +347,9 @@ class ProxyTests(unittest.TestCase):
         self.assertEqual(
             _thread({"x-compache-thread": "a", "x-session-affinity": "b"}, {}), "a"
         )
+        # What the harnesses themselves send: Claude Code, Codex, OpenCode.
+        for name in ("x-claude-code-session-id", "session-id", "x-opencode-session-id"):
+            self.assertEqual(_thread({name: "c"}, {"prompt_cache_key": "d"}), "c")
         self.assertEqual(_thread({"session_id": "s"}, {"prompt_cache_key": "p"}), "s")
         self.assertEqual(_thread({}, {"prompt_cache_key": "p"}), "p")
         self.assertIsNone(_thread({}, {"messages": []}))

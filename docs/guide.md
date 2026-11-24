@@ -8,6 +8,7 @@ pip install git+https://github.com/BarendPotijk/compache
 
 | Step | Command | Python |
 |---|---|---|
+| See it on sample chats | `compache demo` | |
 | Read traces | `compache pull langfuse -o threads.jsonl.gz`, also `mlflow` and `otel` | `compache.langfuse.pull()` |
 | Or record going forward | `compache proxy --record compache-record --sample 0.1` | `compache.wrap(client, record=..., sample=0.1)` |
 | Check the data | `compache check threads.jsonl --labels labels.jsonl` | `compache.load_threads(path)` |
@@ -215,10 +216,10 @@ with compache.thread("conversation-17"):
 compache proxy --policy policy.json                    # for anything that lets its base URL be set
 ```
 
-On the way out, the parts the policy archives are replaced by a notice, the end of the conversation is marked cacheable, and the model is given a `reopen` tool whose calls are answered before your application sees the reply. A background thread sends the keep-warm pings. [Integrations](integrations.md) lists every way in, LangChain and agent harnesses included.
+On the way out, the parts the policy archives are replaced by a notice, the end of the conversation is marked cacheable, and the model is given a `reopen` tool whose calls are answered before your application sees the reply. A background thread sends the keep-warm pings. [Integrations](integrations.md) lists every way in: frameworks, LiteLLM, Hermes and agent harnesses included.
 
 - **Record and apply together.** `record=` and `sample=` work with a policy too, so the next fit has fresher threads.
-- **No long-lived process.** Pings need one. Where there is none, fit with `ping_counts=(0,)`.
+- **No long-lived process.** Pings need one. Where there is none, fit with `ping_counts=(0,)`. Trimming needs no state: a process that meets a conversation in the middle takes the cache to have expired.
 - **Retrieved text pasted into the question.** The request path sees one message, so it can only keep or archive the two together. Fit such an application on a record made going forward, which sees it the same way.
 
 ### By hand

@@ -555,13 +555,15 @@ class Anthropic:
     def scan(body: dict) -> Scan:
         scan = Scan(model=body.get("model"), stream=body.get("stream") is True)
         scan.tools = list(body.get("tools") or ())
-        scan.system = "\n\n".join(
-            t for _, t in _text_parts(body.get("system"), ("system",))
-        )
+        system = [t for _, t in _text_parts(body.get("system"), ("system",))]
         messages = body["messages"]
         for i, message in enumerate(messages):
-            mine = "input" if message.get("role") == "user" else "output"
             content, base = message.get("content"), ("messages", i, "content")
+            if message.get("role") == "system":
+                # An instruction given in the middle of the conversation. Nobody said it.
+                system += [t for _, t in _text_parts(content, base)]
+                continue
+            mine = "input" if message.get("role") == "user" else "output"
             if isinstance(content, str):
                 scan.slots.append(
                     Slot(
@@ -585,7 +587,9 @@ class Anthropic:
                         scan.slots.append(Slot("retrieval", path, text, i, (i, j)))
             if mine == "output" and not said and not called:
                 scan.slots.append(Slot("output", base, "", i, closes=True))
-        scan.awaiting = bool(messages) and messages[-1].get("role") == "user"
+        scan.system = "\n\n".join(system)
+        spoken = [m for m in messages if m.get("role") != "system"]
+        scan.awaiting = bool(spoken) and spoken[-1].get("role") == "user"
         return scan
 
     @staticmethod
@@ -624,7 +628,8 @@ class Anthropic:
     @classmethod
     def with_note(cls, body: dict, text: str) -> dict:
         body = cls.pinned(body)
-        at = len(body["messages"]) - 1
+        # An instruction may follow what the user said last. The note is asked of the user's turn.
+        at = max(i for i, m in enumerate(body["messages"]) if m.get("role") != "system")
         blocks = [
             *cls._blocks(body["messages"][at].get("content")),
             {"type": "text", "text": text},
@@ -1002,6 +1007,9 @@ class OpenAIResponses:
                 last = "tool"
             elif kind == "function_call":
                 last = "call"
+            elif kind == "item_reference":
+                # Part of the history is at the provider, and only its name is here.
+                raise ValueError("the conversation is kept by the provider")
         scan.system = "\n\n".join(system)
         scan.awaiting = last in ("user", "tool")
         return scan

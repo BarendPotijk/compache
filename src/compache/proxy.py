@@ -48,7 +48,9 @@ THREAD_HEADERS = (
     HEADER,
     "x-session-affinity",
     "session_id",
+    "session-id",
     "x-session-id",
+    "x-claude-code-session-id",
     "x-opencode-session-id",
     "agent-session-id",
 )

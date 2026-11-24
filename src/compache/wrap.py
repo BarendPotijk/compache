@@ -138,14 +138,17 @@ def _library(inner=None):
     )
 
 
-def http_client(live: Live, *, inner=None, **options):
-    """An HTTP client that passes model calls through `live`.
+def http_client(live: Live, *, inner=None, pings: bool = True, **options):
+    """An HTTP client that passes model calls through `live`, for anything that takes one.
 
     `inner` is the client or transport that does the sending: the SDK's own
-    client, so that its proxies, certificates and limits stay in force. Give
-    the result to an SDK as its `http_client`.
+    client, so that its proxies, certificates and limits stay in force. `pings`
+    lets a background thread send the policy's keep-warm pings. Other options
+    are the HTTP client's own.
     """
     httpx = _library(inner)
+    if pings:
+        start_pings(live)
 
     send = inner.send if isinstance(inner, httpx.Client) else None
     transport = (
@@ -203,13 +206,15 @@ def http_client(live: Live, *, inner=None, **options):
     return httpx.Client(transport=Transport(), **options)
 
 
-def async_http_client(live: Live, *, inner=None, **options):
+def async_http_client(live: Live, *, inner=None, pings: bool = True, **options):
     """An async HTTP client that passes model calls through `live`.
 
     `Live` does its work on a worker thread and sends through `inner` on the
-    event loop, so the loop is never blocked.
+    event loop, so the loop is never blocked. Otherwise as `http_client`.
     """
     httpx = _library(inner)
+    if pings:
+        start_pings(live)
 
     send = inner.send if isinstance(inner, httpx.AsyncClient) else None
     transport = (
@@ -358,15 +363,19 @@ def wrap(
         inner if inner is not None else getattr(api, "_httpx_client", None)
     )
     if hasattr(client, "with_options") and isinstance(inner, httpx.Client):
-        wrapped = client.with_options(http_client=http_client(live, inner=inner))
+        wrapped = client.with_options(
+            http_client=http_client(live, inner=inner, pings=pings)
+        )
     elif hasattr(client, "with_options") and isinstance(inner, httpx.AsyncClient):
-        wrapped = client.with_options(http_client=async_http_client(live, inner=inner))
+        wrapped = client.with_options(
+            http_client=async_http_client(live, inner=inner, pings=pings)
+        )
     elif hasattr(api, "_httpx_client"):
         # The Google GenAI SDK takes its HTTP clients when it is built, so its own are replaced.
-        api._httpx_client = http_client(live, inner=api._httpx_client)
+        api._httpx_client = http_client(live, inner=api._httpx_client, pings=pings)
         if isinstance(getattr(api, "_async_httpx_client", None), httpx.AsyncClient):
             api._async_httpx_client = async_http_client(
-                live, inner=api._async_httpx_client
+                live, inner=api._async_httpx_client, pings=pings
             )
         wrapped = client
     else:
@@ -375,6 +384,4 @@ def wrap(
             "For anything else that sends through httpx, pass it compache.http_client(live)."
         )
     wrapped.compache = live
-    if pings:
-        start_pings(live)
     return wrapped

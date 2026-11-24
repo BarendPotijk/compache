@@ -205,8 +205,47 @@ class ScanTests(unittest.TestCase):
             "messages": [*CLAUDE["messages"], {"role": "assistant", "content": "The"}],
         }
         self.assertFalse(wire.Anthropic.scan(prefilled).awaiting)
-        with self.assertRaises(ValueError):
-            wire.OpenAIResponses.scan({"previous_response_id": "r1", "input": "next"})
+        stored = [
+            {"role": "user", "content": "First?"},
+            {"type": "item_reference", "id": "msg_1"},
+            {"role": "user", "content": "Next?"},
+        ]
+        for kept in (
+            {"previous_response_id": "r1", "input": "next"},
+            {"input": stored},
+        ):
+            with self.assertRaises(ValueError):
+                wire.OpenAIResponses.scan(kept)
+
+    def test_an_instruction_inside_a_conversation_is_nobody_s_turn(self):
+        # As Claude Code sends it: after the user's message, with the cache mark of the request.
+        told = {
+            "role": "system",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "Today is Tuesday.",
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
+        }
+        body = {**CLAUDE, "messages": [*CLAUDE["messages"], told]}
+        before, after = wire.Anthropic.scan(CLAUDE), wire.Anthropic.scan(body)
+        self.assertEqual(before.slots, after.slots)
+        self.assertEqual(before.awaiting, after.awaiting)
+        self.assertIn("Today is Tuesday.", after.system)
+        if not after.awaiting:
+            body = {
+                **body,
+                "messages": [
+                    *body["messages"],
+                    {"role": "user", "content": "Go on."},
+                    told,
+                ],
+            }
+        noted = wire.Anthropic.with_note(body, "[ask]")
+        self.assertEqual(noted["messages"][-1], told)
+        self.assertIn("[ask]", json.dumps(noted["messages"][-2]))
 
     def test_replacing_text_copies_only_what_changes(self):
         for path, body in BODIES.items():
