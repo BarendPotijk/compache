@@ -9,7 +9,7 @@ import unittest
 
 import compache
 from compache import agent, wire
-from compache.live import _TOOL_BYTES, Result
+from compache.live import Result
 from compache.record import load, load_calls
 from fakes import NOTICE, FakeModel, noticed, tokens
 
@@ -781,7 +781,8 @@ class RecordTests(unittest.TestCase):
             rows = load_calls(folder)
             left = [row.get("left_bytes", 0) for row in rows]
             # What it adds counts against what it leaves out: the tool, from the first call on.
-            self.assertEqual(left[:3], [-_TOOL_BYTES] * 3)
+            self.assertEqual(len(set(left[:3])), 1)
+            self.assertTrue(-2_500 < left[0] < -500)
             self.assertEqual(left, sorted(left))
             self.assertGreater(left[-1], 4 * 2_000)
             self.assertGreater(rows[-1]["sent_bytes"], 0)

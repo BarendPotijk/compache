@@ -1913,6 +1913,21 @@ def dialect_for(path: str):
     return None
 
 
+# What is sent along and is no text a model reads.
+_NO_TEXT = {"data", "signature", "encrypted_content", "thoughtSignature"}
+
+
+def volume(value: Any) -> int:
+    """How many bytes of text a request holds: what is said in it, its instructions and its tools."""
+    if isinstance(value, str):
+        return len(value) if value.isascii() else len(value.encode("utf-8", "replace"))
+    if isinstance(value, dict):
+        return sum(volume(v) for k, v in value.items() if k not in _NO_TEXT)
+    if isinstance(value, (list, tuple)):
+        return sum(map(volume, value))
+    return 0
+
+
 def model_of(path: str) -> str | None:
     """The model a path names, as Gemini's does."""
     _, found, rest = path.partition("/models/")

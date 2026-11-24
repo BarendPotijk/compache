@@ -94,8 +94,6 @@ _REOPEN_HOW = (
     "all archived parts. Then answer from what it returns. Do not reopen parts you do not need, "
     "and never mention archiving, notices or the reopen tool to the user."
 )
-# What the tool and how to use it add to a request.
-_TOOL_BYTES = len(json.dumps(_REOPEN_TOOL)) + len(_REOPEN_HOW)
 _NOT_FOUND = (
     "No archived part matches that. Try other or fewer distinctive words from the text you "
     "need, or the reference of a notice."
@@ -1180,7 +1178,7 @@ class Live:
     def _apply(self, conversation, dialect, body, scan, turns) -> Any:
         """The request with every archived part replaced by its notice, and the tool to fetch one back."""
         pending, name = conversation.pending, conversation.thread_id
-        turn, out, left = pending.turn, body, 0
+        turn, out = pending.turn, body
         if turn.archived_ids:
             notice = {
                 p.part_id: _notice(p.text)
@@ -1200,7 +1198,6 @@ class Live:
                     if part_id in notice:
                         for i, slot in enumerate(slots):
                             shown = _GONE if i else notice[part_id]
-                            left += _size(slot.text) - _size(shown)
                             out = wire.set_text(dialect, out, slot.path, shown)
             conversation.reopens = True
         said, places = dialect.said_so_far(body), self._places(conversation, turns)
@@ -1222,16 +1219,14 @@ class Live:
             # An agent works its way to a first cut soon enough. A tool that joins only then would
             # change what comes ahead of everything else that is cached.
             conversation.reopens = True
-        added = sum(_size(json.dumps(i.messages)) for i in conversation.inserts)
         if conversation.reopens and _REOPEN not in dialect.tool_names(body):
             # A model that is offered the tool while nothing is archived calls it for nothing. So in
             # a chat it comes with the first notice, and stays: the first cut rewrites the request
             # from near its start anyway, and after that the tool never changes what is cached.
             out = dialect.with_tool(out, _REOPEN_TOOL, _REOPEN_HOW)
-            added += _TOOL_BYTES
-        whole = sum(_size(s.text) for s in scan.slots)
-        whole += conversation.system_bytes + conversation.tools_bytes
-        pending.left, pending.held = left - added, whole - left + added
+        if self.recorder is not None:
+            pending.held = wire.volume(out)
+            pending.left = wire.volume(body) - pending.held
         pending.cut = pending.cut or bool(turn.archived_ids)
         # Where those are in the request as it goes out: behind messages of ours.
         shift = len(dialect.said_so_far(out)) - len(said) - put_in
