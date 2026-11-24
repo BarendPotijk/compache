@@ -25,6 +25,7 @@ import contextvars
 import importlib
 import json
 import threading
+import weakref
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from typing import Any
@@ -206,6 +207,35 @@ def http_client(live: Live, *, inner=None, pings: bool = True, **options):
     return httpx.Client(transport=Transport(), **options)
 
 
+def per_loop_transport(httpx):
+    """An async transport with connections of their own for every event loop that uses it.
+
+    A connection belongs to the loop that opened it, and an application may run
+    several: one `asyncio.run` a request, a worker's, a test's.
+    """
+
+    class PerLoop(httpx.AsyncBaseTransport):
+        def __init__(self):
+            self._made = weakref.WeakKeyDictionary()
+            self._lock = threading.Lock()
+
+        async def handle_async_request(self, request):
+            loop = asyncio.get_running_loop()
+            with self._lock:
+                transport = self._made.get(loop)
+                if transport is None:
+                    transport = self._made[loop] = httpx.AsyncHTTPTransport()
+            return await transport.handle_async_request(request)
+
+        async def aclose(self):
+            with self._lock:
+                transport = self._made.pop(asyncio.get_running_loop(), None)
+            if transport is not None:
+                await transport.aclose()
+
+    return PerLoop()
+
+
 def async_http_client(live: Live, *, inner=None, pings: bool = True, **options):
     """An async HTTP client that passes model calls through `live`.
 
@@ -220,7 +250,7 @@ def async_http_client(live: Live, *, inner=None, pings: bool = True, **options):
     transport = (
         inner
         if isinstance(inner, httpx.AsyncBaseTransport)
-        else httpx.AsyncHTTPTransport()
+        else per_loop_transport(httpx)
     )
     done = object()
 

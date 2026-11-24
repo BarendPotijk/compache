@@ -131,9 +131,7 @@ def make(live: Live | None = None):
                 return super().handle_tool_call(name, args, **kwargs)
             args = args if isinstance(args, dict) else {}
             answer = self.live.reopen(
-                self.session,
-                str(args.get("reference", "")),
-                int(args.get("offset") or 0),
+                self.session, str(args.get("reference", "")), args.get("offset")
             )
             return json.dumps(answer, ensure_ascii=False)
 
@@ -228,14 +226,22 @@ def make(live: Live | None = None):
 
 
 def _usage(usage: dict) -> dict:
-    """Hermes' token counts in the OpenAI form: its prompt total counts what was read or written."""
+    """Hermes' token counts in the OpenAI form: its prompt total counts what was read or written.
+
+    What Hermes does not report is left out: a missing count is not a zero.
+    """
+    details = {
+        ours: int(usage[theirs] or 0)
+        for ours, theirs in (
+            ("cached_tokens", "cache_read_tokens"),
+            ("cache_write_tokens", "cache_write_tokens"),
+        )
+        if usage.get(theirs) is not None
+    }
     return {
         "prompt_tokens": int(usage.get("prompt_tokens") or 0),
         "completion_tokens": int(usage.get("completion_tokens") or 0),
-        "prompt_tokens_details": {
-            "cached_tokens": int(usage.get("cache_read_tokens") or 0),
-            "cache_write_tokens": int(usage.get("cache_write_tokens") or 0),
-        },
+        **({"prompt_tokens_details": details} if details else {}),
     }
 
 

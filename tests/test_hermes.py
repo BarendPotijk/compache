@@ -238,6 +238,65 @@ class HermesTests(unittest.TestCase):
         answer = json.loads(fresh.handle_tool_call("reopen", {"reference": "x"}))
         self.assertEqual(answer["status"], "error")
 
+    def test_a_turn_that_waits_for_a_tool_has_not_ended(self):
+        engine = self.engine()
+        waiting = [
+            {"role": "user", "content": "Question 1?"},
+            {
+                "role": "assistant",
+                "content": "Let me search.",
+                "tool_calls": [
+                    {
+                        "id": "c1",
+                        "type": "function",
+                        "function": {"name": "search_docs", "arguments": "{}"},
+                    }
+                ],
+            },
+        ]
+        engine.select_context(waiting[:1], conversation_messages=waiting[:1])
+        engine.on_turn_complete(waiting)
+        self.assertEqual(self.live.stats["turns"], 0)
+        # The tool's result comes in after all, and the turn ends with the answer.
+        more = [
+            *waiting,
+            {"role": "tool", "tool_call_id": "c1", "content": passage(1)},
+        ]
+        engine.select_context(more, conversation_messages=more)
+        engine.on_turn_complete([*more, {"role": "assistant", "content": "Answer 1."}])
+        self.assertEqual(self.live.stats["turns"], 1)
+        threads, _ = load(self.record)
+        self.assertEqual([len(t["runs"]) for t in threads], [1])
+
+    def test_nothing_that_goes_wrong_here_reaches_the_agent(self):
+        engine = self.engine()
+        model = FakeModel(looping, clock=self.clock)
+        self.host(engine, model, [f"Question {n}?" for n in range(1, 5)])
+        # A model may write anything into a tool call.
+        answer = json.loads(
+            engine.handle_tool_call(
+                "reopen", {"reference": "Clause 001", "offset": "the start"}
+            )
+        )
+        self.assertEqual(answer["status"], "error")
+
+        # A record that cannot be written is not the agent's problem.
+        def broken(*args, **kwargs):
+            raise OSError("no space left on device")
+
+        self.live.recorder.call = self.live.recorder.turn = broken
+        with self.assertLogs("compache.live", "WARNING"):
+            self.host(engine, model, ["Question 5?"])
+
+    def test_a_count_that_is_not_reported_is_not_a_zero(self):
+        from compache.threads import cache_read_reported
+
+        counts = {"prompt_tokens": 50, "completion_tokens": 5}
+        self.assertFalse(cache_read_reported(hermes._usage(counts)))
+        self.assertTrue(
+            cache_read_reported(hermes._usage({**counts, "cache_read_tokens": 0}))
+        )
+
     def test_with_no_policy_it_only_records(self):
         engine = self.engine(policy=None)
         self.assertEqual(engine.get_tool_schemas(), [])

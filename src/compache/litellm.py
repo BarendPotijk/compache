@@ -35,7 +35,7 @@ import os
 from typing import Any
 
 from .live import Live, Result
-from .wrap import async_http_client, http_client
+from .wrap import async_http_client, http_client, per_loop_transport
 
 __all__ = ["Callback", "install"]
 
@@ -59,8 +59,9 @@ def install(live: Live, *, pings: bool = True) -> Live:
     litellm.client_session = http_client(
         live, inner=httpx.Client(**options), pings=pings
     )
+    # One client for every event loop of the process, so its connections belong to the loop that uses them.
     litellm.aclient_session = async_http_client(
-        live, inner=httpx.AsyncClient(**options), pings=pings
+        live, inner=per_loop_transport(httpx), pings=pings, **options
     )
     cache = getattr(litellm, "in_memory_llm_clients_cache", None)
     for name in ("flush_cache", "clear"):
@@ -83,22 +84,28 @@ def _plain(value: Any) -> Any:
 
 
 def _usage(usage: Any, cost: Any) -> dict | None:
-    """LiteLLM's usage in the form of the OpenAI API, which counts what was read or written in the total."""
+    """LiteLLM's usage in the form of the OpenAI API, which counts what was read or written in the total.
+
+    What the provider does not report is left out: a missing count is not a zero.
+    """
     if usage is None:
         return None
     usage = _plain(usage)
     details = usage.get("prompt_tokens_details") or {}
-    read = usage.get("cache_read_input_tokens") or details.get("cached_tokens") or 0
-    write = (
-        usage.get("cache_creation_input_tokens")
-        or details.get("cache_write_tokens")
-        or 0
-    )
+    found = {
+        "cached_tokens": usage.get(
+            "cache_read_input_tokens", details.get("cached_tokens")
+        ),
+        "cache_write_tokens": usage.get(
+            "cache_creation_input_tokens", details.get("cache_write_tokens")
+        ),
+    }
     out = {
         "prompt_tokens": usage.get("prompt_tokens") or 0,
         "completion_tokens": usage.get("completion_tokens") or 0,
-        "prompt_tokens_details": {"cached_tokens": read, "cache_write_tokens": write},
     }
+    if any(v is not None for v in found.values()):
+        out["prompt_tokens_details"] = {k: v for k, v in found.items() if v is not None}
     # LiteLLM says 0 where it has no price for the model.
     if isinstance(cost, (int, float)) and cost > 0:
         out["cost"] = float(cost)
@@ -145,6 +152,9 @@ class _Observer:
             "compache_note"
         ):
             return
+        if kwargs.get("cache_hit"):
+            # LiteLLM answered from a cache of its own. No model was called.
+            return
         streamed = kwargs.get("complete_streaming_response") or kwargs.get(
             "async_complete_streaming_response"
         )
@@ -175,9 +185,38 @@ class _Observer:
         )
 
 
+# How a call reaches its provider, as LiteLLM keeps it with the call.
+_CONNECTION = (
+    "api_base",
+    "api_key",
+    "api_version",
+    "azure_ad_token",
+    "azure_ad_token_provider",
+    "azure_password",
+    "azure_username",
+    "client_id",
+    "client_secret",
+    "extra_headers",
+    "organization",
+    "region_name",
+    "ssl_verify",
+    "tenant_id",
+    "timeout",
+)
+_CONNECTIONS = ("aws_", "vertex_", "watsonx_")
+
+
 def _asker(kwargs: dict):
     """A function that asks the model what its reply needed, through LiteLLM with this call's own settings."""
-    params = kwargs.get("litellm_params") or {}
+    params = {
+        **(kwargs.get("optional_params") or {}),
+        **(kwargs.get("litellm_params") or {}),
+    }
+    connection = {
+        key: value
+        for key, value in params.items()
+        if value is not None and (key in _CONNECTION or key.startswith(_CONNECTIONS))
+    }
 
     def ask(body: dict) -> Result:
         import litellm
@@ -187,17 +226,24 @@ def _asker(kwargs: dict):
         if provider and not str(model).startswith(f"{provider}/"):
             model = f"{provider}/{model}"
         request = {
+            **connection,
             "model": model,
             "messages": body["messages"],
             "max_tokens": body.get("max_tokens") or body.get("max_completion_tokens"),
             "metadata": {"compache_note": True},
-            "api_base": params.get("api_base"),
-            "api_key": params.get("api_key"),
             "tools": body.get("tools"),
+            # A note is worth one try.
+            "num_retries": 0,
         }
-        response = litellm.completion(
-            **{k: v for k, v in request.items() if v is not None}
-        )
+        try:
+            response = litellm.completion(
+                **{k: v for k, v in request.items() if v is not None}
+            )
+        except Exception as error:
+            # Counted with the refusals: after three of them no more notes are asked.
+            logger.info("compache: a note was not asked", exc_info=True)
+            status = getattr(error, "status_code", None)
+            return Result(status if isinstance(status, int) and status >= 400 else 502)
         return Result(200, json=_plain(response))
 
     return ask

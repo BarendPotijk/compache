@@ -284,6 +284,115 @@ class LiteLLMTests(unittest.TestCase):
             labels[1]["needs"], [[f"{name}:1:retrieval:1", f"{name}:1:output"]]
         )
 
+    def test_every_event_loop_has_connections_of_its_own(self):
+        url = self.provider(lambda request: {"text": "Answer."})
+        compache.litellm.install(Live(), pings=False)
+
+        async def one():
+            reply = await self.litellm.acompletion(
+                model="openai/claude-sonnet-5-5",
+                api_base=url,
+                api_key="key",
+                messages=[{"role": "user", "content": "Question?"}],
+            )
+            return reply.choices[0].message.content
+
+        # One `asyncio.run` a request, as a script, a worker or a function does it.
+        self.assertEqual([asyncio.run(one()) for _ in range(3)], ["Answer."] * 3)
+
+    def finished(self, **more):
+        """What LiteLLM hands its callbacks for a finished call."""
+        call = {
+            "model": "claude-haiku-5-5",
+            "custom_llm_provider": "azure",
+            "call_type": "acompletion",
+            "messages": [{"role": "user", "content": "Question?"}],
+            "litellm_params": {
+                "metadata": {"session_id": "s"},
+                "api_base": "https://example.invalid",
+                "api_version": "2026-01-01",
+                "vertex_project": None,
+            },
+            "optional_params": {"aws_region_name": "eu-west-1", "temperature": 0.2},
+        }
+        reply = {
+            "model": "claude-haiku-5-5",
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": "Answer."},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 50, "completion_tokens": 5},
+        }
+        return {**call, **more}, reply
+
+    def test_an_answer_from_litellm_s_own_cache_is_no_model_call(self):
+        folder = self.folder()
+        callback = compache.litellm.Callback(record=folder)
+        call, reply = self.finished(cache_hit=True)
+        callback.log_success_event(call, reply, 1_870_000_000.0, 1_870_000_000.1)
+        self.assertEqual(callback.compache.stats["calls"], 0)
+        call, reply = self.finished(cache_hit=False)
+        callback.log_success_event(call, reply, 1_870_000_000.0, 1_870_000_001.5)
+        (row,) = load_calls(folder)
+        # The provider reported no reads, which is not the same as none.
+        self.assertFalse(row.get("cache_read_reported"))
+
+    def test_a_note_goes_the_way_its_call_went_and_a_failure_counts_as_refused(self):
+        from unittest import mock
+
+        call, _ = self.finished()
+        ask = compache.litellm._asker(call)
+        note = {
+            "model": "claude-haiku-5-5",
+            "messages": [{"role": "user", "content": "?"}],
+        }
+        with mock.patch("litellm.completion", return_value={"choices": []}) as made:
+            self.assertEqual(ask({**note, "max_tokens": 64}).status, 200)
+        sent = made.call_args.kwargs
+        self.assertEqual(sent["model"], "azure/claude-haiku-5-5")
+        self.assertEqual(
+            (sent["api_base"], sent["api_version"], sent["aws_region_name"]),
+            ("https://example.invalid", "2026-01-01", "eu-west-1"),
+        )
+        # The call's own sampling and limits are not the note's.
+        self.assertNotIn("temperature", sent)
+        self.assertNotIn("vertex_project", sent)
+        with mock.patch(
+            "litellm.completion", side_effect=RuntimeError("no such deployment")
+        ):
+            self.assertGreaterEqual(ask(note).status, 400)
+        # After three of them no more notes are asked.
+        live = Live(record=self.folder(), sample=1.0, clock=self.clock)
+        for n in range(1, 8):
+            messages = []
+            for k in range(1, n + 1):
+                messages.append({"role": "user", "content": f"Question {k}?"})
+                if k < n:
+                    messages.append({"role": "assistant", "content": f"Answer {k}."})
+            reply = {
+                "choices": [
+                    {
+                        "message": {"role": "assistant", "content": f"Answer {n}."},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 5, "completion_tokens": 1},
+            }
+            at = self.clock.at + 60 * n
+            with mock.patch("litellm.completion", side_effect=RuntimeError("down")):
+                live.observe(
+                    "/v1/chat/completions",
+                    {"model": "claude-haiku-5-5", "messages": messages},
+                    reply,
+                    thread="t",
+                    at=(at, at + 1),
+                    ask=ask,
+                )
+                live.drain()
+        self.assertTrue(live._notes_off)
+
     def test_a_proxy_s_alias_and_an_unknown_price_are_not_recorded(self):
         folder = self.folder()
         callback = compache.litellm.Callback(record=folder)

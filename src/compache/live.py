@@ -215,6 +215,8 @@ class _Conversation:
     at: float = float("-inf")
     # When a call that was made elsewhere really happened: its start while it is prepared, then its end.
     when: float | None = None
+    # When this process last sent the conversation this one takes up again, whole.
+    sent_whole: float | None = None
 
 
 @dataclass
@@ -433,6 +435,9 @@ class Live:
                         name = f"{thread}#{count}"
                         record = thread if done else f"{thread}~{count}"
                 found = _Conversation(name, chains[0], record)
+                earlier = self._latest.get(thread) if thread else None
+                if earlier is not None and not earlier.reopens:
+                    found.sent_whole = earlier.at
                 if self.policy is not None:
                     found.session = self.policy.session(name)
                 if thread:
@@ -558,9 +563,14 @@ class Live:
             if conversation.pending is None:
                 return
             conversation.pending.calls += 1
-            self._ledger(conversation, "answer", wire.Reply(usage=usage, model=model))
+            try:
+                self._ledger(
+                    conversation, "answer", wire.Reply(usage=usage, model=model)
+                )
+            except Exception:
+                logger.warning("compache: a call was not recorded", exc_info=True)
 
-    def reopen(self, thread: str, reference: str, offset: int = 0) -> dict:
+    def reopen(self, thread: str, reference: str, offset: Any = 0) -> dict:
         """The answer to the model's `reopen` call in a conversation shown to `view`, as it is to be read."""
         conversation = self._latest.get(thread)
         if conversation is None or conversation.session is None:
@@ -584,28 +594,26 @@ class Live:
         """Close the turn that `body` ends on, where the host's own reply ended it.
 
         `body` holds the conversation up to and including that answer. A
-        conversation that was never shown to `view` is not recorded.
+        conversation that was never shown to `view` is not recorded, and a
+        turn that still waits for a tool goes on.
         """
-        dialect = wire.dialect_for(path)
         try:
-            turns = _segments(dialect.scan(body).slots)
-        except Exception:
-            return
-        if not turns or not turns[-1].outputs:
-            # The turn goes on, or nothing has been said yet.
-            return
-        conversation, chains = self._conversation(thread, turns)
-        with conversation.lock:
-            try:
+            dialect = wire.dialect_for(path)
+            scan = dialect.scan(body)
+            turns = _segments(scan.slots)
+            if not turns or not turns[-1].outputs or dialect.waits_for_tools(body):
+                return
+            conversation, chains = self._conversation(thread, turns)
+            with conversation.lock:
                 now = self._now(conversation)
-                self._catch_up(conversation, chains, turns, now)
+                self._catch_up(conversation, chains, turns, now, scan)
                 pending = conversation.pending
                 if pending is not None and pending.index == len(turns):
                     self._finish(
                         conversation, _link(chains[-1], turns[-1]), turns[-1], now
                     )
-            except Exception:
-                logger.warning("compache: a turn was not recorded", exc_info=True)
+        except Exception:
+            logger.warning("compache: a turn was not recorded", exc_info=True)
 
     def _exchange(self, path, body, send, thread, at=None, asks=True) -> Result:
         self.stats["calls"] += 1
@@ -653,7 +661,7 @@ class Live:
         conversation.tools_bytes = _size(json.dumps(scan.tools)) if scan.tools else 0
         plain = body
         try:
-            self._catch_up(conversation, chains, turns, now)
+            self._catch_up(conversation, chains, turns, now, scan)
             pending, found = (
                 conversation.pending,
                 [slot.text for slot in current.retrievals],
@@ -735,7 +743,7 @@ class Live:
             return replace(result, events=self._stream(call, result))
         return self._settle(call, result)
 
-    def _catch_up(self, conversation, chains, turns, now) -> None:
+    def _catch_up(self, conversation, chains, turns, now, scan) -> None:
         """Bring a conversation's state up to the turns a request shows as answered."""
         done = len(turns) - 1
         if conversation.turns == done:
@@ -756,12 +764,20 @@ class Live:
         if self.policy is not None:
             conversation.session = self.policy.session(conversation.thread_id)
             # When it was said is not known, and a process that meets a conversation in the middle
-            # has usually just been started: the provider's cache is taken to have expired.
+            # has usually just been started: the provider's cache is taken to have expired. It has
+            # not where this process sent the conversation itself, before a turn was asked again.
             before = now - self.policy.spec.cache_ttl_seconds - 60
+            if conversation.sent_whole is not None:
+                before = max(before, min(conversation.sent_whole, now - 1e-3))
             for k, segment in enumerate(turns[:done]):
                 at = before - (done - k) * 1e-3
+                # Behind the same instructions and tools as now, or they would look changed.
                 turn = conversation.session.prepare(
-                    segment.question, [s.text for s in segment.retrievals], at=at
+                    segment.question,
+                    [s.text for s in segment.retrievals],
+                    at=at,
+                    system_prompt=scan.system,
+                    tools=scan.tools,
                 )
                 conversation.session.complete(turn, segment.answer, at=at)
         conversation.turns = done
@@ -837,6 +853,8 @@ class Live:
         if (
             self.notes == "apart"
             or scan.stream
+            # A call that was made elsewhere has gone out: only a note after it is possible.
+            or conversation.when is not None
             # A schema that cannot take the property, or that the provider refused with it.
             or (schema is not None and extended is None)
             or (schema is not None and _digest(schema) in self._bad_schemas)

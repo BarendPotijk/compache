@@ -715,6 +715,29 @@ class PolicyTests(unittest.TestCase):
             0.9 * answered["prompt_tokens"],
         )
 
+    def test_a_turn_asked_again_finds_the_cache_as_this_process_left_it(self):
+        app = self.start(gap=5)
+        self.play(app, 5)
+        # The user asks the last turn again: the same history, and a cache that is seconds old.
+        app.messages = app.messages[
+            : app.messages.index({"role": "user", "content": "Question 5?"})
+        ]
+        before = len(self.model.bodies)
+        app.turn("Question 5, put differently?", passage(5))
+        self.assertEqual(gone(self.model.bodies[before]), [False] * 4)
+        self.assertGreater(
+            app.seen[-2]["usage"]["prompt_tokens_details"]["cached_tokens"], 1000
+        )
+        # Where the request was already trimmed, what is cached is not the whole history anyway.
+        app = self.start()
+        self.play(app, 5)
+        app.messages = app.messages[
+            : app.messages.index({"role": "user", "content": "Question 5?"})
+        ]
+        before = len(self.model.bodies)
+        app.turn("Question 5, put differently?", passage(5))
+        self.assertEqual(gone(self.model.bodies[before]), [True, True, True, False])
+
     def test_instructions_inside_a_conversation_do_not_hide_it(self):
         """A harness may end every request on an instruction of its own, as Claude Code does."""
 
@@ -1333,6 +1356,25 @@ class ObservedTests(unittest.TestCase):
             self.assertIn("<!-- refs:", json.dumps(self.asked[0]["messages"][-1]))
             name = load(tmp + "/b")[0][0]["thread_id"]
             self.assertEqual(load(tmp + "/b")[1][1]["needs"], [[f"{name}:1:input"]])
+
+    def test_a_note_in_the_reply_is_not_possible_once_the_call_was_made(self):
+        def ask(body):
+            self.asked.append(body)
+            return Result(
+                200, json={"choices": [{"message": {"content": "<!-- refs: {Q1} -->"}}]}
+            )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            self.asked = []
+            live = Live(
+                record=tmp, sample=1.0, notes="inline", clock=Clock(1_953_000_000.0)
+            )
+            self.turns(live, 2, ask=ask)
+            # One request of its own, after the second reply: the call itself is not made again.
+            self.assertEqual(len(self.asked), 1)
+            self.assertIn("Answer 2.", json.dumps(self.asked[0]["messages"][-2]))
+            answers = [c for c in load_calls(tmp) if c["kind"] == "answer"]
+            self.assertEqual([c["usage"]["input"] for c in answers], [100, 200])
 
     def test_a_policy_has_nothing_to_change_in_an_observed_call(self):
         live = Live(fitted())

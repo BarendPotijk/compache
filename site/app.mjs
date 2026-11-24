@@ -399,12 +399,13 @@ function renderBreakdown(r) {
 }
 // The address bar always holds the scenario on screen, so copying it is sharing it. What the page opens with needs no fragment.
 const OPENS_WITH = shareHash(configure(applyPreset({...STARTS[0].scenario}, 'sonnet')), 'sonnet', '', STARTS[0].id);
-function showAddress() {
-  if (loadError) return;
+function address() {
   // Named from whichever is nearest: the defaults, or one of the starting points.
   const url = new URL(location.href), config = configure(readForm()), hash = ['', ...STARTS.map(s => s.id)].map(id => shareHash(config, $('modelPreset').value, sourceLabel(), id)).reduce((a, b) => b.length < a.length ? b : a);
-  url.hash = hash === OPENS_WITH ? '' : hash; history.replaceState(null, '', url);
+  url.hash = hash === OPENS_WITH ? '' : hash; return url;
 }
+// A link that could not be read stays in the bar, beside the message about it, until something is changed or shared.
+function showAddress() { if (!loadError) history.replaceState(null, '', address()); }
 // The result in one line of text, to send along with the link.
 function resultLine(r) {
   const c = r.config, ours = dollars(1000 * r.compache.totals.cost / r.workload.totalRuns), retrieves = c.tokenDrawn || c.tokenMedian > 0;
@@ -524,7 +525,7 @@ document.addEventListener('dragover', e => { if (e.dataTransfer?.types.includes(
 document.addEventListener('drop', e => { const files = [...e.dataTransfer?.files ?? []]; if (files.length) { e.preventDefault(); importFiles(files); } });
 $('share').addEventListener('click', async () => {
   if (!current) return;
-  const text = resultLine(current), url = location.href;
+  const url = address().href, text = resultLine(current); history.replaceState(null, '', url);
   // A phone or tablet has a share sheet. Elsewhere the result and its link go to the clipboard.
   if (navigator.share && matchMedia('(pointer: coarse)').matches) { try { await navigator.share({title: document.title, text, url}); } catch { /* closed without sharing */ } return; }
   try { await navigator.clipboard.writeText(`${text}\n${url}`); note('Result and link copied.'); } catch { note('Copy the address bar to share this scenario.'); }
