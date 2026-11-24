@@ -3,7 +3,7 @@
 Record threads, fit a policy, apply it. Python 3.11 or later, no dependencies.
 
 ```sh
-pip install git+https://github.com/BarendPotijk/compache
+pip install compache
 ```
 
 | Step | Command | Python |

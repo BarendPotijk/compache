@@ -5,7 +5,7 @@ description: "Label which earlier parts of a conversation each turn needed (earl
 
 # Label what each turn needed
 
-compache fits what to keep in a long conversation from labels that say, for a sample of turns, which earlier parts the turn needed. You write those labels. Install compache first (`pip install git+https://github.com/BarendPotijk/compache`).
+compache fits what to keep in a long conversation from labels that say, for a sample of turns, which earlier parts the turn needed. You write those labels. Install compache first (`pip install compache`).
 
 ## Prepare
 

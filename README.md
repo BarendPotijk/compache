@@ -28,7 +28,7 @@ compache is **compaction + cache**, decided together:
 ## Get started
 
 ```sh
-pip install git+https://github.com/BarendPotijk/compache
+pip install compache
 ```
 
 **1. Record.** One line around the client you already have. Your requests and replies do not change.
