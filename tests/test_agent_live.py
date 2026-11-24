@@ -9,7 +9,7 @@ import unittest
 
 import compache
 from compache import agent, wire
-from compache.live import Result
+from compache.live import _TOOL_BYTES, Result
 from compache.record import load, load_calls
 from fakes import NOTICE, FakeModel, noticed, tokens
 
@@ -761,6 +761,14 @@ class RecordTests(unittest.TestCase):
             policy_ = compache.fit(folder, model="claude-haiku-5-5")
             self.assertTrue(policy_.agentic)
             self.assertEqual(policy_.summary["calls"], 8 * 25)
+            # Under a policy that kept things out of view, what was relied on is not known.
+            app = Agent(compache.Live(policy(), record=folder), Claude(), model)
+            app.run("Another task")
+            threads, _ = load(folder)
+            steps = threads[-1]["runs"][0]["steps"]
+            self.assertEqual({s["needs"] is None for s in steps}, {True})
+            self.assertIsNotNone(threads[0]["runs"][0]["steps"][0]["needs"])
+            self.assertTrue(compache.fit(folder, model="claude-haiku-5-5").agentic)
             # No word of what was said or read is in it.
             with open(f"{folder}/turns.jsonl", encoding="utf-8") as stream:
                 self.assertNotIn("a line of file", stream.read())
@@ -772,7 +780,8 @@ class RecordTests(unittest.TestCase):
             Agent(live, Claude(), model).run("Read six files")
             rows = load_calls(folder)
             left = [row.get("left_bytes", 0) for row in rows]
-            self.assertEqual(left[:3], [0, 0, 0])
+            # What it adds counts against what it leaves out: the tool, from the first call on.
+            self.assertEqual(left[:3], [-_TOOL_BYTES] * 3)
             self.assertEqual(left, sorted(left))
             self.assertGreater(left[-1], 4 * 2_000)
             self.assertGreater(rows[-1]["sent_bytes"], 0)

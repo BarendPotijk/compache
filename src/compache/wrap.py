@@ -359,7 +359,7 @@ def start_pings(live: Live) -> None:
     One thread for a `Live`, however many clients share it. Nothing is started
     for a policy that sends no pings.
     """
-    if live.policy is None or not live.policy.max_pings:
+    if live.learner is None and (live.policy is None or not live.policy.max_pings):
         return
     with live._lock:
         if live.pinger is None:
@@ -371,6 +371,7 @@ def wrap(
     policy=None,
     *,
     record=None,
+    learn=None,
     sample: float = 0.0,
     notes: str = "apart",
     pings: bool = True,
@@ -380,13 +381,13 @@ def wrap(
 
     `client` is a client of the OpenAI, Anthropic or Google GenAI SDK, sync or
     async. The other arguments are those of `Live`: a policy to apply, a
-    folder to record into, and the share of turns to ask for a note. Pass a
+    folder to record into or to learn from, and the share of turns to ask for a note. Pass a
     `live` to share one between several clients. `pings` lets a background
     thread send the policy's keep-warm pings. The `Live` is on the returned
     client as `client.compache`.
     """
     if live is None:
-        live = Live(policy, record=record, sample=sample, notes=notes)
+        live = Live(policy, record=record, learn=learn, sample=sample, notes=notes)
     inner = getattr(client, "_client", None)
     api = getattr(client, "_api_client", None)
     httpx = _library(

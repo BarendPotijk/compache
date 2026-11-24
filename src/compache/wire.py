@@ -1913,6 +1913,12 @@ def dialect_for(path: str):
     return None
 
 
+def model_of(path: str) -> str | None:
+    """The model a path names, as Gemini's does."""
+    _, found, rest = path.partition("/models/")
+    return rest.partition(":")[0] or None if found else None
+
+
 def streams(path: str) -> bool:
     """Whether a path alone says that its reply streams, as Gemini's does."""
     return ":streamGenerateContent" in path

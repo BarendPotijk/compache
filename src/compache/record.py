@@ -73,12 +73,14 @@ class Recorder:
         refs=None,
         older: bool = False,
         steps=(),
+        cut: bool = False,
     ) -> None:
         """One answered turn. `sizes` are bytes: `input`, `retrievals`, `output`, `system`, `tools`.
 
         `asked` says the reply was asked to name what it needed, and `refs`
         are the labels it named: an empty list for none, None for no answer.
-        `steps` are the turn's calls, where it made more than one.
+        `steps` are the turn's calls, where it made more than one, and `cut`
+        says that a policy had taken something out of view.
         """
         row = {
             "v": _VERSION,
@@ -99,6 +101,8 @@ class Recorder:
                 row["refs"] = list(refs)
                 if older:
                     row["older"] = True
+        if cut:
+            row["cut"] = True
         if steps:
             row["steps"] = [
                 [
@@ -126,11 +130,14 @@ class Recorder:
         cost: float | None = None,
         archived=None,
         left=None,
+        lifetime=None,
     ) -> None:
         """One model call: an `answer`, a `reopen`, a `ping`, a `note` asked apart, or a `retry`.
 
         `archived` are the labels of the parts that went out as a notice, and
-        `left` how many bytes of text that left out and how many were sent.
+        `left` how many bytes of text compache left out of the request, less
+        what it added, and how many were sent. `lifetime` is the cache lifetime
+        it asked for, where that is not the provider's default.
         """
         row = {
             "v": _VERSION,
@@ -148,6 +155,8 @@ class Recorder:
             row["archived"] = list(archived)
         if left is not None:
             row["left_bytes"], row["sent_bytes"] = left
+        if lifetime is not None:
+            row["ttl"] = lifetime
         self._append(_CALLS, row)
 
 
@@ -199,8 +208,11 @@ def _ids(name: str, labels, last: int, counts: list[int]) -> tuple[list, list]:
     return needs, list(dict.fromkeys(cited))
 
 
-def _steps(name: str, rows, counts: list[int]) -> list[dict]:
-    """A turn's calls, with what each quoted as part IDs."""
+def _steps(name: str, rows, counts: list[int], cut: bool) -> list[dict]:
+    """A turn's calls, with what each quoted as part IDs.
+
+    Where a policy kept things out of view, what replies would have relied on is not known.
+    """
     made, seen = [], 0
     for started, ended, results, size, output, needs, counted in rows:
         # An application may have dropped results while its turn went on.
@@ -210,13 +222,13 @@ def _steps(name: str, rows, counts: list[int]) -> list[dict]:
             "ended_at": max(ended, started),
             "results": seen,
             "bytes": size,
-            "needs": [],
+            "needs": None if cut else [],
         }
         if output is not None:
             step["output_tokens"] = output
         if counted is not None:
             step["input_tokens"] = counted
-        for label in needs:
+        for label in () if cut else needs:
             turn, _, item = str(label)[1:].partition(".")
             if turn.isdigit() and item.isdigit() and 1 <= int(turn) <= len(counts):
                 if 1 <= int(item) <= counts[int(turn) - 1]:
@@ -240,6 +252,7 @@ def load(path: str | Path) -> tuple[list[dict], list[dict]]:
     threads, labels = [], []
     for name, turns in by_thread.items():
         runs, counts = [], []
+        cut = any(row.get("cut") for row in turns.values())
         for n in range(1, len(turns) + 1):
             row = turns.get(n)
             if row is None:
@@ -256,7 +269,7 @@ def load(path: str | Path) -> tuple[list[dict], list[dict]]:
                 "calls": max(1, int(row.get("calls") or 1)),
             }
             if row.get("steps"):
-                run["steps"] = _steps(name, row["steps"], counts)
+                run["steps"] = _steps(name, row["steps"], counts, cut)
             if row.get("model"):
                 run["model"] = row["model"]
             if row.get("usage") is not None:

@@ -187,8 +187,8 @@ class Step:
     # Size of the reply as it joins the history, tool calls included.
     bytes: int
     output_tokens: int | None = None
-    # Earlier parts the reply relies on, where that is known.
-    needs: tuple[str, ...] = ()
+    # Earlier parts the reply relies on. None where that is not known.
+    needs: tuple[str, ...] | None = ()
     # What the provider counted the request at.
     input_tokens: int | None = None
 
@@ -260,10 +260,11 @@ def _check_steps(run: dict, start, end, results: int) -> None:
                 "a step shows more results than the run has, or fewer than before"
             )
         needs = step.get("needs", [])
-        if not isinstance(needs, list) or any(
-            not isinstance(n, str) or not n for n in needs
+        if needs is not None and (
+            not isinstance(needs, list)
+            or any(not isinstance(n, str) or not n for n in needs)
         ):
-            raise ContractError("step needs must be part IDs")
+            raise ContractError("step needs must be part IDs, or null")
         at, seen = done, step["results"]
 
 
@@ -307,7 +308,9 @@ class Thread:
                             s["results"],
                             s["bytes"],
                             s.get("output_tokens"),
-                            tuple(s.get("needs", ())),
+                            None
+                            if s.get("needs", ()) is None
+                            else tuple(s.get("needs", ())),
                             s.get("input_tokens"),
                         )
                         for s in r.get("steps", ())

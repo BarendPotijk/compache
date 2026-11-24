@@ -95,8 +95,8 @@ class Call:
     # The tool results that arrived, by ID and size.
     found: tuple[tuple[str, int], ...]
     output: int
-    # Results of earlier rounds that the reply relies on.
-    needs: frozenset
+    # Results of earlier rounds that the reply relies on. None where that is not known.
+    needs: frozenset | None
     # Whether the reply waits for a tool. Otherwise it waits for the user.
     tool: bool
 
@@ -336,7 +336,9 @@ def calls_of(thread, spec: ModelSpec, header_tokens: int = 0) -> list[Call]:
                     said,
                     found,
                     output,
-                    frozenset(n for n in needs if n not in fresh),
+                    None
+                    if needs is None
+                    else frozenset(n for n in needs if n not in fresh),
                     k + 1 < len(steps),
                 )
             )
@@ -362,9 +364,13 @@ def is_agentic(threads) -> bool:
 
 
 def simulate(conversations, recipe: AgentRecipe, spec: ModelSpec, reserve: int = 0):
-    """What conversations cost under a recipe, every call and ping by the provider's cache rules."""
-    cost = 0.0
-    calls = asked = missed = pings = cuts = peak = 0
+    """What conversations cost under a recipe, every call and ping by the provider's cache rules.
+
+    What fetching back costs is seen on the calls whose needs are known, and
+    taken to be as much on the others.
+    """
+    cost = fetched = 0.0
+    calls = known = asked = missed = pings = cuts = peak = 0
     for conversation in conversations:
         flow = Flow(spec, recipe, reserve)
         for i, call in enumerate(conversation):
@@ -378,12 +384,13 @@ def simulate(conversations, recipe: AgentRecipe, spec: ModelSpec, reserve: int =
                 return None
             peak = max(peak, flow.size)
             calls += 1
+            known += call.needs is not None
             asked += bool(call.needs)
-            lost = [n for n in call.needs if flow.gone(n)]
+            lost = [n for n in call.needs or () if flow.gone(n)]
             if lost:
                 # The model asks for them first: a call that reads the same request.
                 missed += 1
-                cost += flow.charge(call.at, REOPEN_OUTPUT_TOKENS)
+                fetched += flow.charge(call.at, REOPEN_OUTPUT_TOKENS)
                 flow.sent(call.at)
                 for name in lost:
                     flow.add(flow.sizes[name], name, again=True)
@@ -402,7 +409,7 @@ def simulate(conversations, recipe: AgentRecipe, spec: ModelSpec, reserve: int =
                     flow.sent(due)
                     pings += 1
     return {
-        "cost": cost,
+        "cost": cost + fetched * (calls / known if known else 1),
         "calls": calls,
         "asked": asked,
         "missed": missed,
@@ -433,7 +440,8 @@ def _conversations(threads, spec, header_tokens, labels=()):
                 more = wanted.get((thread.thread_id, run.run_index))
                 if more:
                     last = calls[at - 1]
-                    calls[at - 1] = replace(last, needs=last.needs | frozenset(more))
+                    needs = (last.needs or frozenset()) | frozenset(more)
+                    calls[at - 1] = replace(last, needs=needs)
         made.append(calls)
     return made
 
@@ -447,7 +455,7 @@ def _ages(conversations) -> list[int]:
             if call.found:
                 rounds += 1
                 arrived.update((name, rounds) for name, _ in call.found)
-            found += [rounds - arrived[n] for n in call.needs if n in arrived]
+            found += [rounds - arrived[n] for n in call.needs or () if n in arrived]
     return sorted(found)
 
 

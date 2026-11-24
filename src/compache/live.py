@@ -41,6 +41,7 @@ from typing import Any, Callable, Iterator
 from . import notes as notes_
 from . import wire
 from .api import Policy
+from .learn import Learner
 from .optimizer.recovery import REOPEN_TOOL
 from .quotes import Quotes, spoken
 from .record import Recorder
@@ -93,6 +94,8 @@ _REOPEN_HOW = (
     "all archived parts. Then answer from what it returns. Do not reopen parts you do not need, "
     "and never mention archiving, notices or the reopen tool to the user."
 )
+# What the tool and how to use it add to a request.
+_TOOL_BYTES = len(json.dumps(_REOPEN_TOOL)) + len(_REOPEN_HOW)
 _NOT_FOUND = (
     "No archived part matches that. Try other or fewer distinctive words from the text you "
     "need, or the reference of a notice."
@@ -212,9 +215,11 @@ class _Pending:
     sent_at: float = 0.0
     # Its calls one by one, for the record.
     steps: list = field(default_factory=list)
-    # Bytes of text its last request left out, and held.
+    # Bytes of text compache left out of its last request, less what it added, and what it held.
     left: int = 0
     held: int = 0
+    # Whether anything was out of view in any of its requests.
+    cut: bool = False
     # Where in its last request a cache mark belongs: behind what stays as it is.
     marks: tuple = ()
     first_usage: Any = None
@@ -229,7 +234,14 @@ class _Pending:
 
     def goes_on_from(self, earlier: _Pending) -> None:
         """Take over what an earlier state of the same turn has counted."""
-        for name in ("started_at", "calls", "steps", "first_usage", "last_usage"):
+        for name in (
+            "started_at",
+            "calls",
+            "steps",
+            "first_usage",
+            "last_usage",
+            "cut",
+        ):
             setattr(self, name, getattr(earlier, name))
 
 
@@ -257,6 +269,9 @@ class _Conversation:
     reopens: bool = False
     # Whether its policy decides call by call.
     agentic: bool = False
+    # The model it began with and the policy that gave it, where policies are learned.
+    model: str | None = None
+    policy: Any = None
     # What was fetched back and still stands in the conversation, in order.
     inserts: list = field(default_factory=list)
     # How it stood before its latest turn, for a request that branches off there.
@@ -418,6 +433,8 @@ class Live:
 
     `policy` is a `Policy`, a path to one, or None to change nothing and only
     record. `record` is a folder for a record without text, or a `Recorder`.
+    `learn` is a folder instead of both: what passes is recorded there, and the
+    policy follows from it, as `compache.learn` describes.
     `sample` is the share of turns whose reply is asked what it needed, and
     `notes` says how: `"apart"` in a short request of its own after the reply,
     which leaves the reply untouched by construction, or `"inline"` in the
@@ -430,12 +447,17 @@ class Live:
         policy=None,
         *,
         record=None,
+        learn=None,
         sample: float = 0.0,
         notes: str = "apart",
         salt: str = "",
         clock: Callable[[], float] = time.time,
         max_conversations: int = 4096,
     ):
+        if learn is not None and not (policy is None and record is None):
+            raise ValueError(
+                "learn: the folder holds the record, and the policy follows from it"
+            )
         if isinstance(policy, (str, Path)):
             policy = Policy.load(policy)
         if notes not in ("apart", "inline"):
@@ -443,6 +465,12 @@ class Live:
         if not 0 <= sample <= 1:
             raise ValueError("sample: expected a share between 0 and 1")
         self.policy = policy
+        self.learner = None
+        if learn is not None:
+            self.learner = (
+                learn if isinstance(learn, Learner) else Learner(learn, clock=clock)
+            )
+            record = self.learner.folder
         self.recorder = Recorder(record) if isinstance(record, (str, Path)) else record
         if sample and self.recorder is None:
             raise ValueError(
@@ -496,7 +524,7 @@ class Live:
     # -- conversations -------------------------------------------------------
 
     def _conversation(
-        self, thread: str | None, turns: list[_Segment], results=()
+        self, thread: str | None, turns: list[_Segment], scan
     ) -> tuple[_Conversation, list[str]]:
         """The conversation a request continues, found by what it has said so far."""
         seed = "thread:" + thread if thread else "auto"
@@ -505,7 +533,7 @@ class Live:
             chains.append(_link(chains[-1], segment))
         done = len(turns) - 1
         with self._lock:
-            found = self._in_loop(results, chains, turns)
+            found = self._in_loop(scan.results, chains, turns)
             if found is None and (thread or done):
                 found = self._by_chain.get(chains[-1])
                 if found is not None and self._elsewhere(found, turns):
@@ -536,8 +564,7 @@ class Live:
                 earlier = self._latest.get(thread) if thread else None
                 if earlier is not None and not earlier.reopens:
                     found.sent_whole = earlier.at
-                if self.policy is not None:
-                    self._start(found, name)
+                self._start(found, name, scan)
                 if thread:
                     # A named conversation is found again from its first call. An unnamed one only
                     # once it has an answer, since any two may open with the same words.
@@ -618,6 +645,7 @@ class Live:
         made.inserts, made.reopens = list(inserts), reopens
         made.lifetime, made.five_minutes = other.lifetime, other.five_minutes
         made.default_lifetime = other.default_lifetime
+        made.model, made.policy = other.model, other.policy
         made.turns, made.at = done, other.at
         made.session.follows(other.session)
         # What they share is kept warm for the newest of them.
@@ -677,7 +705,7 @@ class Live:
         `Result`; without it no note is asked. There is nothing to apply a
         policy to, so a `Live` that observes has none.
         """
-        if self.policy is not None:
+        if self.policy is not None or self.learner is not None:
             raise ValueError(
                 "observe: a call that was already made has no request to change"
             )
@@ -709,7 +737,7 @@ class Live:
             turns = _segments(scan.slots)
             if not turns or not scan.awaiting:
                 return body
-            conversation, chains = self._conversation(thread, turns, scan.results)
+            conversation, chains = self._conversation(thread, turns, scan)
         except Exception:
             self.stats["passed_through"] += 1
             return body
@@ -781,7 +809,7 @@ class Live:
             turns = _segments(scan.slots)
             if not turns or not turns[-1].outputs or dialect.waits_for_tools(body):
                 return
-            conversation, chains = self._conversation(thread, turns, scan.results)
+            conversation, chains = self._conversation(thread, turns, scan)
             with conversation.lock:
                 now = self._now(conversation)
                 self._catch_up(conversation, chains, turns, now, scan)
@@ -795,9 +823,17 @@ class Live:
 
     # -- the cache lifetime --------------------------------------------------
 
-    def _start(self, conversation, name) -> Any:
-        """Apply the policy to a conversation from here on. Returns the policy."""
+    def _start(self, conversation, name, scan) -> Any:
+        """Apply the policy to a conversation from here on. Returns it, or None where there is none."""
         policy = self.policy
+        if self.learner is not None:
+            # Chosen once. One that was left alone stays alone.
+            if conversation.model is None:
+                conversation.model = scan.model or ""
+                conversation.policy = self.learner.policy(scan.model, bool(scan.tools))
+            policy = conversation.policy
+        if policy is None:
+            return None
         if conversation.default_lifetime:
             policy = policy.at_default_lifetime()
         conversation.session = policy.session(name)
@@ -829,9 +865,10 @@ class Live:
             conversation.lifetime,
         )
         self._plan_default(conversation)
-        policy = self.policy
-        if policy is not None:
-            self.policy = policy.at_default_lifetime()
+        if self.learner is not None:
+            self.learner.default_lifetime = True
+        elif self.policy is not None:
+            self.policy = self.policy.at_default_lifetime()
 
     def _exchange(self, path, body, send, thread, at=None, asks=True) -> Result:
         self.stats["calls"] += 1
@@ -846,7 +883,8 @@ class Live:
             if not turns or not scan.awaiting:
                 raise ValueError("nothing here to decide on")
             scan.stream = scan.stream or wire.streams(path)
-            conversation, chains = self._conversation(thread, turns, scan.results)
+            scan.model = scan.model or wire.model_of(path)
+            conversation, chains = self._conversation(thread, turns, scan)
         except Exception:
             # A shape this does not know: the application's request goes out as it is.
             self.stats["passed_through"] += 1
@@ -1030,8 +1068,8 @@ class Live:
         conversation.pending, conversation.turns, conversation.stale = None, 0, False
         conversation.inserts, conversation.went = [], []
         conversation.base = conversation.quotes = None
-        if self.policy is not None:
-            policy = self._start(conversation, conversation.thread_id)
+        policy = self._start(conversation, conversation.thread_id, scan)
+        if policy is not None:
             # When it was said is not known, and a process that meets a conversation in the middle
             # has usually just been started: the provider's cache is taken to have expired. It has
             # not where this process sent the conversation itself, before a turn was asked again.
@@ -1184,13 +1222,17 @@ class Live:
             # An agent works its way to a first cut soon enough. A tool that joins only then would
             # change what comes ahead of everything else that is cached.
             conversation.reopens = True
+        added = sum(_size(json.dumps(i.messages)) for i in conversation.inserts)
         if conversation.reopens and _REOPEN not in dialect.tool_names(body):
             # A model that is offered the tool while nothing is archived calls it for nothing. So in
             # a chat it comes with the first notice, and stays: the first cut rewrites the request
             # from near its start anyway, and after that the tool never changes what is cached.
             out = dialect.with_tool(out, _REOPEN_TOOL, _REOPEN_HOW)
-        pending.left = max(0, left)
-        pending.held = sum(_size(s.text) for s in scan.slots) - pending.left
+            added += _TOOL_BYTES
+        whole = sum(_size(s.text) for s in scan.slots)
+        whole += conversation.system_bytes + conversation.tools_bytes
+        pending.left, pending.held = left - added, whole - left + added
+        pending.cut = pending.cut or bool(turn.archived_ids)
         # Where those are in the request as it goes out: behind messages of ours.
         shift = len(dialect.said_so_far(out)) - len(said) - put_in
         pending.marks = tuple(
@@ -1630,8 +1672,8 @@ class Live:
                 "ended_at": self._now(conversation),
                 "results": len(pending.seen),
                 "bytes": _size(said),
-                # What an archived part would have added is no part of the count.
-                "input_tokens": None if pending.left else counted.get("input"),
+                # A request with something out of view does not say how large the conversation is.
+                "input_tokens": None if pending.cut else counted.get("input"),
                 "output_tokens": counted.get("output"),
                 "needs": self._quotes(conversation).said(said),
             }
@@ -1722,6 +1764,8 @@ class Live:
                 conversation.session = conversation.lifetime = None
         self._write_turn(conversation, pending, segment, pending.ended_at)
         self.stats["turns"] += 1
+        if self.learner is not None:
+            self.learner.heard(max(1, pending.calls))
         conversation.turns, conversation.pending = pending.index, None
         self._index(conversation, chain)
 
@@ -1748,6 +1792,7 @@ class Live:
             refs=self._named(pending),
             older=pending.older,
             steps=pending.steps if len(pending.steps) > 1 else (),
+            cut=pending.cut,
         )
 
     @staticmethod
@@ -1775,7 +1820,7 @@ class Live:
                 if not conversation.agentic:
                     gone = sorted(pending.turn.archived_ids, key=_position)
                     archived = notes_.labels_of(notes_.Note(needs=tuple(gone)))
-                if pending.left:
+                if pending.held and kind == "answer":
                     left = (pending.left, pending.held)
         self.recorder.call(
             conversation.record_id,
@@ -1787,6 +1832,7 @@ class Live:
             cost=source.cost,
             archived=archived,
             left=left,
+            lifetime=conversation.lifetime,
         )
 
     # -- pings ---------------------------------------------------------------
