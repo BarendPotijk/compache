@@ -93,16 +93,29 @@ def _body(request) -> tuple[dict, list]:
     return {**body, "tools": tools} if tools else body, owners
 
 
-def _thinks(block: Any) -> bool:
-    return isinstance(block, dict) and str(block.get("type")).endswith("thinking")
+def _thinks(block: Any) -> dict | None:
+    """What Claude reasoned, enclosed, as it gave it. None for a block that holds something else."""
+    if not isinstance(block, dict):
+        return None
+    kind, extras = str(block.get("type")), block.get("extras")
+    if kind.endswith("thinking"):
+        return block
+    if kind == "non_standard":
+        return _thinks(block.get("value"))
+    signature = extras.get("signature") if isinstance(extras, dict) else None
+    if kind != "reasoning" or not signature:
+        return None
+    # LangChain's own form of it, which it keeps under `output_version="v1"`.
+    said = block.get("reasoning") or ""
+    return {"type": "thinking", "thinking": said, "signature": signature}
 
 
 def _thoughts(message) -> list:
-    """What Claude reasoned in a message, enclosed."""
+    """What Claude reasoned in a message."""
     content = getattr(message, "content", None)
     if getattr(message, "type", "") != "ai" or not isinstance(content, list):
         return []
-    return [block for block in content if _thinks(block)]
+    return [found for found in map(_thinks, content) if found is not None]
 
 
 def _text(content: Any) -> str | None:

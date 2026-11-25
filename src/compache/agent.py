@@ -1103,6 +1103,10 @@ class AgentEngine:
             if p in self._out or (p in self._thoughts and ("thought", p) not in names)
         ]
 
+    @property
+    def counts_thoughts(self) -> bool:
+        return self._counts_thoughts is not False and self._keeps_thoughts is not False
+
     def _drop(self, places) -> None:
         """The provider does not count the reasoning in those messages, so it takes none of the room."""
         for place in list(places):

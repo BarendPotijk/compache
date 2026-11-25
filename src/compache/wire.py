@@ -2408,21 +2408,22 @@ def volume(value: Any) -> int:
     return 0
 
 
-def holds_media(said: list) -> bool:
+# Where a block of a message may hold others.
+_WITHIN = ("content", "output", "parts", "functionResponse", "function_response")
+_GEMINI_MEDIA = ("inlineData", "fileData", "inline_data", "file_data")
+
+
+def holds_media(said: Any) -> bool:
     """Whether the messages of a request hold pictures, documents or sound, whose tokens have no text."""
-    for message in said:
-        for key in ("content", "output", "parts"):
-            held = message.get(key) if isinstance(message, dict) else None
-            for block in held if isinstance(held, list) else ():
-                if not isinstance(block, dict):
-                    continue
-                if block.get("type") in _MEDIA_TYPES or media_in(block.get("content")):
-                    return True
-                if "inlineData" in block or "fileData" in block:
-                    return True
-                if (block.get("functionResponse") or {}).get("parts"):
-                    return True
-    return False
+    if isinstance(said, list):
+        return any(map(holds_media, said))
+    if not isinstance(said, dict):
+        return False
+    if said.get("type") in _MEDIA_TYPES or said.get("type") in ("video_url", "video"):
+        return True
+    return any(name in said for name in _GEMINI_MEDIA) or any(
+        holds_media(said[name]) for name in _WITHIN if name in said
+    )
 
 
 def model_of(path: str) -> str | None:

@@ -1237,12 +1237,19 @@ class Live:
         """
         with self._lock:
             made = [c for c in self._by_call.get(call or "", ()) if c.named == thread]
-            conversation = made[-1] if made else self._latest.get(thread)
-        if conversation is None or conversation.session is None:
-            return {
-                "status": "error",
-                "message": "there is nothing archived in this conversation",
-            }
+            made = made or [c for c in (self._latest.get(thread),) if c is not None]
+        made = [c for c in made if c.session is not None]
+        conversation = made[-1] if len(made) == 1 else None
+        if len(made) > 1 and reference.strip().startswith("ctx:"):
+            # An ID that counts is that of several. A notice tells whose it is, and words do not.
+            conversation = next(
+                (c for c in reversed(made) if self._archived(c, reference)), None
+            )
+        if conversation is None:
+            said = "this does not say which notice is meant: give its ctx: reference"
+            if not made:
+                said = "there is nothing archived in this conversation"
+            return {"status": "error", "message": said}
         with conversation.lock:
             answers = self._reopen(
                 conversation,
@@ -1254,6 +1261,18 @@ class Live:
                 ],
             )
         return json.loads(answers["reopen"])
+
+    @staticmethod
+    def _archived(conversation, reference: str) -> bool:
+        """Whether a notice's reference is one of a conversation's."""
+        with conversation.lock:
+            try:
+                found = conversation.session.reopen(
+                    reference, search=("retrieval", "input", "output")
+                )
+            except Exception:
+                return False
+            return found.get("status") == "ok"
 
     def conclude(self, path: str, body: Any, *, thread: str) -> None:
         """Close the turn that `body` ends on, where the host's own reply ended it.
@@ -1926,8 +1945,13 @@ class Live:
         if self.recorder is not None:
             pending.held = wire.volume(out)
             pending.left = wire.volume(body) - pending.held
-            pending.media = wire.holds_media(dialect.said_so_far(out))
+            # What is reasoned has tokens and no text that says how many.
+            pending.media = bool(scan.thoughts.keys() - left_out) or wire.holds_media(
+                dialect.said_so_far(out)
+            )
             pending.left_more = conversation.session.left_more
+            if conversation.session.counts_thoughts:
+                pending.left_more += sum(scan.thoughts.get(p, 0) for p in left_out)
         pending.cut = pending.cut or bool(turn.archived_ids)
         # Where those are in the request as it goes out: behind messages of ours.
         shift = len(dialect.said_so_far(out)) - len(said) - put_in + len(gone)

@@ -9,8 +9,8 @@ import compache
 from compache import stats
 from compache.learn import Learner
 from compache.record import load_calls
-from fakes import FakeModel
-from test_agent_live import Agent, Claude, policy, worker
+from fakes import FakeModel, tokens, unmarked
+from test_agent_live import Agent, Claude, policy, result, worker
 from test_live import Clock
 
 MODEL = "claude-haiku-5-5"
@@ -73,6 +73,42 @@ class SavingTests(unittest.TestCase):
         rows = [row("a", 0, 60_000, 0, 60_000, media=True, **sizes)]
         found = stats.savings(rows)
         self.assertEqual(found["models"][MODEL]["left_out_tokens"], 6_000)
+
+    def test_what_a_model_reasons_is_not_taken_for_text(self):
+        """It has tokens and no text. And what goes with a cut would have been there without it."""
+
+        def counted(body):
+            head = [body["tools"], body["system"]]
+            said = [m["content"] for m in body["messages"]]
+            return tokens(unmarked([head, said]))
+
+        for name, reasoned in (
+            ("claude-sonnet-4-5", 0),
+            ("claude-sonnet-4-5", 400),
+            ("claude-sonnet-4-5", 1500),
+            ("claude-sonnet-5-5", 500),
+        ):
+            with self.subTest(model=name, reasoned=reasoned):
+                model = FakeModel(
+                    lambda request, n=reasoned: {"tool": ("read", {}), "thinking": n}
+                )
+                folder = tempfile.TemporaryDirectory()
+                self.addCleanup(folder.cleanup)
+                clock, shape, left = Clock(), Claude(), 0
+                live = compache.Live(policy(3), clock=clock, record=folder.name)
+                shape.model = name
+                app = Agent(live, shape, model, clock=clock)
+                shape.ask("Go")
+                for k in range(20):
+                    written = shape.body(False)
+                    _, calls = app.call()
+                    sent = model.bodies[-1]
+                    left += counted({**written, "tools": sent["tools"]}) - counted(sent)
+                    shape.answer([(call, result(k)) for call, _ in calls])
+                    clock.at += 5
+                said = stats.savings(folder.name)
+                found = {**said["models"], **said["unpriced"]}[name]
+                self.assertLess(abs(found["left_out_tokens"] / left - 1), 0.2)
 
     def test_what_another_conversation_had_cached_would_have_been_read_too(self):
         rows = [row("a", 0, 20_000, 18_000, 2_000, left_bytes=-400, sent_bytes=80_000)]

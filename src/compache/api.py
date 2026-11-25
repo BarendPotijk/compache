@@ -875,6 +875,11 @@ class Session:
         return self._engine.left_more if self.policy.agentic else 0
 
     @property
+    def counts_thoughts(self) -> bool:
+        """Whether the provider counts the reasoning that a request holds, as far as that is known."""
+        return not self.policy.agentic or self._engine.counts_thoughts
+
+    @property
     def holds(self):
         """What goes first with the next cut, where the policy decides call by call."""
         return self._engine.holds if self.policy.agentic else None

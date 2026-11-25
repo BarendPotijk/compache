@@ -130,6 +130,15 @@ class MiddlewareTests(unittest.TestCase):
         from langgraph.checkpoint.memory import InMemorySaver
 
         kept: list = []
+        # LangChain's own form of what Claude reasoned, and Claude's.
+        form: list = []
+
+        def signed(block):
+            if block["type"] == "non_standard":
+                return signed(block["value"])
+            if block["type"] == "thinking":
+                return block["signature"]
+            return (block.get("extras") or {}).get("signature")
 
         def behind(messages):
             said = [[m.type, m.content, getattr(m, "tool_calls", [])] for m in messages]
@@ -152,14 +161,12 @@ class MiddlewareTests(unittest.TestCase):
                     blocks = (
                         message.content if isinstance(message.content, list) else ()
                     )
-                    for block in blocks:
-                        if block["type"] == "thinking":
-                            held += 1
-                            assert block["signature"] == behind(messages[:k])
+                    for block in filter(signed, blocks):
+                        held += 1
+                        assert signed(block) == behind(messages[:k])
                 kept.append(held)
                 read = sum(m.type == "tool" for m in messages)
-                sign = {"type": "thinking", "thinking": "", "signature": ""}
-                sign["signature"] = behind(messages)
+                sign = form[0](behind(messages))
                 usage = {"input_tokens": 100, "output_tokens": 5, "total_tokens": 105}
                 said = {"content": [sign, {"type": "text", "text": "Step."}]}
                 if read < 9:
@@ -177,19 +184,33 @@ class MiddlewareTests(unittest.TestCase):
             """Read a file."""
             return result(file)
 
-        live = compache.Live(policy(rounds=5, ratio=1.0))
-        agent = create_agent(
-            Claude(),
-            [read],
-            middleware=[compache.langchain.middleware(live)],
-            checkpointer=InMemorySaver(),
-        )
-        config = {"configurable": {"thread_id": "t-9"}, "recursion_limit": 200}
-        self.ask(agent, config)
-        self.assertEqual(kept[:6], [0, 1, 2, 3, 4, 5])
-        self.assertLess(min(kept[6:]), 5, "a cut took it along")
-        self.assertGreater(kept[-1], 0, "what came after the cut stays")
-        self.assertEqual(live.stats["stood_down"], 0)
+        def thinking(signature):
+            return {"type": "thinking", "thinking": "", "signature": signature}
+
+        for made in (
+            thinking,
+            lambda signature: {
+                "type": "reasoning",
+                "reasoning": "",
+                "extras": {"signature": signature},
+            },
+            lambda signature: {"type": "non_standard", "value": thinking(signature)},
+        ):
+            form[:], kept[:] = [made], []
+            live = compache.Live(policy(rounds=5, ratio=1.0))
+            agent = create_agent(
+                Claude(),
+                [read],
+                middleware=[compache.langchain.middleware(live)],
+                checkpointer=InMemorySaver(),
+            )
+            config = {"configurable": {"thread_id": "t-9"}, "recursion_limit": 200}
+            with self.subTest(made("...")):
+                self.ask(agent, config)
+                self.assertEqual(kept[:6], [0, 1, 2, 3, 4, 5])
+                self.assertLess(min(kept[6:]), 5, "a cut took it along")
+                self.assertGreater(kept[-1], 0, "what came after the cut stays")
+                self.assertEqual(live.stats["stood_down"], 0)
 
     def test_async_and_learning(self):
         import asyncio

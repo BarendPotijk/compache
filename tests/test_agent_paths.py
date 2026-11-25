@@ -562,6 +562,48 @@ class NobodyElsesTests(unittest.TestCase):
             self.assertIn(f"{name}'s private", json.dumps(found))
             self.assertNotIn(f"{other}'s private", json.dumps(found))
 
+    def test_calls_of_two_agents_that_count_alike(self):
+        """Both call it `functions.reopen:4`: the notice says whose text is meant, and words do not."""
+        live = compache.Live(policy(rounds=1, ratio=0.0), clock=self.clock)
+        tools = [
+            {"type": "function", "function": {"name": n, "parameters": {}}}
+            for n in ("read", "reopen")
+        ]
+        said: dict = {}
+
+        def call(name, tool, k):
+            body = {"model": "m", "messages": list(said[name]), "tools": tools}
+            shown = live.show("/v1/chat/completions", body, thread="t-1")
+            made = {"id": f"functions.{tool}:{k}", "arguments": {"k": k}}
+            usage = {"prompt_tokens": 900, "completion_tokens": 9}
+            shown.heard(usage, model="m", said="", calls=[made])
+            function = {"name": tool, "arguments": "{}"}
+            made = {"id": made["id"], "type": "function", "function": function}
+            message = {"role": "assistant", "content": None, "tool_calls": [made]}
+            said[name].append(message)
+            return shown, made["id"]
+
+        names = ("alice", "bob")
+        for name in names:
+            said[name] = [{"role": "user", "content": f"Work on the files of {name}"}]
+        for k in range(4):
+            for name in names:
+                _, made = call(name, "read", k)
+                text = f"the secret plan of {name}, line {k} " * 60
+                said[name].append(
+                    {"role": "tool", "tool_call_id": made, "content": text}
+                )
+        last = {name: call(name, "reopen", 4) for name in names}
+        for name, other in (names, names[::-1]):
+            shown, made = last[name]
+            for reference in ("secret plan", f"the secret plan of {other}"):
+                found = json.dumps(live.reopen("t-1", reference, call=made))
+                self.assertNotIn("the secret plan of", found)
+            handle = NOTICE.search(json.dumps(shown.body)).group()
+            found = live.reopen("t-1", handle, call=made)
+            self.assertEqual(found["status"], "ok")
+            self.assertIn(f"the secret plan of {name}", found["text"])
+
 
 class ResultTests(unittest.TestCase):
     """Results that hold something else than text, or nothing at all."""
@@ -738,6 +780,14 @@ class ResultTests(unittest.TestCase):
             (True, [{"content": [{"type": "image_url", "image_url": {"url": "x"}}]}]),
             (True, [{"output": [{"type": "input_image", "image_url": "data:x"}]}]),
             (True, [{"parts": [{"inlineData": {"data": "x"}}]}]),
+            (True, [{"parts": [{"inline_data": {"data": "x"}}]}]),
+            (True, [{"parts": [{"functionResponse": {"parts": [{"fileData": {}}]}}]}]),
+            (True, [{"output": {"type": "computer_screenshot", "image_url": "x"}}]),
+            (True, [{"content": [{"type": "video_url", "video_url": {"url": "x"}}]}]),
+            (
+                True,
+                [{"content": [{"content": {"content": {"type": "document"}}}]}],
+            ),
             (False, [{"content": [{"type": "redacted_thinking", "data": "x"}]}]),
             (False, [{"content": [{"type": "tool_use", "input": {"file": "a"}}]}]),
             (False, [{"parts": [{"functionCall": {"args": {"data": 1}}}]}]),
