@@ -16,13 +16,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import ssl
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.request
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from pathlib import Path
 
 ROWS = (
@@ -56,9 +60,12 @@ def _changed(patch: str) -> list[str]:
 
 
 def _apply(tree: Path, patch: str) -> bool:
+    # In a folder of another checkout, git would leave out what is not in that one.
+    alone = {**os.environ, "GIT_CEILING_DIRECTORIES": str(tree.parent)}
     done = subprocess.run(
         ["git", "apply", "--whitespace=nowarn", "-"],
         cwd=tree,
+        env=alone,
         input=patch,
         text=True,
         capture_output=True,
@@ -87,11 +94,20 @@ def extract(root: Path, row: dict, tree: Path) -> None:
     subprocess.run(["tar", "x", "-C", str(tree)], input=packed.stdout, check=True)
 
 
+@contextmanager
+def checkout(root: Path, row: dict) -> Iterator[Path]:
+    """A tree for as long as it is needed: there are hundreds, of 30 MB each."""
+    with tempfile.TemporaryDirectory(dir=root) as folder:
+        tree = Path(folder) / "tree"
+        extract(root, row, tree)
+        yield tree
+
+
 class Issue:
     """One issue as a task for `run.py`."""
 
     def __init__(self, root: Path, name: str):
-        self.root, self.name = Path(root), name
+        self.root, self.name = Path(root).resolve(), name
         rows = json.loads((self.root / "lite.json").read_text())
         self.row = next(r for r in rows if r["instance_id"] == name)
         self.kept = json.loads((self.root / "valid.json").read_text())[name]
@@ -125,7 +141,7 @@ class Session:
     """Several issues of one checkout as a task, one prompt each."""
 
     def __init__(self, root: Path, name: str):
-        self.root, self.name = Path(root), name
+        self.root, self.name = Path(root).resolve(), name
         self.plan = json.loads((self.root / "sessions.json").read_text())[name]
         rows = {
             r["instance_id"]: r
@@ -165,7 +181,7 @@ class Day:
     """All sessions in one conversation, each in a checkout of its own."""
 
     def __init__(self, root: Path, name: str):
-        self.root, self.name = Path(root), name
+        self.root, self.name = Path(root).resolve(), name
         plans = json.loads((self.root / "sessions.json").read_text())
         self.parts = {
             f"checkout{k}": Session(root, base) for k, base in enumerate(plans, 1)
@@ -198,16 +214,19 @@ class Day:
         }
 
 
-def plan_sessions(root: Path) -> None:
+def plan_sessions(root: Path, workers: int) -> None:
     """Find sets of issues that can be fixed at one commit, and that their own fixes do fix together."""
     python = str(root / "venv/bin/python")
     rows = {r["instance_id"]: r for r in fetch(root)}
     kept = json.loads((root / "valid.json").read_text())
     free, made = set(issues(root)), {}
 
-    def fits(base: str, names: list[str], tree: Path) -> dict:
+    def fits(base: str, names: list[str]) -> dict:
         """Which of some issues are broken at a commit and fixed once all their fixes are in."""
-        extract(root, rows[base], tree)
+        with checkout(root, rows[base]) as tree:
+            return fixed(names, tree)
+
+    def fixed(names: list[str], tree: Path) -> dict:
         files = sorted({f for n in names for f in kept[n]["tests"]})
         for n in names:
             if not _apply(tree, rows[n]["test_patch"]):
@@ -227,25 +246,20 @@ def plan_sessions(root: Path) -> None:
     for base in BASES:
         # One by one first, then together: fixes of two issues may be in each other's way.
         candidates = sorted(free)
-        with ThreadPoolExecutor(4) as pool:
-            alone = list(
-                pool.map(
-                    lambda n: fits(base, [n], root / "trees" / f"{base}+{n}"),
-                    candidates,
-                )
-            )
+        with ThreadPoolExecutor(workers) as pool:
+            alone = list(pool.map(lambda n: fits(base, [n]), candidates))
         able = [n for n, f in zip(candidates, alone) if f and f["good"][n]]
         chosen: list[str] = []
         for n in able:
             if len(chosen) == SIZE:
                 break
-            tried = fits(base, [*chosen, n], root / "trees" / f"{base}++{n}")
+            tried = fits(base, [*chosen, n])
             if tried and all(tried["good"].values()):
                 chosen.append(n)
         if len(chosen) < LEAST:
             print(f"{base}: only {len(chosen)} issues fit together")
             continue
-        last = fits(base, chosen, root / "trees" / f"{base}+++")
+        last = fits(base, chosen)
         wanted = {t for n in chosen for t in kept[n]["f2p"]}
         made[base] = {
             "base": rows[base]["base_commit"],
@@ -276,7 +290,7 @@ def fetch(root: Path) -> list[dict]:
     return json.loads(path.read_text())
 
 
-def validate(root: Path, least=(1, 4)) -> None:
+def validate(root: Path, workers: int, least=(1, 4)) -> None:
     python = str(root / "venv/bin/python")
     rows = [
         r
@@ -286,16 +300,15 @@ def validate(root: Path, least=(1, 4)) -> None:
     ]
 
     def one(row):
-        tree = root / "trees" / row["instance_id"]
-        extract(root, row, tree)
         tests = _changed(row["test_patch"])
         wanted = json.loads(row["FAIL_TO_PASS"])
         begun = time.time()
         try:
-            fits = _apply(tree, row["test_patch"])
-            before = _run(python, tree, tests)
-            fits = _apply(tree, row["patch"]) and fits
-            after = _run(python, tree, tests)
+            with checkout(root, row) as tree:
+                fits = _apply(tree, row["test_patch"])
+                before = _run(python, tree, tests)
+                fits = _apply(tree, row["patch"]) and fits
+                after = _run(python, tree, tests)
         except subprocess.TimeoutExpired:
             return row["instance_id"], None
         kept = [n for n in json.loads(row["PASS_TO_PASS"]) if after.get(n)]
@@ -309,7 +322,7 @@ def validate(root: Path, least=(1, 4)) -> None:
             "tests": tests,
         }
 
-    with ThreadPoolExecutor(3) as pool:
+    with ThreadPoolExecutor(workers) as pool:
         found = {name: kept for name, kept in pool.map(one, rows) if kept}
     (root / "valid.json").write_text(json.dumps(found, indent=1))
     print(f"{sum(k['ok'] for k in found.values())} of {len(rows)} issues run here")
@@ -322,7 +335,10 @@ def issues(root: Path) -> list[str]:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("folder", type=Path)
+    parser.add_argument("folder", type=lambda name: Path(name).resolve())
+    parser.add_argument(
+        "--workers", type=int, default=2, help="Test runs at a time. Each wants 0.5 GB"
+    )
     args = parser.parse_args()
     if not (args.folder / "repo").exists():
         url = "https://github.com/sympy/sympy.git"
@@ -331,6 +347,6 @@ if __name__ == "__main__":
     if not (args.folder / "venv").exists():
         sys.exit("make a Python 3.9 with mpmath 1.3 and pytest at <folder>/venv first")
     if not (args.folder / "valid.json").exists():
-        validate(args.folder)
+        validate(args.folder, args.workers)
     if not (args.folder / "sessions.json").exists():
-        plan_sessions(args.folder)
+        plan_sessions(args.folder, args.workers)

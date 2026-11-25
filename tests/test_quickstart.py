@@ -157,8 +157,10 @@ class LinkTests(unittest.TestCase):
         pages = [
             page
             for page in ROOT.rglob("*.md")
-            if not {".venv", "node_modules", ".claude"}
-            & set(page.relative_to(ROOT).parts)
+            if not any(
+                part.startswith(".") or part == "node_modules"
+                for part in page.relative_to(ROOT).parts
+            )
         ]
         self.assertGreater(len(pages), 10)
         for page in pages:
