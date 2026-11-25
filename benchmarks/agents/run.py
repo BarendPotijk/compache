@@ -453,23 +453,63 @@ RANDOM = (
 )
 
 
-def sweep(folder: Path) -> None:
-    """End what an agent left running in a folder: it goes on for hours, and slows the others."""
+def inside(folder: Path) -> list[int]:
+    """The processes that work in a folder."""
+    if Path("/proc/self/cwd").exists():
+        said = [(p.name, _link(p / "cwd")) for p in Path("/proc").glob("[0-9]*")]
+        return [int(pid) for pid, at in said if Path(at).is_relative_to(folder)]
     said = subprocess.run(
         ["lsof", "-a", "-d", "cwd", "-Fpn"],
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
         text=True,
     ).stdout
-    pid = None
+    found, pid = [], 0
     for line in said.splitlines():
         if line.startswith("p"):
             pid = int(line[1:])
         elif line.startswith("n") and Path(line[1:]).is_relative_to(folder):
-            try:
-                os.kill(pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
+            found.append(pid)
+    return found
+
+
+def _link(path: Path) -> str:
+    try:
+        return os.readlink(path)
+    except OSError:
+        return "/"
+
+
+def sweep(folder: Path, over: int = 0, but: int = 0) -> None:
+    """End what works in a folder: all of it, or what holds more than so many megabytes.
+
+    An agent's test runs outlive it, for hours and with gigabytes."""
+    pids = [pid for pid in inside(folder) if pid != but]
+    if over and pids:
+        listed = ",".join(map(str, pids))
+        said = subprocess.run(
+            ["ps", "-o", "pid=,rss=", "-p", listed], stdout=subprocess.PIPE, text=True
+        ).stdout
+        sizes = [line.split() for line in said.splitlines()]
+        pids = [int(pid) for pid, rss in sizes if int(rss) > over * 1024]
+    for pid in pids:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
+def wait(running, folder: Path, limit: float, over: int):
+    """How an agent's prompt ended. Nothing that it starts may grow without end."""
+    until = time.time() + limit
+    while time.time() < until:
+        try:
+            return running.wait(min(5, max(0.1, until - time.time())))
+        except subprocess.TimeoutExpired:
+            sweep(folder, over, but=running.pid)
+    os.killpg(running.pid, signal.SIGKILL)
+    running.wait()
+    return "timeout"
 
 
 class Repository:
@@ -556,11 +596,8 @@ def play_one(args, arm: str, which: str, repeat: int, key: str, bill: Bill) -> d
                     stderr=subprocess.STDOUT,
                     start_new_session=True,
                 )
-                try:
-                    status = running.wait(args.limit)
-                except subprocess.TimeoutExpired:
-                    os.killpg(running.pid, signal.SIGKILL)
-                    status = "timeout"
+                status = wait(running, folder.resolve(), args.limit, args.memory)
+                sweep(folder.resolve())
             said.append(
                 (folder / f"out-{k}.txt").read_bytes()[-300:].decode("utf-8", "replace")
             )
@@ -788,7 +825,12 @@ def main(argv=None):
     sub.add_argument(
         "--budget", type=float, default=1.0, help="Dollars for this command"
     )
-    sub.add_argument("--workers", type=int, default=2)
+    sub.add_argument(
+        "--workers", type=int, default=1, help="Runs at a time. Each wants 1 to 2 GB"
+    )
+    sub.add_argument(
+        "--memory", type=int, default=1200, help="Most megabytes of a process it starts"
+    )
     sub.add_argument("--turns", type=int, default=150, help="Most turns of an agent")
     sub.add_argument(
         "--limit", type=float, default=900, help="Most seconds of a prompt"
