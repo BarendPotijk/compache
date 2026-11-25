@@ -99,7 +99,7 @@ An agent sends every tool result again with every call. compache keeps the newes
 
 ![What long sessions with Claude Code had cost after each prompt. One task in 13 prompts: alone $0.41, Headroom $0.40, Kompressor $0.28, compache $0.13. 17 issues in one conversation: alone $1.20 after 16 prompts, compache $0.22 after all 17](docs/assets/agents-live.svg)
 
-As many tests passed and issues solved. Where the price does not jump with the size of a request, as on Claude Sonnet 5.5, it saves [5% to 43%](docs/agents.md#what-it-saves) by how an agent is worked with. `compache stats` says what it saved. In your own agent it is one argument: `compache.wrap(client, learn="compache-record")`.
+As many tests passed and issues solved. Where the price does not jump with the size of a request, as on Claude Sonnet 5.5, it saves [5% to 43%, modeled](docs/agents.md#what-it-saves), by how an agent is worked with. `compache stats` says what it saved. In your own agent it is one argument: `compache.wrap(client, learn="compache-record")`.
 
 ## Works with
 
