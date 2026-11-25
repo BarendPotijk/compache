@@ -19,26 +19,30 @@ REPOSITORY = "BarendPotijk/compache"
 LINK = re.compile(
     r"(!?)\[((?:[^\[\]]|\[[^\[\]]*\])*)\]\((?!https?://|mailto:)([^)\s]+)\)"
 )
-# An image in HTML, `<img src="path">`.
+# The same in HTML: `<img src="path">`, `<a href="path">`.
 IMAGE = re.compile(r'(<img [^>]*?src=")(?!https?://)')
+ANCHOR = re.compile(r'(<a [^>]*?href=")(?!https?://|mailto:)([^"]+)')
 
 
 def absolute(text: str, ref: str) -> str:
+    raw = f"https://raw.githubusercontent.com/{REPOSITORY}/{ref}/"
+
+    def page(target):
+        place = "tree" if target.startswith("#") else "blob"
+        between = "" if target.startswith("#") else "/"
+        return f"https://github.com/{REPOSITORY}/{place}/{ref}{between}{target}"
+
     def spell(match):
         image, label, target = match.groups()
-        if image:
-            base = f"https://raw.githubusercontent.com/{REPOSITORY}/{ref}/"
-        elif target.startswith("#"):
-            base = f"https://github.com/{REPOSITORY}/tree/{ref}"
-        else:
-            base = f"https://github.com/{REPOSITORY}/blob/{ref}/"
         # The label of a link may itself hold an image.
-        return f"{image}[{LINK.sub(spell, label)}]({base}{target})"
+        shown = raw + target if image else page(target)
+        return f"{image}[{LINK.sub(spell, label)}]({shown})"
 
     text = LINK.sub(spell, text)
     # PyPI's page is light whatever the reader's system is.
     text = re.sub(r"\s*<source [^>]*>", "", text)
-    text = IMAGE.sub(rf"\1https://raw.githubusercontent.com/{REPOSITORY}/{ref}/", text)
+    text = IMAGE.sub(rf"\1{raw}", text)
+    text = ANCHOR.sub(lambda m: m[1] + page(m[2]), text)
     # On the package's own page, the package comes from there.
     return text.replace(
         f"pip install git+https://github.com/{REPOSITORY}", "pip install compache"
