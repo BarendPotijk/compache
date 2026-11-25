@@ -50,9 +50,9 @@ class Slot:
     so one part: a tool that answers in several text blocks still retrieved once.
     `closes` marks an answer that says nothing and calls no tool: it has no
     text to decide on, and still ends its turn. `answers` marks what a tool
-    returned to the model that called it: the turn goes on from there. `stays`
-    marks a result that holds something else too, such as an image, which a
-    notice does not stand for.
+    returned to the model that called it: the turn goes on from there. A result
+    that holds pictures too goes out of view as a `whole`: that is where all of
+    it sits. One that holds something else `stays`.
     """
 
     kind: str
@@ -63,6 +63,7 @@ class Slot:
     closes: bool = False
     answers: bool = False
     stays: bool = False
+    whole: tuple | None = None
 
 
 @dataclass
@@ -179,12 +180,34 @@ def put(body: Any, path: tuple, value: Any) -> Any:
     return {**(body or {}), head: changed}
 
 
-def _more_than_text(content: Any, types=("text",)) -> bool:
-    """Whether a result's content holds something else, such as an image."""
-    return isinstance(content, list) and any(
-        isinstance(part, dict) and part.get("type", "text") not in types
-        for part in content
-    )
+# Blocks that are a picture, a document or sound, in any of the APIs.
+_MEDIA_TYPES = {
+    "computer_screenshot",
+    "document",
+    "file",
+    "image",
+    "image_url",
+    "input_audio",
+    "input_file",
+    "input_image",
+}
+
+
+def media_in(content: Any) -> list:
+    """The blocks of a result's content that are pictures or the like."""
+    if not isinstance(content, list):
+        return []
+    return [b for b in content if isinstance(b, dict) and b.get("type") in _MEDIA_TYPES]
+
+
+def _beside_text(content: Any, base: tuple, types=("text",)) -> dict:
+    """How a result goes out of view, where its content at `base` holds more than text."""
+    if not isinstance(content, list):
+        return {}
+    kinds = {p.get("type", "text") for p in content if isinstance(p, dict)} - {*types}
+    if not kinds:
+        return {}
+    return {"whole": base} if kinds <= _MEDIA_TYPES else {"stays": True}
 
 
 def _text_parts(content: Any, base: tuple, types=("text",)) -> list[tuple[tuple, str]]:
@@ -533,6 +556,8 @@ class OpenAIChat:
     """`POST /chat/completions`, as OpenAI and every compatible gateway serve it."""
 
     name = "openai-chat"
+    # What a block of text in a result is called, beside blocks of something else.
+    text_block = "text"
     suffixes = ("/chat/completions",)
 
     # -- request -----------------------------------------------------------
@@ -550,13 +575,13 @@ class OpenAIChat:
                 continue
             kind = {"user": "input", "assistant": "output"}.get(role, "retrieval")
             answers = role == "function" or bool(message.get("tool_call_id"))
-            stays = False
+            more: dict = {}
             if answers:
                 scan.results.append(message.get("tool_call_id"))
                 found = found or [(base, "")]
-                stays = _more_than_text(message.get("content"))
+                more = _beside_text(message.get("content"), base)
             scan.slots += [
-                Slot(kind, path, text, i, i, answers=answers, stays=stays)
+                Slot(kind, path, text, i, i, answers=answers, **more)
                 for path, text in found
             ]
             calls = message.get("tool_calls") or message.get("function_call")
@@ -987,6 +1012,7 @@ class Anthropic:
     """`POST /messages`, the Anthropic Messages API, and the same on Google's Vertex AI."""
 
     name = "anthropic"
+    text_block = "text"
     suffixes = ("/messages", ":rawPredict", ":streamRawPredict")
 
     @staticmethod
@@ -1026,17 +1052,11 @@ class Anthropic:
                 elif kind == "tool_result":
                     scan.results.append(block.get("tool_use_id"))
                     at, held = (*base, j, "content"), block.get("content")
-                    stays = _more_than_text(held)
+                    more = _beside_text(held, at)
                     for path, text in _text_parts(held, at) or [(at, "")]:
                         scan.slots.append(
                             Slot(
-                                "retrieval",
-                                path,
-                                text,
-                                i,
-                                (i, j),
-                                answers=True,
-                                stays=stays,
+                                "retrieval", path, text, i, (i, j), answers=True, **more
                             )
                         )
             if mine == "output" and not said and not called:
@@ -1510,6 +1530,7 @@ class OpenAIResponses:
     """`POST /responses`, with the conversation sent in full on every request."""
 
     name = "openai-responses"
+    text_block = "input_text"
     suffixes = ("/responses",)
 
     @staticmethod
@@ -1567,11 +1588,12 @@ class OpenAIResponses:
                         if isinstance(part, dict)
                         and isinstance(part.get("stdout"), str)
                     ]
-                stays = kind != "shell_call_output" and _more_than_text(
-                    item.get("output"), ("input_text", "output_text", "text")
-                )
+                more = {}
+                if kind != "shell_call_output":
+                    types = ("input_text", "output_text", "text")
+                    more = _beside_text(item.get("output"), base, types)
                 scan.slots += [
-                    Slot("retrieval", path, text, i, i, answers=True, stays=stays)
+                    Slot("retrieval", path, text, i, i, answers=True, **more)
                     for path, text in found or [(base, "")]
                 ]
                 last = "tool"
@@ -2376,6 +2398,8 @@ _NO_TEXT = {"data", "signature", "encrypted_content", "thoughtSignature"}
 def volume(value: Any) -> int:
     """How many bytes of text a request holds: what is said in it, its instructions and its tools."""
     if isinstance(value, str):
+        if value.startswith("data:") and ";base64," in value[:100]:
+            return 0
         return len(value) if value.isascii() else len(value.encode("utf-8", "replace"))
     if isinstance(value, dict):
         return sum(volume(v) for k, v in value.items() if k not in _NO_TEXT)
@@ -2384,20 +2408,8 @@ def volume(value: Any) -> int:
     return 0
 
 
-# Where a request holds what is no text, in any of the APIs.
-_MEDIA = {
-    "data",
-    "file",
-    "fileData",
-    "file_data",
-    "file_id",
-    "file_url",
-    "image_url",
-    "inlineData",
-    "inline_data",
-    "input_audio",
-}
-_MEDIA_TYPES = {"image", "document", "input_image", "input_file", "computer_screenshot"}
+# Where a request holds what is no text, beside blocks of such a type.
+_MEDIA = {"fileData", "file_data", "inlineData", "inline_data"}
 
 
 def holds_media(value: Any) -> bool:

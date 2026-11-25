@@ -8,7 +8,7 @@ import threading
 import unittest
 
 import compache
-from compache import wire
+from compache import stats, wire
 from compache.live import Result
 from compache.record import load, load_calls
 from fakes import NOTICE, FakeModel, noticed, tokens
@@ -607,25 +607,123 @@ class ResultTests(unittest.TestCase):
             self.assertEqual([r["calls"] for t in threads for r in t["runs"]], [25])
             self.assertTrue(noticed(model.bodies[-1]))
 
-    def test_one_with_an_image_stays(self):
-        def content(k):
-            text = {"type": "text", "text": result(k)}
-            return [text, self.IMAGE] if k % 4 == 0 else result(k)
+    @staticmethod
+    def pictured(shape, k):
+        """A result of some text and a screenshot, as each API has it."""
+        data = "x" * 6000
+        if shape is Claude:
+            image = {"type": "base64", "media_type": "image/png", "data": data}
+            return [
+                {"type": "text", "text": result(k)},
+                {"type": "image", "source": image},
+            ]
+        url = "data:image/png;base64," + data
+        if shape is Codex:
+            return [
+                {"type": "input_text", "text": result(k)},
+                {"type": "input_image", "image_url": url},
+            ]
+        return [
+            {"type": "text", "text": result(k)},
+            {"type": "image_url", "image_url": {"url": url}},
+        ]
 
-        live, model, folder = self.play(content)
-        for body in model.bodies:
-            for found in Claude.results(body):
-                if isinstance(found, list):
-                    self.assertFalse(noticed(found))
-        self.assertTrue(noticed(model.bodies[-1]))
+    def test_one_with_an_image_goes_and_comes_back_as_a_whole(self):
+        for shape in (Claude, Chat, Codex):
+            for stream in (False, True):
+                with self.subTest(shape=shape.__name__, stream=stream):
+                    fetched: list = []
+
+                    def script(request, fetched=fetched):
+                        body = json.dumps(request["body"])
+                        if len(model.bodies) <= 24:
+                            if len(model.bodies) == 20 and not fetched:
+                                # The eldest, which held one.
+                                fetched.append(NOTICE.findall(body)[0])
+                                ask = (REOPEN, {"reference": fetched[0]})
+                                return {"text": "", "tool": ask}
+                            return {"text": "", "tool": ("look", {"n": 1})}
+                        return {"text": "All done."}
+
+                    clock = Clock()
+                    model = FakeModel(script, clock=lambda: clock.at)
+                    folder = tempfile.TemporaryDirectory()
+                    self.addCleanup(folder.cleanup)
+                    live = compache.Live(
+                        policy(rounds=4, ratio=0.0), record=folder.name, clock=clock
+                    )
+                    app = Agent(live, shape(), model, stream=stream)
+                    app.shape.ask("Click through the site.")
+                    for k in range(1, 26):
+                        _, calls = app.call()
+                        if not calls:
+                            break
+                        clock.at += 5
+                        found = self.pictured(shape, k) if k % 4 == 1 else result(k)
+                        app.shape.answer([(c, found) for c, _ in calls])
+                    self.assertEqual(live.stats["reopened"], 1)
+                    self.assertEqual(live.stats["stood_down"], 0)
+                    self.assertEqual(live.stats["retried"], 0)
+                    last = shape.results(model.bodies[-1])
+                    out = [noticed(r) for r in last]
+                    self.assertEqual(out[-4:], [False] * 4)
+                    self.assertTrue(all(out[:12]))
+                    for found in last:
+                        if noticed(found):
+                            self.assertIsInstance(found, str)
+                            self.assertLess(len(found), 200)
+                    # What it was fetched back with holds the picture.
+                    again = [
+                        body
+                        for body in model.bodies
+                        if any(
+                            isinstance(r, list) and "status" in json.dumps(r)
+                            for r in shape.results(body)
+                        )
+                    ]
+                    self.assertTrue(again)
+                    held = next(
+                        r
+                        for r in shape.results(again[0])
+                        if isinstance(r, list) and "status" in json.dumps(r)
+                    )
+                    self.assertEqual(len(wire.media_in(held)), 1)
+                    self.assertIn("a line of file number 1 ", json.dumps(held))
+                    (conversation,) = live.conversations()
+                    flow = conversation.session._engine.flow
+                    self.assertEqual(flow.size, sum(flow.shown))
+                    rows = load_calls(folder.name)
+                    left = [r.get("left_tokens", 0) for r in rows]
+                    self.assertGreater(max(left), 4 * 1200)
+
+    def test_a_screenshot_alone(self):
+        live, model, folder = self.play(lambda k: [self.IMAGE])
+        last = Claude.results(model.bodies[-1])
+        self.assertEqual([noticed(r) for r in last], [True] * 20 + [False] * 4)
+        self.assertEqual(live.stats["stood_down"], 0)
         (conversation,) = live.conversations()
         flow = conversation.session._engine.flow
-        self.assertEqual(flow.size, sum(flow.shown))
         counted = tokens([model.bodies[-1]["messages"]])
         self.assertLess(abs(flow.size - counted) / counted, 0.25)
-        # An image's tokens have no text, so they do not count for what text was left out.
-        rows = load_calls(folder)
-        self.assertTrue(all(r["media"] for r in rows[4:] if r["kind"] == "answer"))
+        # Its tokens were counted as it came, and count as left out.
+        found = stats.savings(folder)
+        (entry,) = found["unpriced"].values()
+        whole = sum(tokens([b["messages"]]) for b in model.bodies)
+        self.assertGreater(entry["left_out_tokens"], whole)
+        threads, _ = load(folder)
+        compache.load_threads(threads, model="agent-model")
+
+    def test_one_with_something_else_stays(self):
+        def content(k):
+            text = {"type": "text", "text": result(k)}
+            tool = {"type": "tool_reference", "tool_name": "x"}
+            return [text, tool] if k % 4 == 0 else result(k)
+
+        live, model, _ = self.play(content)
+        kept = [r for r in Claude.results(model.bodies[-1]) if isinstance(r, list)]
+        self.assertEqual(len(kept), 6)
+        self.assertFalse(noticed(kept))
+        self.assertTrue(noticed(model.bodies[-1]))
 
     def test_what_counts_as_an_image(self):
         for held, body in (

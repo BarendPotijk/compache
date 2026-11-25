@@ -22,7 +22,8 @@ class Source:
     chunk_id: str = ""
     # Adapter metadata, never part of the rendered prefix or expansion handle.
     cited_part_ids: tuple[str, ...] = field(default=(), compare=False)
-    # Whether it holds more than its text, so that no notice stands for it.
+    # Whether it holds more than its text, and whether no notice can stand for that.
+    more: bool = field(default=False, compare=False)
     stays: bool = field(default=False, compare=False)
 
     def __post_init__(self):

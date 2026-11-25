@@ -170,6 +170,8 @@ _MOST_AT_ONE_POINT = 16
 _NOTE_TOKENS = 2048
 # What stands in for the further pieces of a part whose first piece carries the notice.
 _GONE = "…"
+# What stands for the text of a result that holds pictures and says nothing.
+_WORDLESS = "(no text)"
 
 
 @dataclass
@@ -205,11 +207,16 @@ class _Found:
     @property
     def taken(self) -> Any:
         """As the policy's session takes it."""
-        return {"text": self.text, "stays": True} if self.slots[0].stays else self.text
+        first = self.slots[0]
+        if first.stays or first.whole is not None:
+            more = {"stays": first.stays, "more": first.whole is not None}
+            return {"text": self.text, **more}
+        return self.text
 
     @property
     def text(self) -> str:
-        return "\n\n".join(s.text for s in self.slots)
+        said = "\n\n".join(s.text for s in self.slots)
+        return said or (_WORDLESS if self.slots[0].whole is not None else said)
 
     @property
     def answers(self) -> bool:
@@ -289,8 +296,10 @@ class _Pending:
     # Bytes of text compache left out of its last request, less what it added, and what it held.
     left: int = 0
     held: int = 0
-    # Whether its last request holds images or the like, whose tokens have no text.
+    # Whether its last request holds pictures or the like, whose tokens have no text, and how many
+    # tokens of them were left out of it.
     media: bool = False
+    left_more: int = 0
     # Whether anything was out of view in any of its requests.
     cut: bool = False
     # The message that will carry the reply, where that holds reasoning.
@@ -564,7 +573,7 @@ def _segments(slots, remarks: bool = True) -> list[_Segment]:
     for slot in slots:
         if slot.answers:
             results = slot.message
-        if not slot.text and not slot.closes:
+        if not slot.text and not slot.closes and slot.whole is None:
             continue
         if slot.kind == "input":
             remark = remarks and slot.message == results and tagged(slot.text)
@@ -1766,7 +1775,9 @@ class Live:
                     for j, found in enumerate(segment.retrievals, 1)
                 ]
                 for part_id, slots in pieces:
-                    if part_id in notice:
+                    if part_id in notice and slots and slots[0].whole is not None:
+                        out = wire.put(out, slots[0].whole, notice[part_id])
+                    elif part_id in notice:
                         for i, slot in enumerate(slots):
                             shown = _GONE if i else notice[part_id]
                             out = wire.set_text(dialect, out, slot.path, shown)
@@ -1814,6 +1825,7 @@ class Live:
             pending.held = wire.volume(out)
             pending.left = wire.volume(body) - pending.held
             pending.media = wire.holds_media(dialect.said_so_far(out))
+            pending.left_more = conversation.session.left_more
         pending.cut = pending.cut or bool(turn.archived_ids)
         # Where those are in the request as it goes out: behind messages of ours.
         shift = len(dialect.said_so_far(out)) - len(said) - put_in + len(gone)
@@ -2267,10 +2279,11 @@ class Live:
                 part = found.get("part_id")
                 if part and part not in pending.reopened:
                     pending.reopened.append(part)
-            answers[call["id"]] = json.dumps(_for_model(found), ensure_ascii=False)
+            told = json.dumps(_for_model(found), ensure_ascii=False)
+            answers[call["id"]] = self._with_pictures(asked, part, told)
             if not part or conversation.session.shows_again(part):
                 part = f"reopened:{uuid.uuid4().hex[:12]}"
-            names.append((part, answers[call["id"]]))
+            names.append((part, told))
         if asked is not None and conversation.pending is not None:
             try:
                 heard = asked.dialect.said_so_far(asked.body)
@@ -2303,6 +2316,21 @@ class Live:
             except Exception:
                 logger.warning("compache: a fetched part does not stay", exc_info=True)
         return answers
+
+    @staticmethod
+    def _with_pictures(asked: _Call | None, part: str | None, told: str) -> Any:
+        """What a fetch is answered with: what it found, and the pictures that stood with it."""
+        if asked is None or not part or ":retrieval:" not in part:
+            return told
+        _, turn, _, at = part.rsplit(":", 3)
+        try:
+            whole = asked.turns[int(turn) - 1].retrievals[int(at) - 1].slots[0].whole
+            pictures = wire.media_in(wire.get(asked.body, whole)) if whole else []
+        except (IndexError, KeyError, TypeError, ValueError):
+            return told
+        if not pictures:
+            return told
+        return [{"type": asked.dialect.text_block, "text": told}, *pictures]
 
     def _after(self, call: _Call, text: str, calls, reasons: bool = False) -> None:
         """A reply has been read: the turn goes on with tool calls, or ends with this answer."""
@@ -2569,7 +2597,7 @@ class Live:
             self.tokens[name] += count
         if used and pending is not None and pending.held and kind == "answer":
             out = left_out(pending.left, pending.held, used["input"], pending.media)
-            self.tokens["left_out"] += max(0, out)
+            self.tokens["left_out"] += max(0, out + pending.left_more)
         if self.recorder is None:
             return
         archived, left = None, None
@@ -2593,6 +2621,7 @@ class Live:
             archived=archived,
             left=left,
             media=left is not None and pending.media,
+            left_more=pending.left_more if left is not None else 0,
             lifetime=conversation.lifetime,
             header_lifetime=conversation.header_lifetime,
             long_write=long_writes(source.usage),

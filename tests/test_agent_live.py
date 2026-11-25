@@ -1025,6 +1025,47 @@ class BoundReasoningTests(unittest.TestCase):
         self.assertEqual(len(self.held(model.bodies[-1])), 5)
         self.check(app, model)
 
+    def test_a_chat(self):
+        """Not only an agent's policy changes what stands ahead of reasoning."""
+        for stream in (False, True):
+            for notes in ("apart", "inline"):
+                with self.subTest(stream=stream, notes=notes):
+                    clock = Clock(1_990_000_000.0)
+
+                    def script(request):
+                        last = request["body"]["messages"][-1]["content"]
+                        if isinstance(last, list) and last[0]["type"] == "tool_result":
+                            return {"text": f"Answer {request['n']}.", "thinking": 90}
+                        return {"tool": ("search_docs", {"query": "x"}), "thinking": 60}
+
+                    model = FakeModel(script, clock=clock, binds="error")
+                    folder = tempfile.TemporaryDirectory()
+                    self.addCleanup(folder.cleanup)
+                    live = compache.Live(
+                        test_live.fitted(),
+                        record=folder.name,
+                        sample=1.0,
+                        notes=notes,
+                        clock=clock,
+                    )
+                    shape = Claude()
+                    shape.model = "claude-sonnet-5-5"
+                    app = Agent(live, shape, model, stream=stream)
+                    for n in range(1, 7):
+                        shape.ask(f"What does section {n} say?")
+                        _, calls = app.call()
+                        self.assertTrue(calls)
+                        found = test_live.passage(n)
+                        shape.answer([(call, found) for call, _ in calls])
+                        text, calls = app.call()
+                        self.assertFalse(calls)
+                        self.assertTrue(text.startswith("Answer"), text)
+                        live.drain(5)
+                        clock.at += 4000
+                    self.assertTrue(noticed(model.bodies[-1]))
+                    self.assertEqual(live.stats["policy_refused"], 0)
+                    self.assertEqual(live.stats["stood_down"], 0)
+
     def test_two_that_go_on_from_the_same_start(self):
         app, model = self.play(8)
         other = Agent(app.live, Claude(), model, clock=app.clock)

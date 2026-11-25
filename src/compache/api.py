@@ -749,6 +749,7 @@ class Session:
                     fields.get("document_id", part_id),
                     fields.get("version", "1"),
                     fields.get("chunk_id", part_id),
+                    more=bool(fields.get("more")),
                     stays=bool(fields.get("stays")),
                 )
             )
@@ -867,6 +868,11 @@ class Session:
         """Say which messages go out without their reasoning from here on."""
         if self.policy.agentic:
             self._engine.unbound(places)
+
+    @property
+    def left_more(self) -> int:
+        """Tokens of pictures and the like that are out of view, as the provider counted them."""
+        return self._engine.left_more if self.policy.agentic else 0
 
     @property
     def holds(self):

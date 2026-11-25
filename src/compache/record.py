@@ -156,6 +156,7 @@ class Recorder:
         archived=None,
         left=None,
         media=False,
+        left_more=0,
         lifetime=None,
         header_lifetime=None,
         long_write: int = 0,
@@ -191,6 +192,8 @@ class Recorder:
             row["left_bytes"], row["sent_bytes"] = left
         if media:
             row["media"] = True
+        if left_more:
+            row["left_tokens"] = left_more
         if lifetime is not None:
             row["ttl"] = lifetime
         if header_lifetime is not None:

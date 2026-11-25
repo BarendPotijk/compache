@@ -23,7 +23,7 @@ so what was priced is what happens.
 from __future__ import annotations
 
 import json
-from bisect import bisect_left
+from bisect import bisect_left, insort
 from dataclasses import asdict, dataclass, replace
 
 from .errors import ContractError
@@ -241,6 +241,9 @@ class Flow:
         self.shown[i] = self.whole[i] = tokens
         if self.names[i] is not None:
             self.sizes[self.names[i][0]] = tokens
+            if tokens > self.notice and i not in self.held and i not in self.live:
+                # It is worth a notice after all.
+                insort(self.live, i)
         self.ripe, self.freed, self.ahead = 0, 0, (0, 0)
 
     def gone(self, name) -> bool:
@@ -935,8 +938,10 @@ class AgentEngine:
         self._out: set = set()
         self._counts_thoughts: bool | None = None
         self._keeps_thoughts: bool | None = None
-        # A result of the request under way that holds more than text.
-        self._more: int | None = None
+        # Results of the request under way that hold more than text, and what the text of those that
+        # can go is taken to hold.
+        self._more: list = []
+        self._pictures: dict = {}
         # Where the cut ended that the request under way was made with.
         self._just_cut: int | None = None
         # The turn that is being answered, and how everything stood before it.
@@ -947,7 +952,8 @@ class AgentEngine:
         made.__dict__.update(self.__dict__)
         made.flow, made._known = self.flow.copy(), set(self._known)
         made._fresh, made._thoughts = list(self._fresh), dict(self._thoughts)
-        made._out = set(self._out)
+        made._out, made._more = set(self._out), list(self._more)
+        made._pictures = dict(self._pictures)
         return made
 
     def _begins(self, run_id) -> None:
@@ -982,11 +988,21 @@ class AgentEngine:
             self._known.add(part.part_id)
             named = part.part_id if part.kind == "retrieval" else None
             ruled = self.spec.part_tokens(part.text)
-            if part.stays:
-                # What it holds besides has tokens that no ruler tells.
-                self._more = len(self.flow.shown)
-                named = None
+            if part.stays or part.more:
+                # What it holds besides its text has tokens that no ruler tells.
+                self._more.append(len(self.flow.shown))
+                if part.stays:
+                    named = None
+                else:
+                    self._pictures[named] = round(ruled * self._off)
             self._joins(ruled, named)
+
+    @property
+    def left_more(self) -> int:
+        """What pictures and the like that are out of view were counted as."""
+        sizes = self.flow.sizes
+        gone = (n for n in self._pictures if self.flow.gone(n))
+        return sum(max(0, sizes[n] - self._pictures[n]) for n in gone)
 
     def _joins(self, ruled: int, name=None) -> None:
         self._fresh.append((len(self.flow.shown), ruled))
@@ -1117,17 +1133,20 @@ class AgentEngine:
         flow = self.flow
         # What a cut has taken already is a notice, and that is as long as it is.
         fresh = [(i, r) for i, r in self._fresh if r and flow.shown[i] == flow.whole[i]]
-        self._fresh = []
+        more = [i for i in self._more if flow.shown[i] == flow.whole[i]]
+        self._fresh, self._more = [], []
+        if self._just_cut is None:
+            self._counted_thoughts(reported)
+        hidden = reported - flow.size
+        if more and hidden > 0:
+            # A picture's tokens outweigh whatever else was not told by the ruler.
+            for i in more:
+                flow.resize(i, flow.shown[i] + hidden // len(more))
+            flow.resize(more[-1], flow.shown[more[-1]] + hidden % len(more))
+            return
         if self._just_cut is not None:
             # What went was larger, or smaller, than it was counted as.
-            self._more = None
-            flow.settle(self._just_cut, reported - flow.size)
-            return
-        self._counted_thoughts(reported)
-        hidden = reported - flow.size
-        more, self._more = self._more, None
-        if more is not None and hidden > 0:
-            flow.resize(more, flow.shown[more] + hidden)
+            flow.settle(self._just_cut, hidden)
             return
         held = sum(flow.shown[i] for i, _ in fresh)
         if not held or held + hidden <= 0:

@@ -146,6 +146,8 @@ def savings(source) -> dict:
                 left = record.left_out(
                     row["left_bytes"], row["sent_bytes"], size, bool(row.get("media"))
                 )
+                # Pictures have no text. They were counted when they arrived.
+                left += row.get("left_tokens", 0)
             whole = max(0, size + left)
             first = before.first if before is not None else whole
             # What another conversation had cached, such as the same instructions, it would have read
