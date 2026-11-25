@@ -20,7 +20,7 @@ Costs are modeled: every request and ping is priced with the provider's cache ru
 
 ## Coding agents
 
-[Agents](agents/README.md): Claude Code and Codex live, next to Headroom and Kompressor, and 174 public runs modeled. Long sessions with Claude Code cost 67% to 85% less, sessions of some fifty calls 16% less, with as many issues solved.
+[Agents](agents/README.md): Claude Code and Codex live, next to Headroom and Kompressor, and 174 public runs modeled. Long sessions with Claude Code cost 51% to 85% less, sessions of some fifty calls 16% less, with as many issues solved.
 
 ## Other tools
 
