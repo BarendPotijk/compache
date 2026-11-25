@@ -213,10 +213,15 @@ def http_client(live: Live, *, inner=None, pings: bool = True, **options):
 def _let_go(events, close) -> None:
     """End a stream before its end: what reads it, and the response behind it."""
     closing = getattr(events, "close", None)
-    if closing is not None:
-        closing()
-    if close is not None:
-        close()
+    try:
+        if closing is not None:
+            closing()
+    except ValueError:
+        # It is being read at this moment, in another thread. That ends with the response.
+        pass
+    finally:
+        if close is not None:
+            close()
 
 
 def per_loop_transport(httpx):

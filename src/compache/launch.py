@@ -127,7 +127,7 @@ def _in_env_file(folder: str, api: str, variable: str):
         at, home = Path.cwd(), _home(env)
         for place in (at, *at.parents, home):
             for file in (place / folder / ".env", place / ".env"):
-                if not file.is_file():
+                if not os.path.isfile(file):
                     continue
                 said = re.search(
                     rf"^\s*(?:export\s+)?{variable}\s*=\s*[\"']?([^\"'\s#]+)",

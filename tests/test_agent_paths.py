@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import gc
 import json
 import tempfile
 import threading
+import time
 import unittest
 
 import compache
 from compache import stats, wire
 from compache.live import Result
 from compache.record import load, load_calls
+from compache.wrap import _let_go
 from fakes import NOTICE, FakeModel, noticed, tokens
 from test_agent_live import (
     REOPEN,
@@ -48,6 +51,10 @@ def fetching(at, count, text="Let me look back.", beside=()):
         return None
 
     return worker(count, extra)
+
+
+def sse(data) -> bytes:
+    return f"data: {json.dumps(data)}\n\n".encode()
 
 
 def files(k, j):
@@ -870,9 +877,6 @@ class LeftTests(unittest.TestCase):
 
     def test_one_that_is_dropped_is_let_go_of_elsewhere(self):
         """It may be collected by a thread that holds a lock, or by the loop that would have to close it."""
-        import gc
-        import time
-
         for reads in (0, 3):
             with self.subTest(reads=reads):
                 closed: list = []
@@ -922,6 +926,95 @@ class LeftTests(unittest.TestCase):
         answered.events.close()
         (conversation,) = live.conversations()
         self.assertEqual((conversation.pending.in_flight, closed), (0, [True]))
+
+    def held(self, closing=None):
+        """A stream whose reader waits in another thread until `gate` is set."""
+        gate, closed = threading.Event(), []
+
+        def events():
+            yield sse({"choices": [{"index": 0, "delta": {"content": "one"}}]})
+            gate.wait(10)
+            yield sse({"choices": [{"index": 0, "delta": {"content": "two"}}]})
+
+        live = compache.Live(policy(rounds=2))
+        body = {
+            "model": "agent-model",
+            "stream": True,
+            "messages": [{"role": "user", "content": "Hi"}],
+        }
+        answered = live.exchange(
+            Chat.path,
+            body,
+            lambda sent: Result(
+                200, events=events(), close=closing or (lambda: closed.append(True))
+            ),
+            thread="t",
+        )
+        next(answered.events)
+        found: list = []
+
+        def read():
+            found.append(next(answered.events, None))
+
+        reader = threading.Thread(target=read)
+        reader.start()
+        time.sleep(0.1)
+        (conversation,) = live.conversations()
+        return answered, conversation, gate, closed, reader, found
+
+    def test_one_that_another_thread_reads_can_be_closed(self):
+        answered, conversation, gate, closed, reader, found = self.held()
+        _let_go(answered.events, answered.close)
+        self.assertEqual(closed, [True])
+        gate.set()
+        reader.join()
+        # Its reader closes it, and is given no more of it.
+        self.assertEqual(found, [None])
+        self.assertEqual(conversation.pending.in_flight, 0)
+        # Nothing is left for whoever collects it, which may not wait for the conversation.
+        taken, over = threading.Event(), threading.Event()
+
+        def another():
+            with conversation.lock:
+                taken.set()
+                over.wait(5)
+
+        threading.Thread(target=another).start()
+        taken.wait()
+        begun = time.time()
+        del answered, reader
+        gc.collect()
+        self.assertLess(time.time() - begun, 1)
+        over.set()
+
+    def test_a_response_that_cannot_be_closed_leaves_no_turn_open(self):
+        def closing():
+            raise TimeoutError("its loop does not run")
+
+        answered, conversation, gate, _, reader, _ = self.held(closing)
+        gate.set()
+        reader.join()
+        answered.events.close()
+        self.assertEqual(conversation.pending.in_flight, 0)
+
+    def test_one_that_has_to_wait_holds_up_no_other(self):
+        first, waits, gate, _, reader, _ = self.held()
+        second, conversation, other, closed, reading, _ = self.held()
+        for one in (gate, other):
+            one.set()
+        reader.join()
+        reading.join()
+        with waits.lock:
+            del first, second
+            gc.collect()
+            until = time.time() + 5
+            while conversation.pending.in_flight and time.time() < until:
+                time.sleep(0.01)
+            self.assertEqual(conversation.pending.in_flight, 0)
+            self.assertEqual(waits.pending.in_flight, 1)
+        while waits.pending.in_flight and time.time() < until:
+            time.sleep(0.01)
+        self.assertEqual(waits.pending.in_flight, 0)
 
 
 class FailTests(unittest.TestCase):

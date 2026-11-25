@@ -474,57 +474,78 @@ class _Later:
     def _run(self) -> None:
         while True:
             action = self._waiting.get()
-            try:
-                action()
-            except Exception:
-                logger.debug("compache: a stream was not closed", exc_info=True)
+            # One may have to wait for its conversation, and the others not for that.
+            made = threading.Thread(target=self._try, args=(action,), daemon=True)
             del action
+            try:
+                made.start()
+            except RuntimeError:
+                made.run()
+            del made
+
+    @staticmethod
+    def _try(action: Callable[[], None]) -> None:
+        try:
+            action()
+        except Exception:
+            logger.debug("compache: a stream was not closed", exc_info=True)
 
 
 _LATER = _Later()
 
 
+@dataclass
+class _Reading:
+    """How far a streamed reply is: whether its events have begun, and whether somebody closes them."""
+
+    begun: bool = False
+    asked: bool = False
+
+
 class _Passing:
-    """A streamed reply on its way. One that is closed before it was read lets go of what it holds too.
+    """A streamed reply on its way. One that is closed before it was read lets go of what it holds too."""
 
-    `asked` tells the events behind it whether somebody closed them.
-    """
-
-    def __init__(self, events, release: Callable[[], None], asked: list):
-        self._events, self._release, self._asked = events, release, asked
-        self._begun = self._over = False
+    def __init__(self, events, release: Callable[[], None], reading: _Reading):
+        self._events, self._release, self._reading = events, release, reading
+        self._wanted = self._over = False
 
     def __iter__(self) -> _Passing:
         return self
 
     def __next__(self) -> bytes:
-        self._begun = True
         try:
-            return next(self._events)
+            found = next(self._events)
         except BaseException:
             self._over = True
             raise
+        if self._wanted:
+            # Another thread closed it while this one was reading.
+            self.close()
+            raise StopIteration
+        return found
 
     @staticmethod
-    def _close(events, release, asked, begun) -> None:
-        asked.append(True)
-        events.close()
-        if not begun:
+    def _close(events, release, reading) -> bool:
+        reading.asked = True
+        try:
+            events.close()
+        except ValueError:
+            # It is being read at this moment, in another thread.
+            reading.asked = False
+            return False
+        if not reading.begun:
             release()
+        return True
 
     def close(self) -> None:
-        begun, over = self._begun, self._over
-        self._begun = self._over = True
-        if not over:
-            self._close(self._events, self._release, self._asked, begun)
+        self._wanted = True
+        if not self._over:
+            # What is being read is closed by its reader, once that comes back.
+            self._over = self._close(self._events, self._release, self._reading)
 
     def __del__(self):
         if not self._over:
-            _LATER.do(
-                partial(
-                    self._close, self._events, self._release, self._asked, self._begun
-                )
-            )
+            _LATER.do(partial(self._close, self._events, self._release, self._reading))
 
 
 class Shown:
@@ -1578,9 +1599,9 @@ class Live:
                     result.close()
 
             _LATER.ready()
-            asked: list = []
-            events = self._stream(call, result, pending, asked)
-            return replace(result, events=_Passing(events, release, asked))
+            reading = _Reading()
+            events = self._stream(call, result, pending, reading)
+            return replace(result, events=_Passing(events, release, reading))
         return self._settle(call, result)
 
     def _under_default(self, call: _Call, result: Result) -> Result:
@@ -2133,12 +2154,10 @@ class Live:
         return reply.cut or not (reply.text or reply.calls)
 
     def _stream(
-        self, call: _Call, result: Result, pending, asked: list
+        self, call: _Call, result: Result, pending, reading: _Reading
     ) -> Iterator[bytes]:
-        """A streamed reply passed on as it arrives, with our own tool calls answered on the way.
-
-        `asked` holds something once somebody has closed it.
-        """
+        """A streamed reply passed on as it arrives, with our own tool calls answered on the way."""
+        reading.begun = True
         conversation, dialect = call.conversation, call.dialect
         most = _AGENT_ROUNDS if conversation.agentic else _ROUNDS
         tool = _REOPEN if conversation.session is not None else None
@@ -2149,8 +2168,12 @@ class Live:
 
         def let_go():
             for closing in closers:
-                if closing is not None:
-                    closing()
+                try:
+                    if closing is not None:
+                        closing()
+                except Exception:
+                    # The books are closed all the same.
+                    logger.debug("compache: a response was not closed", exc_info=True)
             if not closed:
                 if failed is not None:
                     editor.finished = False
@@ -2219,7 +2242,7 @@ class Live:
             editor.finished = False
             raise error.__cause__ from None
         except GeneratorExit:
-            dropped = not asked
+            dropped = not reading.asked
             raise
         finally:
             if dropped:
