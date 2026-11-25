@@ -2,9 +2,9 @@
 
 compache fits a policy to your own conversations. Before any are recorded,
 `default_policy` gives one fitted to a default workload instead: the one the
-cost calculator opens with. It is a place to start from while a record of your
-own traffic builds up, not a substitute for it: a default is one point, and
-your workload is somewhere else.
+cost calculator opens with, or for an agent public coding-agent runs. It is a
+place to start from while a record of your own traffic builds up, not a
+substitute for it: a default is one point, and your workload is somewhere else.
 
     policy = compache.default_policy("claude-sonnet-5-5")
     client = compache.wrap(client, policy, record="compache-record", sample=0.1)
@@ -16,8 +16,11 @@ from __future__ import annotations
 
 import math
 import random
+from dataclasses import asdict
 
+from .agent import SCHEMA, default_header, default_recipe
 from .api import Policy, fit
+from .models import cache_lifetimes, model_spec, pricing
 from .record import SIZES_ONLY
 
 __all__ = ["WORKLOAD", "default_policy", "default_workload"]
@@ -102,12 +105,29 @@ def default_workload(seed: int = 42, **changes) -> tuple[list[dict], list[dict]]
     return threads, labels
 
 
-def default_policy(model, *, seed: int = 42, **changes) -> Policy:
+def default_policy(model, *, agent: bool = False, seed: int = 42, **changes) -> Policy:
     """The policy fitted to the default workload, for `model`.
 
-    `model` is a known model name or a model spec, as for `fit`. `changes`
-    replace entries of `WORKLOAD`, for a default that is nearer to what you
-    expect, such as `retrieved_tokens=(4_000, 9_000)`.
+    `model` is a known model name or a model spec, as for `fit`. `agent` gives
+    the policy for loops of tool calls, fitted on public coding-agent runs.
+    `changes` replace entries of `WORKLOAD`, for a default that is nearer to
+    what you expect, such as `retrieved_tokens=(4_000, 9_000)`.
     """
-    threads, labels = default_workload(seed, **changes)
-    return fit(threads, labels, model=model)
+    if not agent:
+        threads, labels = default_workload(seed, **changes)
+        return fit(threads, labels, model=model)
+    if changes:
+        raise TypeError("the default policy for agents has no workload to change")
+    spec = model_spec(model)
+    header = default_header(spec, cache_lifetimes(model))
+    return Policy(
+        {
+            "schema_version": SCHEMA,
+            "model_spec": spec.to_dict(),
+            **({} if header is None else {"header_spec": header.to_dict()}),
+            "recipe": asdict(default_recipe(spec)),
+            "reserve_tokens": 8192,
+            "training_threads": [],
+            "pricing": pricing(model),
+        }
+    )

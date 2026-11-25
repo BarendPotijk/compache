@@ -2,10 +2,11 @@
 import {configurePolicy} from './engine.mjs';
 import {presetKey} from './models.mjs';
 
-export const POLICY_SCHEMA = 'compache-workload-planner-v1';
-export const isPolicy = data => data?.schema_version === POLICY_SCHEMA;
+export const POLICY_SCHEMA = 'compache-workload-planner-v1', AGENT_SCHEMA = 'compache-agent-v1';
+export const isPolicy = data => data?.schema_version === POLICY_SCHEMA || data?.schema_version === AGENT_SCHEMA;
 const decision = (recipe, pings, long) => configurePolicy({questions: recipe?.input_runs ?? null, answers: recipe?.output_runs ?? null, retrieved: recipe?.retrieval_runs ?? null, keepUnder: recipe?.keep_under_tokens ?? 0, maxPings: pings, long});
 export function readPolicy(data) {
+  if (data?.schema_version === AGENT_SCHEMA) throw new Error('an agent’s policy decides call by call, and here one decision is made per message: price it with `compache replay`');
   if (!isPolicy(data) || !Array.isArray(data.recipes) || !data.model_spec) throw new Error('this is not a policy written by `compache fit`');
   const recipe = data.recipes.find(r => r.eligible)?.recipe ?? null, solve = data.solve ?? {}, price = data.pricing?.input_price_per_million, turns = solve.turns;
   const per = cost => price && turns && Number.isFinite(cost) ? 1000 * cost / turns * price / 1e6 : null;

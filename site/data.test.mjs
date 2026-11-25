@@ -78,6 +78,7 @@ test('a fitted policy file gives its decision, its candidates and its costs', ()
     solve: {...data.solve, candidates: [300, 3600].map(seconds => ({recipe, max_pings: 3, cache_ttl_seconds: seconds, coverage: .9, expected_cost: 50000, complete: true}))}});
   assert.equal(lasting.policy.long, true); assert.deepEqual(lasting.lives, [5, 60]); assert.deepEqual(lasting.candidates.map(c => [c.policy.long, c.chosen]), [[false, false], [true, true]]);
   assert.throws(() => readPolicy({}), /not a policy/);
+  assert.throws(() => readPolicy({schema_version: 'compache-agent-v1', recipe: {rounds: 8}}), /call by call/);
 });
 test('every comparison is a valid set of rules for every model, and your app starts as sending everything', () => {
   for (const id of Object.keys(presets)) {

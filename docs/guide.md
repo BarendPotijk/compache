@@ -9,7 +9,7 @@ pip install compache
 | Step | Command | Python |
 |---|---|---|
 | See it on sample chats | `compache demo` | |
-| Read traces | `compache pull langfuse -o threads.jsonl.gz`, also `mlflow` and `otel` | `compache.langfuse.pull()` |
+| Read traces | `compache pull langfuse -o threads.jsonl.gz`, also `mlflow`, `otel`, `claude` and `codex` | `compache.langfuse.pull()` |
 | Or record going forward | `compache proxy --record compache-record --sample 0.1` | `compache.wrap(client, record=..., sample=0.1)` |
 | Check the data | `compache check threads.jsonl --labels labels.jsonl` | `compache.load_threads(path)` |
 | Fit | `compache fit threads.jsonl --labels labels.jsonl --model claude-sonnet-5-5` | `compache.fit(threads, labels, model=...)` |
@@ -38,6 +38,7 @@ One JSON object per line, one conversation each. A file, a gzipped file or a fol
 | `id` | Optional name of a retrieved document |
 | `usage` | Optional, on an assistant message: the provider's usage as returned. Its output count replaces the estimate, and its cache read says how much of the last request the turn found cached |
 | `model` | Optional, on an assistant message or on the thread: the model that answered. `fit` prices the threads as the model most of them record |
+| `tool_calls` | Optional, on an assistant message, or `tool_use` blocks in its content: their arguments say what an agent's reply relied on, see [Agents](agents.md) |
 
 A user message opens a turn. Everything retrieved and everything the assistant says before the next user message belongs to it. User messages sent before any answer merge into one question, and a last message that was never answered is dropped. The first system message becomes the system prompt of the fit.
 
@@ -167,6 +168,8 @@ compache fit compache-record --model claude-sonnet-5-5    # threads and labels b
 Either way, a reply that ignores the request leaves its turn unlabelled, and a part the model fetched back while answering counts as one the turn needed.
 
 For a policy from the first day, `compache default --model claude-sonnet-5-5` writes the one fitted to the default workload of the calculator. Refit on your record as it grows.
+
+For an agent, no notes are needed: [it learns from its loops](agents.md#how-it-learns).
 
 ## 3. Fit
 

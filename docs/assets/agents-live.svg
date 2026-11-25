@@ -1,0 +1,101 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="372" viewBox="0 0 880 372" role="img" aria-labelledby="t d">
+<title id="t">What long sessions had cost after each prompt</title>
+<desc id="d">Claude Haiku 5.5 in Claude Code, billed by the provider. Its price is five times higher for requests above 100k tokens. One task in 13 prompts: alone $0.41 after 13 prompts, alone $0.25 after 13 prompts, Headroom $0.40 after 13 prompts, Kompressor $0.28 after 13 prompts, compache $0.13 after 13 prompts, compache $0.12 after 13 prompts. 17 issues in one conversation: alone $1.20 after 16 prompts, alone $0.80 after 17 prompts, Headroom $0.14 after 8 prompts, Kompressor $0.95 after 12 prompts, compache $0.22 after 17 prompts, compache $0.13 after 17 prompts.</desc>
+<style>
+text{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;font-size:12px;fill:#0b0b0b}
+.surface{fill:#fcfcfb;stroke:rgba(11,11,11,.1)}
+.t2{fill:#52514e}.tm{fill:#898781}.b{font-weight:600}.h{font-size:13px;font-weight:600}.big{font-size:15px;font-weight:600}
+.grid{stroke:#e1e0d9}.axis{stroke:#c3c2b7}.box{fill:none;stroke:#c3c2b7}
+.c{fill:#2a78d6}.cs{stroke:#2a78d6}.n{fill:#898781}.ns{stroke:#898781}.o{fill:#eb6834}.os{stroke:#eb6834}
+.cell{fill:#e1e0d9}.ring{stroke:#fcfcfb;stroke-width:2}.line{fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.arc{fill:none;stroke-width:1.75;stroke-linecap:round}
+@media (prefers-color-scheme:dark){
+text{fill:#f0efec}.surface{fill:#1a1a19;stroke:rgba(255,255,255,.1)}.t2{fill:#c3c2b7}
+.grid{stroke:#2c2c2a}.axis{stroke:#383835}.box{stroke:#52514e}
+.c{fill:#3987e5}.cs{stroke:#3987e5}.o{fill:#d95926}.os{stroke:#d95926}
+.cell{fill:#383835}.ring{stroke:#1a1a19}
+}
+</style>
+<rect class="surface" x=".5" y=".5" width="879" height="371" rx="10"/>
+<style>.n2s{stroke:#b5b3a9}.n2{fill:#b5b3a9}.over{paint-order:stroke;stroke-width:6;stroke-linejoin:round}@media (prefers-color-scheme:dark){.n2s{stroke:#66655f}.n2{fill:#66655f}}</style>
+<text x="24.0" y="32.0" class="big">What long sessions had cost after each prompt</text>
+<text x="24.0" y="51.0" class="t2">Claude Haiku 5.5 in Claude Code, billed by the provider. Its price is five times higher for requests above 100k tokens.</text>
+<path class="line ns" d="M24,71 h16"/>
+<text x="47.0" y="75.5" class="t2">Claude Code alone</text>
+<path class="line n2s" d="M177.4,71 h16"/>
+<text x="200.4" y="75.5" class="t2">with Headroom or Kompressor</text>
+<path class="line cs" d="M392.8,71 h16"/>
+<text x="415.8" y="75.5" class="t2">with compache</text>
+<text x="24.0" y="102.0" class="h">One task in 13 prompts</text>
+<line class="axis" x1="62.0" x2="311.0" y1="316.0" y2="316.0"/>
+<text x="53.0" y="320.0" class="tm" text-anchor="end">0</text>
+<line class="grid" x1="62.0" x2="311.0" y1="276.0" y2="276.0"/>
+<text x="53.0" y="280.0" class="tm" text-anchor="end">$0.10</text>
+<line class="grid" x1="62.0" x2="311.0" y1="236.0" y2="236.0"/>
+<text x="53.0" y="240.0" class="tm" text-anchor="end">$0.20</text>
+<line class="grid" x1="62.0" x2="311.0" y1="196.0" y2="196.0"/>
+<text x="53.0" y="200.0" class="tm" text-anchor="end">$0.30</text>
+<line class="grid" x1="62.0" x2="311.0" y1="156.0" y2="156.0"/>
+<text x="53.0" y="160.0" class="tm" text-anchor="end">$0.40</text>
+<line class="grid" x1="62.0" x2="311.0" y1="116.0" y2="116.0"/>
+<text x="53.0" y="120.0" class="tm" text-anchor="end">$0.50</text>
+<text x="62.0" y="336.0" class="tm" text-anchor="middle">1</text>
+<text x="145.0" y="336.0" class="tm" text-anchor="middle">5</text>
+<text x="248.8" y="336.0" class="tm" text-anchor="middle">10</text>
+<text x="311.0" y="336.0" class="tm" text-anchor="middle">13</text>
+<text x="186.5" y="356.0" class="t2" text-anchor="middle">Prompt</text>
+<polyline class="line n2s" points="62.0,305.7 82.8,305.1 103.5,304.5 124.2,301.8 145.0,301.2 165.8,295.2 186.5,291.3 207.2,286.8 228.0,285.9 248.8,273.3 269.5,228.0 290.2,206.9 311.0,157.2"/>
+<polyline class="line n2s" points="62.0,305.3 82.8,304.7 103.5,304.1 124.2,299.4 145.0,298.7 165.8,294.9 186.5,289.5 207.2,288.0 228.0,286.2 248.8,274.4 269.5,254.6 290.2,227.7 311.0,202.4"/>
+<polyline class="line ns" points="62.0,307.1 82.8,306.4 103.5,305.8 124.2,303.2 145.0,302.6 165.8,297.0 186.5,291.7 207.2,287.1 228.0,286.1 248.8,268.6 269.5,225.8 290.2,202.1 311.0,152.6"/>
+<polyline class="line ns" points="62.0,312.6 82.8,311.2 103.5,309.4 124.2,306.0 145.0,304.5 165.8,297.6 186.5,293.2 207.2,288.5 228.0,287.6 248.8,285.0 269.5,277.9 290.2,260.1 311.0,215.8"/>
+<polyline class="line cs" points="62.0,304.6 82.8,304.0 103.5,303.3 124.2,301.2 145.0,300.6 165.8,295.2 186.5,289.9 207.2,287.0 228.0,286.0 248.8,281.4 269.5,274.0 290.2,270.8 311.0,262.6"/>
+<polyline class="line cs" points="62.0,312.5 82.8,311.0 103.5,309.2 124.2,304.6 145.0,303.0 165.8,295.6 186.5,289.3 207.2,286.1 228.0,284.9 248.8,282.2 269.5,276.8 290.2,273.9 311.0,267.0"/>
+<circle class="n2 ring" cx="311.0" cy="157.2" r="5"/>
+<circle class="n2 ring" cx="311.0" cy="202.4" r="5"/>
+<circle class="n ring" cx="311.0" cy="152.6" r="5"/>
+<circle class="n ring" cx="311.0" cy="215.8" r="5"/>
+<circle class="c ring" cx="311.0" cy="262.6" r="5"/>
+<circle class="c ring" cx="311.0" cy="267.0" r="5"/>
+<text x="327.0" y="156.6" class="t2">alone $0.41</text>
+<line class="axis" x1="318.0" y1="159.2" x2="324.0" y2="168.6"/>
+<text x="327.0" y="172.6" class="t2">Headroom $0.40</text>
+<text x="327.0" y="206.4" class="t2">Kompressor $0.28</text>
+<line class="axis" x1="318.0" y1="217.8" x2="324.0" y2="218.4"/>
+<text x="327.0" y="222.4" class="t2">alone $0.25</text>
+<text x="327.0" y="266.6" class="h">compache $0.13</text>
+<line class="axis" x1="318.0" y1="269.0" x2="324.0" y2="278.6"/>
+<text x="327.0" y="282.6" class="h">compache $0.12</text>
+<text x="459.0" y="102.0" class="h">17 issues in one conversation</text>
+<line class="axis" x1="497.0" x2="746.0" y1="316.0" y2="316.0"/>
+<text x="488.0" y="320.0" class="tm" text-anchor="end">0</text>
+<line class="grid" x1="497.0" x2="746.0" y1="249.3" y2="249.3"/>
+<text x="488.0" y="253.3" class="tm" text-anchor="end">$0.50</text>
+<line class="grid" x1="497.0" x2="746.0" y1="182.7" y2="182.7"/>
+<text x="488.0" y="186.7" class="tm" text-anchor="end">$1.00</text>
+<line class="grid" x1="497.0" x2="746.0" y1="116.0" y2="116.0"/>
+<text x="488.0" y="120.0" class="tm" text-anchor="end">$1.50</text>
+<text x="497.0" y="336.0" class="tm" text-anchor="middle">1</text>
+<text x="559.2" y="336.0" class="tm" text-anchor="middle">5</text>
+<text x="637.1" y="336.0" class="tm" text-anchor="middle">10</text>
+<text x="746.0" y="336.0" class="tm" text-anchor="middle">17</text>
+<text x="621.5" y="356.0" class="t2" text-anchor="middle">Prompt</text>
+<polyline class="line n2s" points="497.0,314.1 512.6,312.4 528.1,309.1 543.7,306.7 559.2,306.6 574.8,300.3 590.4,298.0 605.9,297.2"/>
+<polyline class="line n2s" points="497.0,313.8 512.6,310.5 528.1,307.4 543.7,303.8 559.2,303.7 574.8,291.6 590.4,274.9 605.9,262.5 621.5,238.7 637.1,229.7 652.6,204.9 668.2,188.9"/>
+<polyline class="line ns" points="497.0,313.8 512.6,311.2 528.1,307.0 543.7,304.2 559.2,297.4 574.8,282.8 590.4,276.2 605.9,269.5 621.5,259.6 637.1,242.9 652.6,232.3 668.2,215.2 683.8,192.7 699.3,180.4 714.9,174.6 730.4,155.8"/>
+<polyline class="line ns" points="497.0,314.5 512.6,313.6 528.1,312.8 543.7,311.3 559.2,310.6 574.8,309.0 590.4,308.4 605.9,305.7 621.5,295.1 637.1,271.9 652.6,269.2 668.2,253.2 683.8,248.8 699.3,244.9 714.9,231.5 730.4,214.9 746.0,209.8"/>
+<polyline class="line cs" points="497.0,313.4 512.6,312.4 528.1,309.4 543.7,308.2 559.2,307.4 574.8,306.3 590.4,305.6 605.9,304.8 621.5,303.7 637.1,302.5 652.6,301.4 668.2,299.8 683.8,297.3 699.3,294.0 714.9,292.8 730.4,291.2 746.0,286.9"/>
+<polyline class="line cs" points="497.0,315.2 512.6,313.7 528.1,312.9 543.7,312.0 559.2,311.4 574.8,310.7 590.4,310.1 605.9,309.1 621.5,307.6 637.1,306.2 652.6,305.9 668.2,304.6 683.8,303.4 699.3,302.7 714.9,301.3 730.4,300.2 746.0,299.2"/>
+<circle class="n2 ring" cx="605.9" cy="297.2" r="5"/>
+<circle class="n2 ring" cx="668.2" cy="188.9" r="5"/>
+<circle class="n ring" cx="730.4" cy="155.8" r="5"/>
+<circle class="n ring" cx="746.0" cy="209.8" r="5"/>
+<circle class="c ring" cx="746.0" cy="286.9" r="5"/>
+<circle class="c ring" cx="746.0" cy="299.2" r="5"/>
+<text x="746.4" y="159.8" class="t2">alone $1.20</text>
+<text x="658.2" y="188.9" class="t2 ring over" text-anchor="end">Kompressor $0.95</text>
+<text x="762.0" y="213.8" class="t2">alone $0.80</text>
+<text x="762.0" y="290.9" class="h">compache $0.22</text>
+<text x="608.9" y="286.2" class="t2 ring over">Headroom $0.14</text>
+<line class="axis" x1="753.0" y1="301.2" x2="759.0" y2="302.9"/>
+<text x="762.0" y="306.9" class="h">compache $0.13</text>
+</svg>

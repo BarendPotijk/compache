@@ -21,12 +21,19 @@ run beside the application it serves.
 
 from __future__ import annotations
 
+import base64
+import gzip
 import http.client
+import importlib
+import io
 import json
 import logging
 import os
+import re
 import ssl
+import sys
 import urllib.parse
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from . import _tls, wire
@@ -67,6 +74,8 @@ _HOP = {
     "content-length",
     "accept-encoding",
 }
+# Paths as they come from an SDK whose base URL was set without the API's version.
+_UNVERSIONED = ("/messages", "/chat/completions", "/responses", "/models")
 _BODY = {
     "content-length",
     "content-encoding",
@@ -76,20 +85,99 @@ _BODY = {
 }
 
 
-def _family(path: str, headers) -> str:
-    """Which provider's API a request speaks."""
+def _family(path: str, headers, other: str = "openai") -> str:
+    """Which provider's API a request speaks. `other` is the answer where nothing says."""
     dialect = wire.dialect_for(path)
     if dialect is not None:
         return {"anthropic": "anthropic", "gemini": "gemini"}.get(
             dialect.name, "openai"
         )
-    if "x-goog-api-key" in headers or "/v1beta/" in path:
-        return "gemini"
-    if "anthropic-version" in headers or (
-        "x-api-key" in headers and "authorization" not in headers
+    key = headers.get("x-api-key", headers.get("authorization", ""))
+    if (
+        "anthropic-version" in headers
+        or "sk-ant-" in key
+        or "/publishers/anthropic/" in path
+        or ("x-api-key" in headers and "authorization" not in headers)
     ):
         return "anthropic"
-    return "openai"
+    if (
+        "x-goog-api-key" in headers
+        or "/v1beta/" in path
+        or "/publishers/google/" in path
+    ):
+        return "gemini"
+    return other
+
+
+# What the keys of a provider look like. Any other is for another server, such as a gateway.
+_KEYS = {
+    "openai": re.compile(r"T3BlbkFJ|^sk-(?:proj|svcacct|admin)-"),
+    "anthropic": re.compile(r"^sk-ant-"),
+    "gemini": re.compile(r"^(?:AIza|AQ\.|ya29\.)"),
+}
+
+
+def _elsewhere(api: str, headers, path: str) -> bool:
+    """Whether a request's key is none of the provider's whose API it speaks."""
+    query = urllib.parse.parse_qs(urllib.parse.urlsplit(path).query)
+    keys = [headers.get("authorization", "").removeprefix("Bearer ").strip()]
+    keys += [headers.get(name, "") for name in ("x-api-key", "x-goog-api-key")]
+    keys = [k for k in (*keys, *query.get("key", ())) if k]
+    return bool(keys) and not any(_KEYS[api].search(k) for k in keys)
+
+
+def _decoded(raw: bytes, encoding: str | None) -> bytes:
+    """A request body as JSON text. One in an encoding this Python does not read passes as it came."""
+    encoding = (encoding or "identity").strip().lower()
+    if encoding == "gzip":
+        return gzip.decompress(raw)
+    if encoding == "zstd":
+        for name in ("compression.zstd", "backports.zstd", "zstandard"):
+            try:
+                found = importlib.import_module(name)
+            except ImportError:
+                continue
+            if name == "zstandard":
+                # It may not say how large it is, which the plain call needs.
+                found = found.ZstdDecompressor()
+                return found.stream_reader(io.BytesIO(raw)).read()
+            return found.decompress(raw)
+        raise ValueError("no zstd here")
+    if encoding != "identity":
+        raise ValueError(f"unknown encoding {encoding}")
+    return raw
+
+
+def _proxy(url: urllib.parse.SplitResult) -> urllib.parse.SplitResult | None:
+    """What this machine reaches a host through, as `HTTPS_PROXY` names it. None where it needs nothing."""
+    host = url.hostname or ""
+    if host == "localhost" or host.startswith("127.") or host == "::1":
+        return None
+    given = urllib.request.getproxies().get(url.scheme)
+    if not given or urllib.request.proxy_bypass(host):
+        return None
+    found = urllib.parse.urlsplit(given if "://" in given else f"http://{given}")
+    if found.scheme == "https":
+        # Its name and password would go out in plain sight.
+        raise ValueError(
+            f"{host} is reached through a proxy over TLS, which is not spoken"
+        )
+    return found if found.scheme == "http" and found.hostname else None
+
+
+def _credentials(proxy: urllib.parse.SplitResult) -> dict:
+    if not proxy.username:
+        return {}
+    name = urllib.parse.unquote(proxy.username)
+    said = f"{name}:{urllib.parse.unquote(proxy.password or '')}".encode()
+    return {"Proxy-Authorization": "Basic " + base64.b64encode(said).decode()}
+
+
+def _metrics(live: Live) -> str:
+    """What was done so far, as Prometheus reads it."""
+    found = {f"compache_{name}_total": n for name, n in live.stats.items()}
+    found |= {f"compache_{name}_tokens_total": n for name, n in live.tokens.items()}
+    return "".join(f"# TYPE {name} counter\n{name} {n}\n" for name, n in found.items())
 
 
 def _thread(headers, body) -> str | None:
@@ -114,18 +202,23 @@ class _Upstream:
 
     def _sent(self, body: bytes | None, headers: dict):
         """A connection to the provider with the request on its way."""
+        target = self.url.path + ("?" + self.url.query if self.url.query else "")
+        host, port, proxy = self.url.hostname, self.url.port, _proxy(self.url)
+        if proxy is not None:
+            host, port = proxy.hostname, proxy.port or 80
         if self.url.scheme == "https":
             connection = http.client.HTTPSConnection(
-                self.url.hostname,
-                self.url.port,
-                timeout=self.timeout,
-                context=_tls.FOUND["context"],
+                host, port, timeout=self.timeout, context=_tls.FOUND["context"]
             )
+            if proxy is not None:
+                connection.set_tunnel(
+                    self.url.hostname, self.url.port, _credentials(proxy)
+                )
         else:
-            connection = http.client.HTTPConnection(
-                self.url.hostname, self.url.port, timeout=self.timeout
-            )
-        target = self.url.path + ("?" + self.url.query if self.url.query else "")
+            connection = http.client.HTTPConnection(host, port, timeout=self.timeout)
+            if proxy is not None:
+                target = f"http://{self.url.netloc}{target}"
+                headers = {**headers, "Host": self.url.netloc, **_credentials(proxy)}
         try:
             connection.request(self.method, target, body=body, headers=headers)
         except ssl.SSLError as error:
@@ -137,7 +230,9 @@ class _Upstream:
         return connection
 
     def __call__(self, payload, raw: bytes | None = None) -> Result:
-        body = raw if raw is not None else json.dumps(payload).encode()
+        body = raw
+        if raw is None and payload is not None:
+            body = json.dumps(payload).encode()
         headers = {k: v for k, v in self.headers}
         headers["Accept-Encoding"] = "identity"
         if body is not None:
@@ -190,6 +285,8 @@ def serve(
     `openai`, `anthropic` or `gemini`. `server.live` is the `Live`.
     """
     targets = {**DEFAULTS, **(upstreams or {})}
+    forward: dict = {"all": upstream, "other": "openai", "known": set(DEFAULTS)}
+    forward["told"] = set()
 
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -227,17 +324,48 @@ def serve(
                 if closing is not None:
                     closing()
 
+        def _read(self) -> bytes | None:
+            """The request's body, whole or in chunks."""
+            if "chunked" not in (self.headers.get("Transfer-Encoding") or "").lower():
+                length = int(self.headers.get("Content-Length") or 0)
+                return self.rfile.read(length) if length else None
+            pieces = []
+            while True:
+                size = int(self.rfile.readline().split(b";")[0].strip() or b"0", 16)
+                if not size:
+                    break
+                pieces.append(self.rfile.read(size))
+                self.rfile.readline()
+            while self.rfile.readline().strip():
+                # Trailers, which nobody sends.
+                pass
+            return b"".join(pieces)
+
         def _handle(self):
             if (
                 self.path in ("/compache/stats", "/compache/health")
                 and self.command == "GET"
             ):
-                body = json.dumps({"status": "ok", **live.stats}).encode()
+                said = {"status": "ok", **live.stats, "tokens": live.tokens}
+                body = json.dumps(said).encode()
                 return self._answer(200, [("Content-Type", "application/json")], body)
-            length = int(self.headers.get("Content-Length") or 0)
-            raw = self.rfile.read(length) if length else None
+            if self.path == "/compache/metrics" and self.command == "GET":
+                kind = [("Content-Type", "text/plain; version=0.0.4")]
+                return self._answer(200, kind, _metrics(live).encode())
+            if "websocket" in (self.headers.get("Upgrade") or "").lower():
+                # An agent that tries this first, as Codex does, goes on over HTTP.
+                return self._answer(426, [], b"compache speaks HTTP")
+            raw = self._read()
             headers = {k.lower(): v for k, v in self.headers.items()}
-            base = upstream or targets[_family(self.path, headers)]
+            speaks = _family(self.path, headers, forward["other"])
+            base = forward["all"] or targets[speaks]
+            if speaks not in forward["known"] and _elsewhere(
+                speaks, headers, self.path
+            ):
+                return self._refuse(speaks, base)
+            if base in DEFAULTS.values() and self.path.startswith(_UNVERSIONED):
+                # SDKs differ in whether a base URL holds the version. Their providers do not.
+                self.path = "/v1" + self.path
             kept = [
                 (k, v)
                 for k, v in self.headers.items()
@@ -251,17 +379,27 @@ def serve(
                 and wire.dialect_for(self.path) is not None
             ):
                 try:
-                    body = json.loads(raw)
-                except ValueError:
+                    body = json.loads(_decoded(raw, headers.get("content-encoding")))
+                except Exception:
+                    # Whatever is wrong with it is for the provider to say.
                     body = None
             if body is None:
                 result = send(None, raw)
             else:
                 # The caller's bytes go out as they came whenever nothing in them was changed.
+                plain = _Upstream(
+                    base,
+                    self.command,
+                    self.path,
+                    [(k, v) for k, v in kept if k.lower() != "content-encoding"],
+                    timeout,
+                )
                 result = live.exchange(
                     self.path,
                     body,
-                    lambda payload: send(payload, raw if payload is body else None),
+                    lambda payload: (
+                        send(payload, raw) if payload is body else plain(payload)
+                    ),
                     thread=_thread(headers, body),
                 )
             if result.events is not None:
@@ -272,6 +410,19 @@ def serve(
                 else json.dumps(result.json).encode()
             )
             self._answer(result.status, result.headers, content)
+
+        def _refuse(self, speaks: str, base: str):
+            """Where a key belongs is not known, so it goes nowhere."""
+            message = (
+                f"compache: this key does not look like one for {base}, so it was not sent there. Say "
+                "where it belongs with --upstream URL"
+            )
+            if speaks not in forward["told"]:
+                forward["told"].add(speaks)
+                print(message, file=sys.stderr, flush=True)
+            said = {"type": "permission_error", "message": message}
+            body = json.dumps({"type": "error", "error": said}).encode()
+            self._answer(403, [("Content-Type", "application/json")], body)
 
         def _guarded(self):
             try:
@@ -304,6 +455,24 @@ def serve(
             # A caller that hangs up is not an error worth a traceback.
             pass
 
+        @staticmethod
+        def forward(
+            everything: str | None,
+            named: dict,
+            other: str = "openai",
+            careful: bool = False,
+        ) -> None:
+            """Where requests go on to, once that is known: one base URL, or one by API.
+
+            `other` is the API of those that do not say which they speak. Where it
+            has to be `careful`, the providers' own addresses get only their own keys.
+            """
+            forward["all"], forward["other"] = everything, other
+            targets.update(named)
+            forward["known"] = (
+                set(named) if careful and not everything else set(DEFAULTS)
+            )
+
     server = Server((host, port), Handler)
     server.live = live
     if pings:
@@ -313,7 +482,13 @@ def serve(
 
 def main(args) -> int:
     """`compache proxy`: run until interrupted."""
-    live = Live(args.policy, record=args.record, sample=args.sample, notes=args.notes)
+    live = Live(
+        args.policy,
+        record=args.record,
+        learn=args.learn,
+        sample=args.sample,
+        notes=args.notes,
+    )
     upstream = args.upstream or os.environ.get("COMPACHE_UPSTREAM")
     named = {
         key: value
@@ -327,11 +502,15 @@ def main(args) -> int:
     server = serve(
         live, host=args.host, port=args.port, upstream=upstream, upstreams=named
     )
+    if args.careful:
+        server.forward(upstream, named, careful=True)
     where = f"http://{args.host}:{server.server_address[1]}"
     doing = []
     if live.policy is not None:
         doing.append(f"applying {args.policy}")
-    if live.recorder is not None:
+    if live.learner is not None:
+        doing.append(f"learning in {args.learn}")
+    elif live.recorder is not None:
         doing.append(f"recording to {args.record}")
     if live.sample:
         doing.append(f"asking {live.sample:.0%} of turns what they needed")

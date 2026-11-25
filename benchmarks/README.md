@@ -18,6 +18,10 @@ Costs are modeled: every request and ping is priced with the provider's cache ru
 
 [Live model calls](live/README.md): DocChat conversations played at their users' pace through five ways in, and what the provider billed. On Claude Haiku 5.5 the fitted policies cut the bill by 42% to 49% with as many answers right, whether fitted on past traces or on the model's own notes. On GPT-6 Luna, whose cache outlasts these users' breaks, they saved 2% to 5%.
 
+## Coding agents
+
+[Agents](agents/README.md): Claude Code and Codex live, next to Headroom and Kompressor, and 174 public runs modeled. Long sessions with Claude Code cost 51% to 85% less, sessions of some fifty calls 16% less, with as many issues solved.
+
 ## Other tools
 
 [Compare](compare/README.md): Headroom, Kompressor and the cheapest way to keep the whole history cached, against compache. Modeled, 30% to 70% under the cheapest cache setting. Live, the lowest bill with the answers of the whole history. [Read more](../docs/comparisons.md)

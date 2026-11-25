@@ -1,0 +1,24 @@
+# compache
+
+> A Python package that lowers what long LLM conversations and agent loops cost. It sits between an application and the model API, learns from the traffic which earlier parts still matter and when users come back, then sends less and caches better. Compaction and cache are decided together: trimming waits for the moments when the provider's prompt cache has expired or a cut pays for itself, and keep-warm pings go out only where they cost less than losing the cache. What is trimmed leaves a notice, and the model can fetch it back. No dependencies, Apache-2.0.
+
+Install: `pip install compache` (Python 3.11 or later).
+
+- Around a coding agent: `compache wrap claude` (also codex, opencode, gemini, qwen, copilot, aider, goose, crush, kilo, pi, openhands, or `compache wrap -- <command>`). `compache stats` says what was saved, `compache doctor` checks the setup.
+- In Python: `client = compache.wrap(Anthropic(), learn="compache-record")`, for clients of the OpenAI, Anthropic and Google GenAI SDKs, sync and async.
+- LangChain and LangGraph: `create_agent(model, tools, middleware=[compache.langchain.middleware(compache.Live(learn="compache-record"))])`.
+- Any other stack: `compache proxy --learn compache-record`, with the base URL set to it.
+- Chats with retrieved text: record with `compache.wrap(client, record="compache-record", sample=0.1)`, then `compache fit compache-record`, then `compache.wrap(client, "policy.json")`.
+- The record holds sizes, times, usage and labels, never text.
+
+## Docs
+
+- [README](https://github.com/BarendPotijk/compache/blob/main/README.md): what it does and what it saves
+- [Agents](https://github.com/BarendPotijk/compache/blob/main/docs/agents.md): coding agents and tool loops
+- [Guide](https://github.com/BarendPotijk/compache/blob/main/docs/guide.md): thread and label formats, fit, replay, apply
+- [Integrations](https://github.com/BarendPotijk/compache/blob/main/docs/integrations.md): every way in, one line each
+- [How it works](https://github.com/BarendPotijk/compache/blob/main/docs/how-it-works.md): what is learned and what is decided when
+- [Other tools compared](https://github.com/BarendPotijk/compache/blob/main/docs/comparisons.md): measured next to compressors and cache tools
+- [Benchmarks](https://github.com/BarendPotijk/compache/blob/main/benchmarks/README.md): what the fit chose and what it saved
+- [Setup skill](https://github.com/BarendPotijk/compache/blob/main/skills/compache-setup/SKILL.md): instructions for a coding agent that puts compache into a codebase. `/plugin install compache --marketplace BarendPotijk/compache` in Claude Code, `npx skills add BarendPotijk/compache` elsewhere
+- [Cost calculator](https://barendpotijk.github.io/compache/): the bill for a workload, in the browser

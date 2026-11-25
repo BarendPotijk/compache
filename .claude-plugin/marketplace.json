@@ -1,0 +1,22 @@
+{
+  "name": "compache",
+  "owner": {
+    "name": "Barend Potijk"
+  },
+  "metadata": {
+    "description": "Skills for compache: long chats and agent loops that cost less"
+  },
+  "plugins": [
+    {
+      "name": "compache",
+      "source": "./",
+      "description": "Puts compache where an application's model calls leave, checks what it saves, and labels what past replies needed",
+      "homepage": "https://github.com/BarendPotijk/compache",
+      "license": "Apache-2.0",
+      "category": "development",
+      "keywords": ["llm-cost", "prompt-caching", "context", "agents"],
+      "strict": false,
+      "skills": ["./skills/compache-setup", "./skills/compache-label-dependencies"]
+    }
+  ]
+}

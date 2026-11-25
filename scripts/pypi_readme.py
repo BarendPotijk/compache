@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The README as PyPI needs it: every link and image spelled out, as of one tag.
 
-    python scripts/pypi_readme.py v0.14.0      # rewrites README.md, which the release workflow then builds
+    python scripts/pypi_readme.py v0.15.0      # rewrites README.md, which the release workflow then builds
 
 On GitHub the README's links are relative, so they work on every branch. PyPI has no
 repository to resolve them against.

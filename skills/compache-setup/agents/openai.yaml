@@ -1,0 +1,4 @@
+interface:
+  display_name: "Compache Setup"
+  short_description: "Put compache where an application's model calls leave"
+  default_prompt: "Use $compache-setup to put compache into this application and tell me what it saves."

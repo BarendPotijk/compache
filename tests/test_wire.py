@@ -504,6 +504,21 @@ class ScanTests(unittest.TestCase):
                 self.assertIs(changed["tools"], body["tools"])
 
 
+class VolumeTests(unittest.TestCase):
+    def test_what_is_reasoned_is_counted_by_itself(self):
+        said = {"role": "assistant", "content": [{"type": "text", "text": "Hello."}]}
+        plain = wire.volume([said])
+        block = {"type": "thinking", "thinking": "a thought " * 50, "signature": "s"}
+        with_it = {**said, "content": [block, *said["content"]]}
+        self.assertLess(wire.volume([with_it]) - plain, 20)
+        for name in ("reasoning_content", "reasoning"):
+            self.assertEqual(wire.volume([{**said, name: "a thought " * 50}]), plain)
+        details = [{"type": "reasoning.text", "text": "a thought " * 50}]
+        self.assertEqual(wire.volume([{**said, "reasoning_details": details}]), plain)
+        item = {"type": "reasoning", "summary": [{"text": "a thought " * 50}]}
+        self.assertEqual(wire.volume([said, item]), plain)
+
+
 class RewriteTests(unittest.TestCase):
     def test_a_note_goes_last_and_the_cache_mark_before_it(self):
         marked = wire.Anthropic.with_cache_mark(CLAUDE)

@@ -10,17 +10,24 @@ import sys
 from importlib import resources
 from pathlib import Path
 
-from . import __version__
+from . import __version__, doctor, stats
 from .api import Policy, fit, replay
 from .defaults import default_policy
 from .errors import ContractError
 from .labels import build_packet, label_index
+from .launch import AGENTS, home
+from .launch import main as run_agent
+from .learn import FIRST_CALLS, Learner
 from .models import _sheet, known_models
 from .optimizer.contracts import ModelSpec
 from .profile import history_resent, measure, profile
-from .record import is_record
+from .proxy import main as run_proxy
+from .record import is_record, load_calls, thread_name
 from .record import load as load_record
 from .threads import load_threads, read_jsonl
+from .transcripts import AGENTS as TRANSCRIPTS
+from .transcripts import imported
+from .transcripts import pull as pull_sessions
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -114,14 +121,18 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_argument("--sample", type=int, default=200, help="How many runs to label")
     sub.add_argument("--seed", default="0")
 
-    text = "Read the conversations kept in Langfuse, MLflow or an OpenTelemetry export into a threads file"
+    text = (
+        "Read the conversations kept in Langfuse, MLflow or an OpenTelemetry export, or the sessions "
+        "that Claude Code or Codex keeps on this machine, into a threads file"
+    )
     sub = commands.add_parser("pull", help=text, description=text)
-    sub.add_argument("source", choices=["langfuse", "mlflow", "otel"])
+    sub.add_argument("source", choices=["langfuse", "mlflow", "otel", *TRANSCRIPTS])
     sub.add_argument(
         "export",
         nargs="?",
         type=Path,
-        help="A file already exported, read instead of the API. Needed for otel",
+        help="A file already exported, read instead of the API. Needed for otel. For an agent, "
+        "where it keeps its sessions, if not where it does by default",
     )
     sub.add_argument("-o", "--output", type=Path, default=Path("threads.jsonl.gz"))
     sub.add_argument("--days", type=float, default=30, help="How far back to read")
@@ -161,6 +172,11 @@ def _parser() -> argparse.ArgumentParser:
         required=True,
         help=f"A known model ({', '.join(known_models())}) or a JSON file of model spec fields",
     )
+    sub.add_argument(
+        "--agent",
+        action="store_true",
+        help="The policy for an agent's loops of tool calls",
+    )
     sub.add_argument("-o", "--output", type=Path, default=Path("policy.json"))
     sub.add_argument("--json", action="store_true", help="Print JSON")
 
@@ -171,6 +187,11 @@ def _parser() -> argparse.ArgumentParser:
         "--record",
         type=Path,
         help="A folder to record conversations in, without their text",
+    )
+    sub.add_argument(
+        "--learn",
+        type=Path,
+        help="A folder to record in and learn the policy from, instead of both",
     )
     sub.add_argument(
         "--sample",
@@ -190,6 +211,11 @@ def _parser() -> argparse.ArgumentParser:
         "--upstream", help="One base URL to forward everything to, such as a gateway's"
     )
     sub.add_argument(
+        "--careful",
+        action="store_true",
+        help="Send a provider's own address only keys that look like its own",
+    )
+    sub.add_argument(
         "--openai-url", help="Where OpenAI's API goes instead of api.openai.com"
     )
     sub.add_argument(
@@ -197,6 +223,71 @@ def _parser() -> argparse.ArgumentParser:
         help="Where Anthropic's API goes instead of api.anthropic.com",
     )
     sub.add_argument("--gemini-url", help="Where Gemini's API goes instead of Google's")
+
+    text = "Run an agent through compache, which learns its policy as it goes"
+    sub = commands.add_parser(
+        "wrap",
+        help=text,
+        description=f"{text}. Known: {', '.join(AGENTS)}. Any other command is told by the variables "
+        "that SDKs read. Put -- ahead of the agent's own flags.",
+    )
+    sub.add_argument(
+        "words", nargs=argparse.REMAINDER, help="The agent and its own arguments"
+    )
+    sub.add_argument(
+        "--print",
+        action="store_true",
+        help="Only show the proxy to start and what to set, to do it yourself",
+    )
+    sub.add_argument("--policy", type=Path, help="Apply this policy and learn none")
+    sub.add_argument(
+        "--watch", action="store_true", help="Only record, and change nothing"
+    )
+    sub.add_argument(
+        "--folder", type=Path, help="Where to record and learn. Left out, ~/.compache"
+    )
+    sub.add_argument("--port", type=int, help="The proxy's port. Left out, a free one")
+    sub.add_argument("--upstream", help="One base URL to forward everything to")
+    sub.add_argument("--quiet", action="store_true", help="Say nothing at the end")
+
+    text = "Say what was saved, from the record of the calls"
+    sub = commands.add_parser("stats", help=text, description=text)
+    sub.add_argument(
+        "folder",
+        nargs="*",
+        type=Path,
+        help="Record folders, or names of agents. Left out, all that `compache wrap` keeps",
+    )
+    sub.add_argument(
+        "--line",
+        action="store_true",
+        help="A few words, for the status line of an agent that gives its session on standard input",
+    )
+    sub.add_argument("--json", action="store_true", help="Print JSON")
+
+    text = "Fit again what a record has grown enough for"
+    sub = commands.add_parser("learn", help=text, description=text)
+    sub.add_argument(
+        "folder",
+        type=Path,
+        help="A folder that is learned in, or the name of an agent run with `compache wrap`",
+    )
+    sub.add_argument(
+        "--from",
+        dest="source",
+        choices=list(TRANSCRIPTS),
+        help="First add the sessions this agent keeps on this machine, as sizes and times",
+    )
+    sub.add_argument(
+        "--sessions", type=Path, help="Where it keeps them, if not where by default"
+    )
+    sub.add_argument("--days", type=float, default=30, help="How far back to read them")
+    sub.add_argument("--json", action="store_true", help="Print JSON")
+
+    text = "Check that compache works here and say what it can be used with"
+    sub = commands.add_parser("doctor", help=text, description=text)
+    sub.add_argument("--port", type=int, default=8787, help="A proxy to look for")
+    sub.add_argument("--json", action="store_true", help="Print JSON")
 
     listing = commands.add_parser(
         "models", help="List the models with a built-in price sheet"
@@ -237,16 +328,20 @@ def _fit(args):
     )
     policy.save(args.output)
     summary = policy.summary
-    labelled = (
-        f" ({summary['labelled_turns']:,} labelled)"
-        if summary["labelled_turns"]
-        else ""
-    )
-    resent = history_resent(load_threads(args.threads), policy.spec)
+    if policy.agentic:
+        fitted = (
+            f"{summary['calls']:,} calls ({summary['relying_calls']:,} rely on an "
+            "earlier result)"
+        )
+        resent = None
+    else:
+        fitted = f"{summary['turns']:,} turns"
+        if summary["labelled_turns"]:
+            fitted += f" ({summary['labelled_turns']:,} labelled)"
+        resent = history_resent(load_threads(args.threads), policy.spec)
     text = "\n".join(
         [
-            f"Fitted on {summary['threads']:,} threads, {summary['turns']:,} turns{labelled} "
-            f"for {summary['model']}.",
+            f"Fitted on {summary['threads']:,} threads, {fitted} for {summary['model']}.",
             "",
             policy.describe(),
             *_trimmed(resent),
@@ -288,9 +383,11 @@ def _replay(args):
         args.labels,
         observed_until=args.observed_until,
     )
-    detail = report.pop("detail")
+    detail = report.pop("detail", None)
     if args.output:
         _write(args.output, {**report, "detail": detail})
+    if "cost_per_1000_calls" in report:
+        return report, _replayed_agent(report)
     lines = [f"{report['threads']:,} threads, {report['planned_turns']:,} turns."]
     costs = report["cost_per_1000_turns"]
     if report["saving"] is None:
@@ -317,6 +414,27 @@ def _replay(args):
         )
     lines.append(f"{report['pings']:,} keep-warm pings sent.")
     return report, "\n".join(lines)
+
+
+def _replayed_agent(report) -> str:
+    lines = [f"{report['threads']:,} threads, {report['calls']:,} calls."]
+    costs = report["cost_per_1000_calls"]
+    if report["saving"] is None:
+        lines.append(
+            f"{_money(costs, 'policy')} per 1,000 calls with the policy. Keeping everything does not fit the model."
+        )
+    else:
+        lines.append(
+            f"{_money(costs, 'policy')} per 1,000 calls with the policy against "
+            f"{_money(costs, 'keep_everything')} keeping everything: {report['saving']:.0%} less."
+        )
+    if report["coverage"] is not None:
+        lines.append(
+            f"{report['coverage']:.0%} of the {report['relying_calls']:,} calls that rely on an earlier "
+            "result find it in view."
+        )
+    lines.append(f"{report['pings']:,} keep-warm pings sent.")
+    return "\n".join(lines)
 
 
 def _trimmed(resent) -> list[str]:
@@ -533,7 +651,9 @@ _LEFT_OUT = (
 def _pull(args):
     export = args.rows or args.export
     window = dict(since=args.since, until=args.until, days=args.days)
-    if args.source == "otel":
+    if args.source in TRANSCRIPTS:
+        threads, report = pull_sessions(args.source, export, **window)
+    elif args.source == "otel":
         from .otel import pull
 
         if export is None:
@@ -567,9 +687,12 @@ def _pull(args):
                 **window,
             )
     rows = "observations" if args.source == "langfuse" else "spans"
+    read = f"Read {report.get('observations', 0):,} {rows}"
+    if args.source in TRANSCRIPTS:
+        read = f"Read {report['files']:,} files"
     lines = [
-        f"Read {report.get('observations', 0):,} {rows}: {report.get('model_calls', 0):,} "
-        f"model calls in {report.get('sessions', 0):,} sessions."
+        f"{read}: {report.get('model_calls', 0):,} model calls in "
+        f"{report.get('sessions', 0):,} sessions."
     ]
     notes = [text.format(report[key]) for key, text in _LEFT_OUT if report.get(key)]
     if not threads:
@@ -601,11 +724,12 @@ def _pull(args):
 
 
 def _default(args):
-    policy = default_policy(args.model)
+    policy = default_policy(args.model, agent=args.agent)
     policy.save(args.output)
     summary = policy.summary
+    taught = "public coding-agent runs" if args.agent else "the default workload"
     lines = [
-        f"Fitted to the default workload, not to yours, for {summary['model']}.",
+        f"Fitted to {taught}, not to yours, for {summary['model']}.",
         "",
         policy.describe(),
         "",
@@ -613,6 +737,95 @@ def _default(args):
         "Next: apply it and record your own traffic, then fit on the record.",
     ]
     return summary, "\n".join(lines)
+
+
+def _of_agent(folder: Path) -> Path:
+    """A record folder, where the name of an agent stands for the one that `wrap` makes."""
+    if len(folder.parts) != 1 or (folder / "calls.jsonl").is_file():
+        return folder
+    # Something else may go by an agent's name here.
+    named = folder.name in AGENTS or not folder.exists()
+    return home() / folder if named else folder
+
+
+# How much of a record's end a status line looks at.
+_RECENT = 2_000_000
+
+
+def _line(folders) -> str:
+    """The status line of the session that is told of on standard input, or of the last day."""
+    said = None
+    try:
+        said = None if sys.stdin.isatty() else json.loads(sys.stdin.read() or "null")
+    except (OSError, ValueError):
+        pass
+    session = said.get("session_id") if isinstance(said, dict) else None
+    rows = [row for folder in folders for row in load_calls(folder, _RECENT)]
+    if isinstance(session, str):
+        rows = [row for row in rows if row.get("thread") == thread_name(session)]
+    else:
+        since = max((row["at"] for row in rows), default=0) - 86_400
+        rows = [row for row in rows if row["at"] >= since]
+    return stats.line(stats.savings(rows))
+
+
+def _stats(args):
+    folders = [_of_agent(f) for f in args.folder]
+    folders = folders or sorted(f.parent for f in home().glob("*/calls.jsonl"))
+    if args.line:
+        said = _line(folders)
+        return {"line": said}, said
+    if not folders:
+        return (
+            {},
+            f"Nothing on record in {home()} yet. Start with: compache wrap claude",
+        )
+    found, text = {}, []
+    for folder in folders:
+        report = stats.savings(folder)
+        learner = Learner(folder) if (folder / "policies").is_dir() else None
+        said = stats.lines(report)
+        policies = {}
+        for model in report["models"] if learner is not None else ():
+            fitted = learner.fitted_on(report["models"][model]["requested"])
+            policies[model] = fitted
+            said.append(
+                f"  policy for {model}: fitted on {fitted['calls']:,} of your calls"
+                if fitted
+                else f"  policy for {model}: the default, until there are {FIRST_CALLS} calls to fit on"
+            )
+        found[str(folder)] = {**report, "policies": policies}
+        text += [f"{folder.name}:", *said, ""]
+    return found, "\n".join(text[:-1])
+
+
+def _learn(args):
+    folder = _of_agent(args.folder)
+    lines, report = [], {}
+    if args.source:
+        report = imported(folder, args.source, args.sessions, days=args.days)
+        lines.append(
+            f"Added {report['added']:,} of {report['sessions']:,} sessions, "
+            f"{report['model_calls']:,} model calls, as sizes and times."
+        )
+    learner = Learner(folder)
+    before = dict(learner._state)
+    learner.refit(wait=True)
+    new = {
+        k: v for k, v in learner._state.items() if k != "lasting" and before.get(k) != v
+    }
+    fitted = [
+        f"Fitted {key} on {entry['calls']:,} calls"
+        + (
+            "."
+            if entry["saving"] is None
+            # Where not everything would have fit, there is nothing to compare with.
+            else f": {entry['saving']:.0%} less than keeping everything."
+        )
+        for key, entry in new.items()
+    ]
+    lines += fitted or ["Nothing has grown enough for a new fit."]
+    return {"fitted": new, **report}, "\n".join(lines)
 
 
 def _models(args):
@@ -639,18 +852,19 @@ _COMMANDS = {
     "packets": _packets,
     "pull": _pull,
     "default": _default,
+    "stats": _stats,
+    "learn": _learn,
+    "doctor": doctor.main,
     "models": _models,
 }
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    if args.command == "proxy":
-        # Runs until interrupted, so it is imported and started apart from the commands that report.
-        from .proxy import main as run_proxy
-
+    if args.command in ("proxy", "wrap"):
+        # These run until they are interrupted, apart from the commands that report.
         try:
-            return run_proxy(args)
+            return (run_proxy if args.command == "proxy" else run_agent)(args)
         except (ContractError, OSError, ValueError) as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 1

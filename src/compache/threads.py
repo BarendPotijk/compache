@@ -21,6 +21,7 @@ from __future__ import annotations
 import copy
 import gzip
 import json
+import re
 from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -29,6 +30,7 @@ from pathlib import Path
 from typing import Any, Iterable, Iterator
 
 from .errors import ContractError
+from .quotes import Quotes, spoken
 from .record import is_record
 from .record import load as load_record
 
@@ -60,6 +62,17 @@ _RUN_FIELDS = {
     "retrievals",
     "generation",
     "calls",
+    "steps",
+}
+_STEP_FIELDS = {
+    "started_at",
+    "ended_at",
+    "results",
+    "bytes",
+    "input_tokens",
+    "output_tokens",
+    "thought_tokens",
+    "needs",
 }
 _GENERATION_FIELDS = {
     "observation_id",
@@ -166,6 +179,25 @@ class Generation:
 
 
 @dataclass(frozen=True)
+class Step:
+    """One model call of a turn: what it had been shown by then, and what it said."""
+
+    started_at: str
+    ended_at: str
+    # How many of the run's retrievals the call had been shown.
+    results: int
+    # Size of the reply as it joins the history, tool calls included.
+    bytes: int
+    output_tokens: int | None = None
+    # Earlier parts the reply relies on. None where that is not known.
+    needs: tuple[str, ...] | None = ()
+    # What the provider counted the request at.
+    input_tokens: int | None = None
+    # Reasoning of the reply's that later requests carry.
+    thought_tokens: int = 0
+
+
+@dataclass(frozen=True)
 class Run:
     run_id: str
     run_index: int
@@ -179,6 +211,8 @@ class Run:
     # Model calls the turn made, when the record says. None means not recorded.
     calls: int | None = None
     cited_part_ids: tuple[str, ...] = ()
+    # The turn's model calls one by one, when the record says. Empty means not recorded.
+    steps: tuple[Step, ...] = ()
 
 
 def _typed_part(part: dict, retrieval: bool = False) -> Part:
@@ -206,6 +240,36 @@ def _check_usage(usage: Any) -> None:
         raise ContractError(
             "usage must contain nonnegative integer input/output/cache_read/cache_write, with cache within input"
         )
+
+
+def _check_steps(run: dict, start, end, results: int) -> None:
+    """The calls of a run come in order, inside it, and never un-see a result."""
+    steps = run.get("steps", [])
+    if not isinstance(steps, list):
+        raise ContractError("steps must be an array")
+    at, seen = start, 0
+    for step in steps:
+        if not isinstance(step, dict) or set(step) - _STEP_FIELDS:
+            raise ContractError("unknown step fields")
+        sent = _time(step.get("started_at"), "step.started_at")
+        done = _time(step.get("ended_at"), "step.ended_at")
+        if not at <= sent <= done <= end:
+            raise ContractError("step timestamps outside the run or out of order")
+        for name in sorted(_STEP_FIELDS - {"started_at", "ended_at", "needs"}):
+            value = step.get(name, 0 if name.endswith("_tokens") else None)
+            if type(value) is not int or value < 0:
+                raise ContractError(f"step {name} must be a nonnegative integer")
+        if not seen <= step["results"] <= results:
+            raise ContractError(
+                "a step shows more results than the run has, or fewer than before"
+            )
+        needs = step.get("needs", [])
+        if needs is not None and (
+            not isinstance(needs, list)
+            or any(not isinstance(n, str) or not n for n in needs)
+        ):
+            raise ContractError("step needs must be part IDs, or null")
+        at, seen = done, step["results"]
 
 
 class Thread:
@@ -241,6 +305,21 @@ class Thread:
                     generation,
                     r.get("calls"),
                     tuple(r.get("cited_part_ids", ())),
+                    tuple(
+                        Step(
+                            s["started_at"],
+                            s["ended_at"],
+                            s["results"],
+                            s["bytes"],
+                            s.get("output_tokens"),
+                            None
+                            if s.get("needs", ()) is None
+                            else tuple(s.get("needs", ())),
+                            s.get("input_tokens"),
+                            s.get("thought_tokens", 0),
+                        )
+                        for s in r.get("steps", ())
+                    ),
                 )
             )
         self.runs = tuple(runs)
@@ -323,6 +402,7 @@ class Thread:
                     raise ContractError(
                         "cited_part_ids must refer to retrievals already exposed in this thread"
                     )
+            _check_steps(run, start, end, len(retrievals))
             g = run.get("generation")
             if not isinstance(g, dict):
                 raise ContractError("exactly one generation object required")
@@ -408,6 +488,33 @@ def cache_read_reported(usage: Any) -> bool:
         if isinstance(usage.get(key), dict):
             counts.append(usage[key].get("cached_tokens"))
     return any(type(n) is int and n >= 0 for n in counts)
+
+
+def reasoning_tokens(usage: Any) -> int | None:
+    """How much of a call's output was reasoning, where the provider counts it apart."""
+    if not isinstance(usage, dict):
+        dump = getattr(usage, "model_dump", None)
+        usage = dump() if callable(dump) else None
+    if not isinstance(usage, dict):
+        return None
+    for details in ("output_tokens_details", "completion_tokens_details"):
+        found = usage.get(details)
+        for name in ("thinking_tokens", "reasoning_tokens"):
+            count = found.get(name) if isinstance(found, dict) else None
+            if type(count) is int and count >= 0:
+                return count
+    count = usage.get("thoughtsTokenCount")
+    return count if type(count) is int and count >= 0 else None
+
+
+def long_writes(usage: Any) -> int:
+    """Tokens a call wrote to entries that live an hour, where the provider counts them apart."""
+    if not isinstance(usage, dict):
+        dump = getattr(usage, "model_dump", None)
+        usage = dump() if callable(dump) else None
+    made = usage.get("cache_creation") if isinstance(usage, dict) else None
+    count = made.get("ephemeral_1h_input_tokens") if isinstance(made, dict) else None
+    return count if type(count) is int and count > 0 else 0
 
 
 def canonical_usage(usage: Any) -> dict | None:
@@ -564,15 +671,52 @@ def _turn_usage(usages: list) -> dict | None:
     counted = [u for u in map(canonical_usage, usages) if u is not None]
     if not counted:
         return None
+    last = counted[-1]
+    # A request can be shorter than the one before it, where something was taken out.
+    read = min(counted[0]["cache_read"], last["input"])
     return {
-        "input": counted[-1]["input"],
+        "input": last["input"],
         "output": sum(u["output"] for u in counted),
-        "cache_read": counted[0]["cache_read"],
-        "cache_write": min(
-            counted[-1]["cache_write"],
-            counted[-1]["input"] - counted[0]["cache_read"],
-        ),
+        "cache_read": read,
+        "cache_write": min(last["cache_write"], last["input"] - read),
     }
+
+
+def _called(message: dict) -> list:
+    """The arguments of the tool calls a message makes, in either provider's shape."""
+    found = []
+    calls = message.get("tool_calls")
+    for call in calls if isinstance(calls, list) else ():
+        made = call.get("function") if isinstance(call, dict) else None
+        if isinstance(made, dict):
+            found.append(made.get("arguments"))
+    content = message.get("content")
+    for block in content if isinstance(content, list) else ():
+        if isinstance(block, dict) and str(block.get("type")).endswith("tool_use"):
+            found.append(block.get("input"))
+    return [a for a in found if a is not None]
+
+
+def _reasoned(message: dict) -> bool:
+    """Whether an assistant message keeps reasoning that later requests carry."""
+    content = message.get("content")
+    return any(
+        isinstance(block, dict) and "thinking" in str(block.get("type"))
+        for block in (content if isinstance(content, list) else ())
+    )
+
+
+def tagged(text: str) -> bool:
+    """Whether a text stands in a tag, as what a harness adds to its tools' results does."""
+    return re.match(r"\s*<[A-Za-z][\w-]*[\s>]", text) is not None
+
+
+def _timed(value: Any) -> bool:
+    """Whether a time can be read."""
+    try:
+        return bool(_iso(value, "at"))
+    except ContractError:
+        return False
 
 
 def _runs_from_messages(messages: Any, thread_id: str) -> list[dict]:
@@ -583,6 +727,7 @@ def _runs_from_messages(messages: Any, thread_id: str) -> list[dict]:
     current: dict | None = None
     waiting: list[dict] = []
     exposed_ids: set[str] = set()
+    quotes = Quotes()
 
     def close():
         nonlocal current
@@ -596,6 +741,7 @@ def _runs_from_messages(messages: Any, thread_id: str) -> list[dict]:
                     "output": "\n\n".join(current["answers"]),
                     # Every assistant message is one model call.
                     "calls": current["calls"],
+                    "steps": current["steps"],
                     **(
                         {"cited_part_ids": list(current["cited"])}
                         if current["cited"]
@@ -623,7 +769,10 @@ def _runs_from_messages(messages: Any, thread_id: str) -> list[dict]:
         text, results = _content(message.get("content"))
         at = next((message[k] for k in _TIME_KEYS if message.get(k) is not None), None)
         if role == "system":
+            quotes.own(text)
             continue
+        if role == "user":
+            quotes.own(text)
         found = [{"text": r} for r in results]
         if role in RETRIEVAL_ROLES and text:
             part = {"text": text}
@@ -633,7 +782,9 @@ def _runs_from_messages(messages: Any, thread_id: str) -> list[dict]:
                 part["part_id"] = _id(message["part_id"], "part_id")
             found.append(part)
         if role == "user" and text:
-            if current is not None and current["answers"]:
+            # What a harness puts beside the results of tools, in a tag, is a remark in the same turn.
+            remark = bool(results) and tagged(text)
+            if current is not None and current["answers"] and not remark:
                 close()
             if current is None:
                 if at is None:
@@ -649,6 +800,8 @@ def _runs_from_messages(messages: Any, thread_id: str) -> list[dict]:
                     "cited": {},
                     "usages": [],
                     "calls": 0,
+                    "steps": [],
+                    "heard": None,
                     "model": None,
                 }
                 found = waiting + found
@@ -670,7 +823,27 @@ def _runs_from_messages(messages: Any, thread_id: str) -> list[dict]:
                     "cache_read_reported", cache_read_reported(message.get("usage"))
                 )
             current["calls"] += 1
+            said = spoken(text, _called(message))
+            before = current["steps"][-1]["ended_at"] if current["steps"] else None
+            begun = current["heard"] or before or current["started_at"]
+            current["steps"].append(
+                {
+                    "started_at": begun,
+                    "ended_at": begun if at is None else at,
+                    "results": len(current["retrievals"]),
+                    "bytes": len(said.encode()),
+                    "needs": quotes.said(said),
+                }
+            )
+            current["heard"] = None
             if message.get("usage") is not None:
+                counted = canonical_usage(message["usage"])
+                if counted is not None:
+                    current["steps"][-1]["input_tokens"] = counted["input"]
+                    current["steps"][-1]["output_tokens"] = counted["output"]
+                if _reasoned(message):
+                    thought = reasoning_tokens(message["usage"]) or 0
+                    current["steps"][-1]["thought_tokens"] = thought
                 current["usages"].append(message["usage"])
             current["model"] = message.get("model") or current["model"]
         elif role not in ("user", "assistant") and role not in RETRIEVAL_ROLES:
@@ -679,15 +852,22 @@ def _runs_from_messages(messages: Any, thread_id: str) -> list[dict]:
         # first user message it waits for that run.
         if current is not None:
             for k, part in enumerate(found, len(current["retrievals"]) + 1):
-                exposed_ids.add(
-                    part.get("part_id", f"{thread_id}:{len(runs) + 1}:retrieval:{k}")
-                )
+                name = part.get("part_id", f"{thread_id}:{len(runs) + 1}:retrieval:{k}")
+                exposed_ids.add(name)
+                quotes.result(name, part["text"])
+            if found and _timed(at):
+                # The results are in: the call that reads them goes out then.
+                current["heard"] = at
             current["retrievals"].extend(found)
         else:
             waiting.extend(found)
     close()
     if not runs:
         raise ContractError("messages hold no answered user message")
+    if all(run["calls"] < 2 for run in runs):
+        # One call a turn: the turns say it all.
+        for run in runs:
+            del run["steps"]
     return runs
 
 
@@ -728,6 +908,26 @@ def _retrieval(value: Any, part_id: str) -> dict:
     return part
 
 
+def _in_order(steps: Any, start: str, end: str) -> list[dict]:
+    """The calls of a run with times that follow each other and stay inside it.
+
+    Logs time messages and not calls, and clocks of several machines differ.
+    """
+    if not isinstance(steps, list) or not all(isinstance(s, dict) for s in steps):
+        raise ContractError("steps must be an array of objects")
+    first, last = _time(start, "run.started_at"), _time(end, "run.ended_at")
+    made = []
+    for step in steps:
+        sent = _time(_iso(step.get("started_at"), "step.started_at"), "step.started_at")
+        done = _time(_iso(step.get("ended_at"), "step.ended_at"), "step.ended_at")
+        sent = min(max(sent, first), last)
+        first = min(max(done, sent), last)
+        made.append(
+            {**step, "started_at": sent.isoformat(), "ended_at": first.isoformat()}
+        )
+    return made
+
+
 def normalize_thread(data: Any, *, model: str | None = None) -> dict:
     """Spell out what a thread leaves implicit. A canonical thread comes back equal.
 
@@ -741,7 +941,13 @@ def normalize_thread(data: Any, *, model: str | None = None) -> dict:
     thread_id = _id(data.get("thread_id"), "thread_id")
     default_model = data.pop("model", None)
     # What `recorded` reads: about the record, not part of the conversation.
-    for key in ("tools", "observed_until", "system_bytes", "tools_bytes"):
+    for key in (
+        "tools",
+        "observed_until",
+        "system_bytes",
+        "tools_bytes",
+        "requested_model",
+    ):
         data.pop(key, None)
     if "messages" in data:
         if "runs" in data:
@@ -772,6 +978,9 @@ def normalize_thread(data: Any, *, model: str | None = None) -> dict:
         ]
         run["started_at"] = _iso(run.get("started_at"), "run.started_at")
         run["ended_at"] = _iso(run.get("ended_at", run["started_at"]), "run.ended_at")
+        if run.get("steps"):
+            run["steps"] = _in_order(run["steps"], run["started_at"], run["ended_at"])
+            run.setdefault("calls", len(run["steps"]))
         generation = dict(run.get("generation") or {})
         usage, recorded = run.pop("usage", None), run.pop("model", None)
         generation.setdefault("observation_id", f"{run_id}:generation")

@@ -2,6 +2,7 @@
 
 import contextlib
 import io
+import json
 import os
 import re
 import runpy
@@ -129,6 +130,19 @@ class FigureTests(unittest.TestCase):
                 )
 
 
+class SkillTests(unittest.TestCase):
+    def test_the_marketplace_names_every_skill(self):
+        market = json.loads(
+            (ROOT / ".claude-plugin" / "marketplace.json").read_text("utf-8")
+        )
+        named = {path for plugin in market["plugins"] for path in plugin["skills"]}
+        there = sorted(page.parent for page in ROOT.glob("skills/*/SKILL.md"))
+        self.assertEqual(named, {f"./skills/{folder.name}" for folder in there})
+        for folder in there:
+            head = (folder / "SKILL.md").read_text("utf-8").split("---")[1]
+            self.assertIn(f"\nname: {folder.name}\n", head)
+
+
 class LinkTests(unittest.TestCase):
     LINK = re.compile(r"\]\((?!https?://|mailto:)([^)\s]+)\)")
 
@@ -143,8 +157,10 @@ class LinkTests(unittest.TestCase):
         pages = [
             page
             for page in ROOT.rglob("*.md")
-            if not {".venv", "node_modules", ".claude"}
-            & set(page.relative_to(ROOT).parts)
+            if not any(
+                part.startswith(".") or part == "node_modules"
+                for part in page.relative_to(ROOT).parts
+            )
         ]
         self.assertGreater(len(pages), 10)
         for page in pages:

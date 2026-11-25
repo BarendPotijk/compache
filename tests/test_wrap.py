@@ -5,15 +5,18 @@ These tests need the SDKs themselves and are skipped where they are not installe
 """
 
 import asyncio
+import gc
 import importlib.util
 import json
 import tempfile
+import time
 import unittest
+from unittest import mock
 
 import compache
 from compache.live import Live
 from compache.record import load
-from compache.wrap import thread, wrap
+from compache.wrap import async_http_client, thread, wrap
 from fakes import NOTE_ASKED, FakeModel, noticed, serve
 from test_live import (
     CLAUDE_SEARCH,
@@ -254,6 +257,151 @@ class OpenAITests(SdkCase):
                 self.assertEqual(response.output_text, f"Answer {n}.")
                 self.clock.at += 3600
         self.check(items)
+
+    def test_an_async_stream_that_is_left_does_not_hold_up_the_loop(self):
+        """Broken off, given up before it begins, or dropped: the loop that has to close it must not wait for it."""
+        import threading
+
+        from openai import AsyncOpenAI
+
+        def slow(request):
+            time.sleep(0.2)
+            return {"text": "words of an answer " * 200}
+
+        live = self.start(slow, sample=0.0)
+        client = wrap(
+            AsyncOpenAI(api_key="key", base_url=self.url + "/v1", max_retries=0),
+            live=live,
+        )
+
+        async def ask(k):
+            return await client.chat.completions.create(
+                model="gpt-6-luna",
+                messages=[{"role": "user", "content": f"Hello {k}"}],
+                stream=True,
+            )
+
+        async def broken_off(k):
+            async for _ in await ask(k):
+                break
+
+        async def given_up(k):
+            try:
+                await asyncio.wait_for(ask(k), 0.05)
+            except asyncio.TimeoutError:
+                pass
+
+        async def dropped(k):
+            await ask(k)
+
+        async def work():
+            for leave in (broken_off, given_up, dropped):
+                await asyncio.gather(*(leave(k) for k in range(4)))
+                gc.collect()
+                await asyncio.sleep(0.3)
+            gc.collect()
+            await asyncio.sleep(0.2)
+
+        worker = threading.Thread(target=lambda: asyncio.run(work()), daemon=True)
+        worker.start()
+        worker.join(30)
+        self.assertFalse(worker.is_alive(), "the event loop stands still")
+
+    def silent(self, seconds):
+        """An async client of a provider that sends one piece and then nothing for a while."""
+        import httpx
+
+        made: list = []
+
+        def piece(text):
+            choice = {"index": 0, "delta": {"content": text}, "finish_reason": None}
+            return f"data: {json.dumps({'choices': [choice]})}\n\n".encode()
+
+        class Silent(httpx.AsyncByteStream):
+            def __init__(self):
+                self.closed = False
+                made.append(self)
+
+            async def __aiter__(self):
+                yield piece("one")
+                for _ in range(int(seconds / 0.02)):
+                    if self.closed:
+                        raise httpx.ReadError("closed")
+                    await asyncio.sleep(0.02)
+                yield piece("two")
+
+            async def aclose(self):
+                self.closed = True
+
+        class Provider(httpx.AsyncBaseTransport):
+            async def handle_async_request(self, request):
+                kind = {"content-type": "text/event-stream"}
+                return httpx.Response(200, headers=kind, stream=Silent())
+
+        self.start(lambda request: {"text": "unused"}, sample=0.0)
+        client = async_http_client(self.live, inner=Provider(), pings=False)
+        body = {
+            "model": "gpt-6-luna",
+            "stream": True,
+            "messages": [{"role": "user", "content": "Hi"}],
+        }
+        asked = client.build_request(
+            "POST",
+            "http://provider.test/v1/chat/completions",
+            json=body,
+            headers={"x-compache-thread": "t"},
+        )
+        return client, asked, made
+
+    def in_flight(self):
+        return [c.pending.in_flight for c in self.live.conversations() if c.pending]
+
+    def test_a_read_that_is_cancelled_ends_the_stream(self):
+        client, asked, made = self.silent(5)
+
+        async def work():
+            begun = time.monotonic()
+            with self.assertRaises(asyncio.TimeoutError):
+                response = await client.send(asked, stream=True)
+
+                async def read():
+                    try:
+                        async for _ in response.aiter_bytes():
+                            pass
+                    finally:
+                        await response.aclose()
+
+                await asyncio.wait_for(read(), 0.3)
+            for _ in range(100):
+                if not any(self.in_flight()):
+                    break
+                await asyncio.sleep(0.02)
+            return time.monotonic() - begun
+
+        self.assertLess(asyncio.run(work()), 3)
+        self.assertTrue(made[0].closed)
+        self.assertEqual(self.in_flight(), [0])
+
+    def test_a_stream_left_to_a_loop_that_no_longer_runs_is_no_open_turn(self):
+        client, asked, _ = self.silent(0)
+
+        async def broken_off():
+            # As a loop leaves it that keeps no generator of httpx's.
+            response = await client._transport.handle_async_request(asked)
+            await response.stream.__aiter__().__anext__()
+
+        with mock.patch("compache.wrap._CLOSING_SECONDS", 0.2):
+            loop = asyncio.new_event_loop()
+            self.addCleanup(loop.close)
+            loop.run_until_complete(broken_off())
+            gc.collect()
+            until = time.monotonic() + 5
+            while any(self.in_flight()) and time.monotonic() < until:
+                time.sleep(0.02)
+            self.assertEqual(self.in_flight(), [0])
+            # What was left for it to do is done once it runs again.
+            loop.run_until_complete(asyncio.sleep(0.2))
+            loop.run_until_complete(loop.shutdown_asyncgens())
 
     def test_an_async_client_streams_through_it(self):
         import openai

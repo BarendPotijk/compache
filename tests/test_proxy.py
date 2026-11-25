@@ -219,6 +219,13 @@ class ProxyTests(unittest.TestCase):
         connection.request("GET", "/compache/stats")
         stats = json.loads(connection.getresponse().read())
         self.assertEqual((stats["status"], stats["turns"]), ("ok", 3))
+        self.assertGreater(stats["tokens"]["input"], 0)
+        connection.request("GET", "/compache/metrics")
+        said = connection.getresponse().read().decode()
+        self.assertIn(
+            "# TYPE compache_turns_total counter\ncompache_turns_total 3\n", said
+        )
+        self.assertIn(f"compache_input_tokens_total {stats['tokens']['input']}\n", said)
 
     def test_a_request_leaves_the_same_whichever_way_compache_went_in(self):
         from test_live import ChatApp

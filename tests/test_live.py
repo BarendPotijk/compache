@@ -1,6 +1,7 @@
 """compache in the request path: what goes to the provider, what comes back, what is kept."""
 
 import copy
+import gc
 import json
 import tempfile
 import unittest
@@ -634,6 +635,28 @@ class PolicyTests(unittest.TestCase):
                 )
                 runs = load(self.tmp.name)[0][0]["runs"]
                 self.assertEqual(runs[0]["retrievals"], [{"bytes": len(passage(1))}])
+
+    def test_a_question_after_a_tool_of_the_client_s_opens_a_turn(self):
+        """An answer that ends on a tool the application shows something with, and asks nothing after."""
+
+        def script(request):
+            last = request["body"]["messages"][-1]
+            if last["role"] == "tool":
+                return {"text": "Here it is.", "tool": ("show_chart", {})}
+            return {"text": "", "tool": ("search_docs", {"query": "q"})}
+
+        app = self.start(script=script)
+        for n in range(1, 5):
+            app.messages.append({"role": "user", "content": f"Question {n}?"})
+            for found in (passage(n), "shown"):
+                message = app.call()
+                (call,) = message["tool_calls"]
+                shown = {"role": "tool", "tool_call_id": call["id"], "content": found}
+                app.messages += [message, shown]
+            self.clock.at += self.gap
+        self.assertEqual(self.live.stats["turns"], 3)
+        self.assertIn('reopen(\\"ctx:', json.dumps(self.model.bodies[-1]))
+        self.assertNotIn("Clause 001", json.dumps(self.model.bodies[-1]))
 
     def test_a_tool_result_in_several_pieces_is_one_part(self):
         clock = Clock(1_990_000_000.0)
@@ -1384,6 +1407,38 @@ class LifetimeTests(unittest.TestCase):
         app = ClaudeApp(Live(clock=clock), model, thread="plain")
         app.turn("Question 1?", passage(1))
         self.assertEqual([self.marks(b) for b in model.bodies], [[], []])
+
+
+class SharedPolicyTests(unittest.TestCase):
+    def test_one_policy_in_a_live_of_its_own_for_every_request(self):
+        """As a server does that wraps a client in each request it handles."""
+        chosen, clock, said = fitted("gpt-6-luna"), Clock(1_800_000_000.0), []
+        model = FakeModel(clock=clock)
+        for k in range(5):
+            said.append({"role": "user", "content": f"Question {k}"})
+            live = Live(chosen, clock=clock)
+            body = {"model": "gpt-6-luna", "messages": said}
+            answered = live.exchange(
+                "/v1/chat/completions", body, model.send(), thread="t"
+            )
+            said.append(answered.json["choices"][0]["message"])
+            clock.at += 10
+            self.assertEqual(live.stats["stood_down"], 0)
+
+    def test_nothing_is_left_of_sessions_that_are_over(self):
+        chosen = fitted("claude-sonnet-5-5")
+        usage = {"input_tokens": 100, "output_tokens": 10}
+        for n in range(40):
+            session = chosen.session("t")
+            turn = session.prepare("What now?", [passage(1)], at=1.79e9 + 10 * n)
+            session.complete(turn, "This.", at=1.79e9 + 10 * n + 1, usage=usage)
+        del session, turn
+        gc.collect()
+        chosen.session("t").prepare("What now?", [passage(1)], at=1.8e9)
+        (count,) = chosen._checker._db.execute(
+            "SELECT COUNT(*) FROM compache_cache_guard_v1"
+        ).fetchone()
+        self.assertLessEqual(count, 1)
 
 
 class ApartTests(unittest.TestCase):

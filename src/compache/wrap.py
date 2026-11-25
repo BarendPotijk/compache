@@ -28,10 +28,11 @@ import threading
 import weakref
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
+from functools import partial
 from typing import Any
 
 from . import wire
-from .live import Live, Result
+from .live import _LATER, Live, Result
 
 __all__ = ["async_http_client", "http_client", "start_pings", "thread", "wrap"]
 
@@ -43,6 +44,10 @@ _thread: contextvars.ContextVar[str | None] = contextvars.ContextVar(
 _BODY_HEADERS = ("content-length", "content-encoding", "transfer-encoding")
 # Async calls do their bookkeeping here, one worker per call in flight.
 _workers = ThreadPoolExecutor(max_workers=128, thread_name_prefix="compache")
+# The replies that are being streamed.
+_open: dict[int, Any] = {}
+# How long the end of a stream that nobody reads is waited for.
+_CLOSING_SECONDS = 30
 
 
 @contextmanager
@@ -164,9 +169,7 @@ def http_client(live: Live, *, inner=None, pings: bool = True, **options):
             yield from self._result.events
 
         def close(self):
-            closing = getattr(self._result.events, "close", None)
-            if closing is not None:
-                closing()
+            _let_go(self._result.events, self._result.close)
 
     class Transport(httpx.BaseTransport):
         def _forward(self, request):
@@ -205,6 +208,20 @@ def http_client(live: Live, *, inner=None, pings: bool = True, **options):
         options.setdefault("timeout", inner.timeout)
         options.setdefault("follow_redirects", inner.follow_redirects)
     return httpx.Client(transport=Transport(), **options)
+
+
+def _let_go(events, close) -> None:
+    """End a stream before its end: what reads it, and the response behind it."""
+    closing = getattr(events, "close", None)
+    try:
+        if closing is not None:
+            closing()
+    except ValueError:
+        # It is being read at this moment, in another thread. That ends with the response.
+        pass
+    finally:
+        if close is not None:
+            close()
 
 
 def per_loop_transport(httpx):
@@ -256,20 +273,30 @@ def async_http_client(live: Live, *, inner=None, pings: bool = True, **options):
 
     class Stream(httpx.AsyncByteStream):
         def __init__(self, result):
-            self._result = result
+            self._events, self._close = iter(result.events), result.close
+            self._over = False
+            _LATER.ready()
 
-        async def __aiter__(self):
-            loop, events = asyncio.get_running_loop(), iter(self._result.events)
-            while True:
-                chunk = await loop.run_in_executor(_workers, next, events, done)
-                if chunk is done:
-                    return
-                yield chunk
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            loop = asyncio.get_running_loop()
+            chunk = await loop.run_in_executor(_workers, next, self._events, done)
+            if chunk is done:
+                self._over = True
+                raise StopAsyncIteration
+            return chunk
 
         async def aclose(self):
-            closing = getattr(self._result.events, "close", None)
-            if closing is not None:
-                await asyncio.get_running_loop().run_in_executor(_workers, closing)
+            if not self._over:
+                self._over = True
+                loop = asyncio.get_running_loop()
+                await loop.run_in_executor(_workers, _let_go, self._events, self._close)
+
+        def __del__(self):
+            if not self._over:
+                _LATER.do(partial(_let_go, self._events, self._close))
 
     class Transport(httpx.AsyncBaseTransport):
         async def _forward(self, request):
@@ -288,8 +315,9 @@ def async_http_client(live: Live, *, inner=None, pings: bool = True, **options):
                 return await self._forward(request)
             loop = asyncio.get_running_loop()
 
-            def on_loop(coroutine):
-                return asyncio.run_coroutine_threadsafe(coroutine, loop).result()
+            def on_loop(coroutine, most=None):
+                made = asyncio.run_coroutine_threadsafe(coroutine, loop)
+                return made.result(most)
 
             async def fetch(payload):
                 response = await self._forward(
@@ -306,14 +334,42 @@ def async_http_client(live: Live, *, inner=None, pings: bool = True, **options):
                 if chunks is None:
                     return _result(response)
 
+                # Not to be collected by itself: it is closed in one place, when what reads it is.
+                _open[id(chunks)] = chunks
+
+                async def step():
+                    return await chunks.__anext__()
+
                 def events():
                     while True:
                         try:
-                            yield on_loop(chunks.__anext__())
+                            yield on_loop(step())
                         except StopAsyncIteration:
+                            _open.pop(id(chunks), None)
                             return
 
-                return _result(response, events(), lambda: on_loop(response.aclose()))
+                async def over():
+                    try:
+                        await chunks.aclose()
+                    except RuntimeError:
+                        # It is being read at this moment.
+                        pass
+                    finally:
+                        _open.pop(id(chunks), None)
+                        await response.aclose()
+
+                def closing():
+                    try:
+                        here = asyncio.get_running_loop() is loop
+                    except RuntimeError:
+                        here = False
+                    if here:
+                        # Its own thread cannot wait for what it has to do itself.
+                        loop.create_task(over())
+                    elif not loop.is_closed():
+                        on_loop(over(), _CLOSING_SECONDS)
+
+                return _result(response, events(), closing)
 
             named = _named(request)
             result = await loop.run_in_executor(
@@ -359,7 +415,7 @@ def start_pings(live: Live) -> None:
     One thread for a `Live`, however many clients share it. Nothing is started
     for a policy that sends no pings.
     """
-    if live.policy is None or not live.policy.max_pings:
+    if live.learner is None and (live.policy is None or not live.policy.max_pings):
         return
     with live._lock:
         if live.pinger is None:
@@ -371,6 +427,7 @@ def wrap(
     policy=None,
     *,
     record=None,
+    learn=None,
     sample: float = 0.0,
     notes: str = "apart",
     pings: bool = True,
@@ -380,13 +437,13 @@ def wrap(
 
     `client` is a client of the OpenAI, Anthropic or Google GenAI SDK, sync or
     async. The other arguments are those of `Live`: a policy to apply, a
-    folder to record into, and the share of turns to ask for a note. Pass a
+    folder to record into or to learn from, and the share of turns to ask for a note. Pass a
     `live` to share one between several clients. `pings` lets a background
     thread send the policy's keep-warm pings. The `Live` is on the returned
     client as `client.compache`.
     """
     if live is None:
-        live = Live(policy, record=record, sample=sample, notes=notes)
+        live = Live(policy, record=record, learn=learn, sample=sample, notes=notes)
     inner = getattr(client, "_client", None)
     api = getattr(client, "_api_client", None)
     httpx = _library(

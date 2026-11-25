@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import json
 import threading
 import time
@@ -10,6 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from . import agent
 from .errors import ContractError
 from .models import cache_lifetimes, model_spec, pricing
 from .optimizer.cache_breaks import CacheBreakChecker, CacheScope
@@ -24,17 +26,24 @@ from .profile import header_size, measure, workload
 from .record import SIZES_ONLY, is_record
 from .record import load as load_record
 from .threads import (
+    Thread,
     cache_read_reported,
     canonical_usage,
     load_threads,
     read_jsonl,
+    reasoning_tokens,
     recorded,
+    system_prompt_of,
 )
 from .wire import TTLS, cache_mark
 
 __all__ = ["Policy", "Session", "Turn", "fit", "replay"]
 
 _HORIZON_SECONDS = 86400
+_CHAT = "compache-workload-planner-v1"
+_SESSIONS = itertools.count(1)
+# Characters an agent reads back at once: the whole of most tool results.
+_AGENT_PAGE = 32_000
 
 
 def _rows(source) -> list:
@@ -66,7 +75,28 @@ def _threads(source, model=None):
                 "the threads do not record which model answered: name it with --model or model="
             )
     spec = model_spec(model)
+    found["headers"] = _headers(rows, spec)
     return load_threads(rows, model=spec.model_id), spec, found, model
+
+
+def _headers(rows, spec) -> dict:
+    """Tokens of the instructions and tools that each thread says it opened its requests with."""
+    sizes = {}
+    for row in rows:
+        row = row.to_dict() if isinstance(row, Thread) else row
+        if not isinstance(row, dict) or not isinstance(row.get("thread_id"), str):
+            continue
+        tokens = sum(
+            spec.text_tokens("." * row[key])
+            for key in ("system_bytes", "tools_bytes")
+            if type(row.get(key)) is int
+        )
+        if not tokens:
+            prompt, tools = system_prompt_of(row), row.get("tools")
+            tools = tools if isinstance(tools, list) else ()
+            tokens = header_size(spec, prompt or "", tools)
+        sizes[row["thread_id"].strip()] = tokens
+    return sizes
 
 
 def _calls(threads):
@@ -112,6 +142,11 @@ def fit(
     for an hour, every candidate is priced under that too.
     `observed_until` is when the record was cut, for a record that ends while
     conversations were still going. `options` go to the solver.
+
+    Where turns are loops of many model calls, as an agent's are, the policy
+    decides call by call instead: which tool results stay in view, and what
+    keeps the cache warm while a tool runs. What replies quote from earlier
+    results says which were still needed, so an agent's record needs no labels.
     """
     labels = _labels(labels, threads)
     threads, spec, found, model = _threads(threads, model)
@@ -123,9 +158,28 @@ def fit(
             raise ContractError(
                 f"no request can ask for cache entries of {other.cache_ttl_seconds:g} seconds"
             )
+    opens = found["headers"] if system_prompt is None and tools is None else {}
     if system_prompt is None:
         system_prompt = found["system_prompt"] or ""
     tools = list(found["tools"] or ()) if tools is None else list(tools)
+    header = {"system_prompt": system_prompt, "default_tools": tools}
+    agentic = options.pop("agent", None)
+    if agent.is_agentic(threads) if agentic is None else agentic:
+        unknown = sorted(set(options) - {"floor", "reserve", "pings"})
+        if unknown:
+            raise ContractError(
+                f"a policy that decides call by call is not fitted with {', '.join(unknown)}: "
+                "give agent=False for one that decides per message"
+            )
+        artifact = agent.fit_agent(
+            threads,
+            spec,
+            labels=labels,
+            lifetimes=lifetimes,
+            header_tokens=opens or header_size(spec, system_prompt, tools),
+            **options,
+        )
+        return Policy({**artifact, "header": header, "pricing": pricing(model)})
     if all(t.to_dict().get("provenance") == SIZES_ONLY for t in threads):
         # No words to match a question against: see `solve_workload`.
         options.setdefault("match_questions", False)
@@ -160,8 +214,7 @@ def fit(
     # The policy file keeps the cut that won. The priced candidates stay under `solve`.
     artifact["recipes"] = [row for row in scored if row["eligible"]]
     artifact["header"] = {
-        "system_prompt": system_prompt,
-        "default_tools": tools,
+        **header,
         "share_headers": options.get("share_headers", True),
     }
     artifact["pricing"] = pricing(model)
@@ -189,8 +242,22 @@ def replay(policy, threads, labels=None, *, observed_until=None, **options) -> d
     if not isinstance(policy, Policy):
         policy = Policy(policy)
     labels = _labels(labels, threads)
-    threads, _, found, _ = _threads(threads, policy.spec)
+    threads, spec, found, _ = _threads(threads, policy.spec)
     header = policy.artifact.get("header") or {}
+    if policy.agentic:
+        prompt, tools = header.get("system_prompt", ""), header.get("default_tools")
+        opens = header_size(spec, prompt, tools or ())
+        report = agent.replay_agent(
+            policy.artifact,
+            threads,
+            labels=labels,
+            header_tokens={k: v or opens for k, v in found["headers"].items()},
+        )
+        calls = report["calls"]
+        costs = {"policy": report["policy_cost"]}
+        if report["keep_everything_cost"] is not None:
+            costs["keep_everything"] = report["keep_everything_cost"]
+        return {**report, "cost_per_1000_calls": policy._per_1000(costs, calls)}
     # Threads share a cached system prompt in the replay if they did in the fit.
     options.setdefault("share_headers", header.get("share_headers", True))
     options.setdefault("calls_per_run", _calls(threads))
@@ -240,7 +307,7 @@ def replay(policy, threads, labels=None, *, observed_until=None, **options) -> d
         "saving": 1 - cost / keep if complete and keep else None,
         "common_prefix": {
             "turns": len(common_runs),
-            "cost_per_1000_turns": policy._per_1000_turns(paired, len(common_runs)),
+            "cost_per_1000_turns": policy._per_1000(paired, len(common_runs)),
             "saving": 1 - paired["policy"] / paired["keep_everything"]
             if paired["keep_everything"]
             else None,
@@ -259,8 +326,8 @@ def replay(policy, threads, labels=None, *, observed_until=None, **options) -> d
         if full_tokens
         else None,
         "cost_per_1000_turns": {
-            **policy._per_1000_turns({"policy": cost}, turns),
-            **policy._per_1000_turns({"keep_everything": keep}, baseline_turns),
+            **policy._per_1000({"policy": cost}, turns),
+            **policy._per_1000({"keep_everything": keep}, baseline_turns),
         },
         "detail": detail,
     }
@@ -284,12 +351,14 @@ class Policy:
     """A fitted policy: what stays in view, and how many pings keep the cache warm."""
 
     def __init__(self, artifact: dict):
-        if (
-            not isinstance(artifact, dict)
-            or artifact.get("schema_version") != "compache-workload-planner-v1"
+        if not isinstance(artifact, dict) or artifact.get("schema_version") not in (
+            _CHAT,
+            agent.SCHEMA,
         ):
             raise ContractError("expected a fitted policy")
         self.artifact = artifact
+        # Whether it decides call by call, for an agent, or once per user message.
+        self.agentic = artifact["schema_version"] == agent.SCHEMA
         self._compiled = None
         self._checker = None
         self._lock = threading.Lock()
@@ -324,16 +393,26 @@ class Policy:
         """The cache mark for a Claude request you assemble yourself."""
         return cache_mark(self.cache_lifetime)
 
+    @property
+    def header_lifetime(self) -> float | None:
+        """How long the provider is asked to keep instructions and tools, where that is longer than the rest."""
+        spec = self.artifact.get("header_spec")
+        return spec["cache_ttl_seconds"] if spec else None
+
     def at_default_lifetime(self) -> Policy:
         """The same cut and pings, planned under the provider's default cache lifetime."""
-        if self.cache_lifetime is None:
+        if self.cache_lifetime is None and self.header_lifetime is None:
             return self
-        artifact = {k: v for k, v in self.artifact.items() if k != "standard_spec"}
-        return Policy({**artifact, "model_spec": self.artifact["standard_spec"]})
+        dropped = ("standard_spec", "header_spec")
+        artifact = {k: v for k, v in self.artifact.items() if k not in dropped}
+        standard = self.artifact.get("standard_spec", self.artifact["model_spec"])
+        return Policy({**artifact, "model_spec": standard})
 
     @property
-    def recipe(self) -> RetentionRecipe | None:
+    def recipe(self) -> RetentionRecipe | agent.AgentRecipe | None:
         """The cut the policy applies, or None when it keeps the whole history."""
+        if self.agentic:
+            return agent.AgentRecipe(**self.artifact["recipe"])
         for row in self.artifact["recipes"]:
             if row["eligible"]:
                 return RetentionRecipe(**row["recipe"])
@@ -341,12 +420,14 @@ class Policy:
 
     @property
     def max_pings(self) -> int:
+        if self.agentic:
+            return max(self.recipe.tool_pings, self.recipe.user_pings)
         return (self.artifact.get("planner_options") or {}).get("max_pings", 1)
 
-    def _per_1000_turns(self, costs, turns):
-        """Costs per 1,000 turns: in dollars for a known model, else in input tokens."""
+    def _per_1000(self, costs, count):
+        """Costs per 1,000 turns or calls: in dollars for a known model, else in input tokens."""
         price = (self.artifact.get("pricing") or {}).get("input_price_per_million")
-        scale = 1000 / turns if turns else None
+        scale = 1000 / count if count else None
         if price is None:
             return {
                 "unit": "input-token equivalents",
@@ -366,6 +447,8 @@ class Policy:
     @property
     def summary(self) -> dict:
         """The decision and what it costs on the fitted threads, as plain numbers."""
+        if self.agentic:
+            return self._agent_summary
         solved = self.artifact.get("solve") or {}
         chosen = solved.get("chosen") or {}
         recipe = self.recipe
@@ -408,11 +491,78 @@ class Policy:
             "saving": solved.get("saving_fraction"),
             "cost_per_1000_turns": None
             if None in costs.values()
-            else self._per_1000_turns(costs, solved.get("turns")),
+            else self._per_1000(costs, solved.get("turns")),
         }
+
+    @property
+    def _agent_summary(self) -> dict:
+        solved, recipe = self.artifact.get("solve") or {}, self.recipe
+        chosen = solved.get("chosen") or {}
+        costs = {
+            "policy": chosen.get("cost"),
+            "keep_everything": solved.get("keep_everything_cost"),
+            "caching_alone": (solved.get("caching_alone") or {}).get("cost"),
+        }
+        return {
+            "model": self.spec.model_id,
+            "threads": len(self.artifact.get("training_threads") or ()),
+            "turns": solved.get("turns"),
+            "calls": solved.get("calls"),
+            "relying_calls": solved.get("relying_calls"),
+            "keep": None
+            if recipe.rounds is None
+            else {"rounds": recipe.rounds, "ratio": recipe.ratio},
+            "pings": {"tool": recipe.tool_pings, "user": recipe.user_pings},
+            "max_pings": self.max_pings,
+            "cache_lifetime_seconds": self.cache_lifetime,
+            "header_lifetime_seconds": self.header_lifetime,
+            "coverage": chosen.get("coverage"),
+            "missed_calls": chosen.get("missed_calls"),
+            "saving": solved.get("saving_fraction"),
+            "cost_per_1000_calls": None
+            if None in costs.values()
+            else self._per_1000(costs, solved.get("calls")),
+        }
+
+    def _describe_agent(self) -> str:
+        summary, recipe = self.summary, self.recipe
+        lines = agent.sentences(recipe)
+        if summary["cache_lifetime_seconds"]:
+            lines.insert(
+                1,
+                f"Ask for {_duration(summary['cache_lifetime_seconds'])} cache entries.",
+            )
+        if summary["header_lifetime_seconds"]:
+            lines.insert(
+                1,
+                f"Ask for {_duration(summary['header_lifetime_seconds'])} cache entries for the "
+                "instructions and tools that open every request.",
+            )
+        if recipe.rounds is not None and summary["coverage"] is not None:
+            kept = f"{summary['coverage']:.0%} of the calls that rely on an earlier result find it in view."
+            if summary["missed_calls"]:
+                share = summary["missed_calls"] / summary["calls"]
+                kept += f" The others, {share:.1%} of all calls, fetch it back, and that is in the cost."
+            lines.append(kept)
+        costs, saving = summary["cost_per_1000_calls"], summary["saving"]
+        if costs and saving is not None:
+            if costs["unit"] == "USD":
+                lines.append(
+                    f"${costs['policy']:,.2f} per 1,000 calls against "
+                    f"${costs['keep_everything']:,.2f} keeping everything: {saving:.0%} less."
+                )
+                if costs["caching_alone"] < costs["keep_everything"]:
+                    lines.append(
+                        f"Caching alone, at its best, would cost ${costs['caching_alone']:,.2f}."
+                    )
+            else:
+                lines.append(f"{saving:.0%} cheaper than keeping everything.")
+        return "\n".join(lines)
 
     def describe(self) -> str:
         """The decision in sentences."""
+        if self.agentic:
+            return self._describe_agent()
         summary, recipe = self.summary, self.recipe
         lines = []
         if recipe is None:
@@ -474,7 +624,7 @@ class Policy:
         """The session of one conversation. Keep it for as long as the conversation lives."""
         with self._lock:
             # Conversations open at the same moment on a server: set up once, and in full.
-            if self._compiled is None:
+            if self._compiled is None and not self.agentic:
                 checker = CacheBreakChecker()
                 weakref.finalize(self, checker.close)
                 self._checker = checker
@@ -521,6 +671,11 @@ def _counters(usage) -> dict:
     }
 
 
+def _thought(usage) -> int:
+    """Tokens of reasoning in a reply, as far as the provider counts them apart."""
+    return reasoning_tokens(usage) or 0
+
+
 class Session:
     """One conversation under a policy.
 
@@ -533,14 +688,32 @@ class Session:
         self.policy, self.thread_id = policy, thread_id
         self.system_prompt, self.tools = system_prompt, tools
         self._model = policy.spec.model_id
-        self._engine = WorkloadSession(
-            policy._compiled,
-            CacheScope("compache", "declared", self._model, thread_id),
-            policy._checker,
-        )
+        if policy.agentic:
+            self._engine = agent.AgentEngine(policy.artifact, thread_id)
+        else:
+            # Two sessions of one name know nothing of each other, as in a server that makes one a request.
+            mine = str(next(_SESSIONS))
+            scope = CacheScope("compache", "declared", self._model, thread_id, mine)
+            checker = policy._checker
+            self._engine = WorkloadSession(policy._compiled, scope, checker)
+            ended = weakref.finalize(self._engine, checker.forget, scope.fingerprint)
+            ended.atexit = False
         self._history: list[Source] = []
         self._run = 0
         self._pending = None
+
+    def copy(self) -> Session | None:
+        """The session as it stands, for a conversation that branches. None where it cannot be copied."""
+        if not self.policy.agentic:
+            return None
+        made = Session.__new__(Session)
+        made.__dict__.update(self.__dict__)
+        made._engine, made._history = self._engine.copy(), list(self._history)
+        return made
+
+    def follows(self, other: Session) -> None:
+        """Take over how warm the cache is from a conversation that went on from the same start."""
+        self._engine.follows(other._engine)
 
     def _request(self, run, parts):
         return Request(
@@ -580,6 +753,8 @@ class Session:
                     fields.get("document_id", part_id),
                     fields.get("version", "1"),
                     fields.get("chunk_id", part_id),
+                    more=bool(fields.get("more")),
+                    stays=bool(fields.get("stays")),
                 )
             )
         return parts
@@ -618,21 +793,137 @@ class Session:
             plan,
         )
 
-    def extend(self, turn: Turn, retrieved) -> Turn:
+    def extend(self, turn: Turn, retrieved, *, at=None) -> Turn:
         """Add text retrieved while `turn` is being answered, such as the results of a tool loop.
 
         The history stays as `prepare` sent it and the new items follow it, so
-        the cached prefix is untouched. Returns the turn to pass to `complete`.
+        the cached prefix is untouched. An agent's policy decides again here,
+        on the results of one round of tool calls at a time, and `at` is when
+        the request that carries them goes out. Returns the turn to pass to
+        `complete`.
         """
         if self._pending is None or self._pending[0] is not turn.plan.request:
             raise ContractError("no prepared turn to extend")
         request, parts = self._pending
         found = sum(p.kind == "retrieval" for p in parts)
         added = self._retrieved(request.run_index, retrieved, found + 1)
-        plan = self._engine.extend(turn.plan, added)
+        if at is None:
+            at = time.time()
+        plan = self._engine.extend(turn.plan, added, at=at)
         self._pending = (plan.request, parts + tuple(added))
-        view = plan.view
-        return Turn(view.parts, view.archived_ids, view.tokens, turn.action, plan)
+        view, action = plan.view, turn.action
+        if self.policy.agentic:
+            action = plan.decision["action"]
+        return Turn(view.parts, view.archived_ids, view.tokens, action, plan)
+
+    def replied(
+        self,
+        turn: Turn,
+        text: str = "",
+        calls=(),
+        *,
+        at=None,
+        usage=None,
+        place=None,
+    ):
+        """Record a reply that calls tools, and so does not end `turn`. Returns when the next ping is due.
+
+        `text` is what it said and `calls` the arguments of its tool calls. An
+        agent's policy learns from it what the provider holds in its cache and
+        when a ping is due while the tools run. Without it the policy goes by
+        its own count. `place` says which message will carry the reply, where
+        that keeps the reply's reasoning in later requests.
+        """
+        if self._pending is None or self._pending[0] is not turn.plan.request:
+            raise ContractError("no prepared turn to reply to")
+        if not self.policy.agentic:
+            return None
+        counted = canonical_usage(usage) or {}
+        self._engine.replied(
+            turn.plan,
+            at=time.time() if at is None else at,
+            text=text,
+            calls=calls,
+            output_tokens=counted.get("output"),
+            thought=_thought(usage),
+            place=place,
+            **_counters(usage),
+        )
+        return self.next_ping_at
+
+    def thought(self, place, tokens: int) -> None:
+        """Say that a message of the conversation holds reasoning of about that size."""
+        self._engine.thought(place, tokens)
+
+    def carries(self, places) -> None:
+        """Say which messages of the request still hold reasoning."""
+        self._engine.carries(places)
+
+    def without(self, places) -> list:
+        """Those of the messages with reasoning that go out without it."""
+        return self._engine.without(places)
+
+    def binds(self, does: bool) -> None:
+        """Say whether the model takes its reasoning back only behind what stood ahead of it when it was made."""
+        if self.policy.agentic:
+            self._engine.flow.binds = does
+
+    def unbound(self, places) -> None:
+        """Say which messages go out without their reasoning from here on."""
+        if self.policy.agentic:
+            self._engine.unbound(places)
+
+    @property
+    def left_more(self) -> int:
+        """Tokens of pictures and the like that are out of view, as the provider counted them."""
+        return self._engine.left_more if self.policy.agentic else 0
+
+    @property
+    def counts_thoughts(self) -> bool:
+        """Whether the provider counts the reasoning that a request holds, as far as that is known."""
+        return not self.policy.agentic or self._engine.counts_thoughts
+
+    @property
+    def holds(self):
+        """What goes first with the next cut, where the policy decides call by call."""
+        return self._engine.holds if self.policy.agentic else None
+
+    def reopened(self, name: str, text: str) -> None:
+        """Say that fetched-back text now stands at the end of the conversation, under `name`."""
+        if self.policy.agentic:
+            self._engine.reopened(name, self.policy.spec.part_tokens(text))
+
+    def elsewhere(self, turn: Turn, answer: str) -> None:
+        """Record the answer to a turn that another model gave. Only an agent's session takes it."""
+        request, parts = self._pending
+        named, run = f"{request.run_id}:output", request.run_index
+        source = Source(named, "output", run, answer)
+        self._engine.elsewhere(turn.plan, source)
+        self._history.extend((*parts, source))
+        self._run, self._pending = run, None
+
+    def stay_longer(self) -> None:
+        """Say that the model fetches back what it had fetched back before."""
+        if self.policy.agentic:
+            self._engine.flow.stay_longer()
+
+    def lost(self) -> None:
+        """Say that the provider has nothing of the conversation in its cache any more."""
+        if self.policy.agentic:
+            self._engine.flow.at = None
+
+    def warm(self, at: float) -> bool:
+        """Whether the provider is taken to have the conversation in its cache."""
+        return self.policy.agentic and self._engine.flow.warm(at)
+
+    def shows_again(self, name: str) -> bool:
+        """Whether text that was fetched back under `name` still stands where it was put."""
+        return self.policy.agentic and self._engine.shows_again(name)
+
+    def dropped(self, name: str) -> None:
+        """Say that what was fetched back under `name` no longer stands in the conversation."""
+        if self.policy.agentic:
+            self._engine.dropped(name)
 
     def complete(
         self,
@@ -643,6 +934,7 @@ class Session:
         usage=None,
         last_usage=None,
         cited_part_ids=(),
+        place=None,
     ):
         """Record the answer to `turn`. Returns when the next ping is due, if one is.
 
@@ -678,7 +970,13 @@ class Session:
         counters = _counters(usage)
         final = _counters(last_usage)
         spec = self.policy.spec
-        if counters and final:
+        if self.policy.agentic:
+            # Its calls were told of one by one: what counts is what the last one left.
+            counters = final or counters
+            counters["place"] = place
+            if place is not None:
+                counters["thought"] = _thought(last_usage or usage)
+        elif counters and final:
             # The first call says what the turn found cached, the last what it leaves.
             left = final["input_tokens"]
             if final["cache_write_input_tokens"]:
@@ -694,7 +992,7 @@ class Session:
                 "cached_input_tokens": counters["cached_input_tokens"],
                 "reusable_input_tokens": left if cacheable else 0,
             }
-        elif not counters:
+        if not counters:
             cached = turn.tokens // spec.cache_block_tokens * spec.cache_block_tokens
             cacheable = spec.cache_ttl_seconds > 0 and cached >= spec.cache_min_tokens
             counters = {"reusable_input_tokens": cached if cacheable else 0}
@@ -718,7 +1016,7 @@ class Session:
 
         Send it with the smallest output the provider allows, then call `ping_sent`.
         """
-        if not self._run:
+        if not self._run and not self.policy.agentic:
             return None
         view = self._engine.ping_view(
             run_id=f"{self.thread_id}:{self._run}",
@@ -758,4 +1056,12 @@ class Session:
         arguments = {"reference": reference}
         if offset:
             arguments["offset"] = offset
-        return _reopen(request, arguments, search=tuple(search))
+        if not self.policy.agentic:
+            return _reopen(request, arguments, search=tuple(search))
+        return _reopen(
+            request,
+            arguments,
+            search=tuple(search),
+            within=self._engine.archived_ids,
+            page=_AGENT_PAGE,
+        )

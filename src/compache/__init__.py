@@ -11,7 +11,7 @@ client = compache.wrap(client, record="compache-record", sample=0.1)
 policy = compache.fit("compache-record")
 """
 
-__version__ = "0.14.0"
+__version__ = "0.15.0"
 
 from . import langchain, langfuse, litellm, mlflow, otel
 from .api import Policy, Session, Turn, fit, replay

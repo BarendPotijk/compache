@@ -15,6 +15,7 @@ import hashlib
 import json
 import logging
 import sqlite3
+from collections import deque
 from threading import RLock
 
 from compache.errors import ContractError
@@ -147,11 +148,23 @@ def _classify(
     return outcome, changed, age, expected
 
 
+_TABLES = (
+    "compache_cache_guard_v1",
+    "compache_cache_arrival_v1",
+    "compache_cache_reset_v1",
+    "compache_ping_stop_v1",
+    "compache_ping_foreground_v1",
+    "compache_cache_warning_v1",
+)
+
+
 class CacheBreakChecker:
     """Per-thread cache guard. Pass a database path for cross-process persistence."""
 
     def __init__(self, path=":memory:"):
         self._lock = RLock()
+        # Sessions end wherever they are collected, perhaps in the middle of something here.
+        self._gone: deque[str] = deque()
         self._db = sqlite3.connect(
             path, timeout=10, isolation_level=None, check_same_thread=False
         )
@@ -191,6 +204,16 @@ class CacheBreakChecker:
     def close(self):
         with self._lock:
             self._db.close()
+
+    def forget(self, scope_id: str) -> None:
+        """Nothing will be asked of a scope any more. It goes with the next request of another."""
+        self._gone.append(scope_id)
+
+    def _clear(self) -> None:
+        while self._gone:
+            scope_id = self._gone.popleft()
+            for table in _TABLES:
+                self._db.execute(f"DELETE FROM {table} WHERE scope=?", (scope_id,))
 
     @contextmanager
     def _transaction(self):
@@ -233,6 +256,7 @@ class CacheBreakChecker:
         run = digest(_id(run_id, "run_id"))
         number(started_at, "started_at", -1e20)
         with self._transaction():
+            self._clear()
             if self._before_reset(scope_id, started_at):
                 return False
             prior = self._prior(scope_id)
