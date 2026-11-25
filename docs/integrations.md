@@ -7,7 +7,7 @@ compache goes in at two places: where your model calls leave, and where your tra
 | Your stack | compache goes in with |
 |---|---|
 | Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code, Copilot CLI, Aider, Goose, Crush, Kilo, pi, OpenHands, or any other agent on the command line | `compache wrap claude`, see [Agents](agents.md) |
-| OpenAI SDK (Chat Completions, Responses), Anthropic SDK, Google GenAI SDK, sync or async | `client = compache.wrap(client, "policy.json")` |
+| OpenAI SDK (Chat Completions, Responses, also on Azure), Anthropic SDK (also on Vertex AI and Foundry), Google GenAI SDK, sync or async | `client = compache.wrap(client, "policy.json")` |
 | A Python framework on one of these SDKs: OpenAI Agents SDK, Claude Agent SDK, Google ADK, Pydantic AI, LlamaIndex, Microsoft Agent Framework, Semantic Kernel, Agno, AutoGen, Strands, Haystack, Instructor, Langfuse's OpenAI drop-in | The wrapped client, an HTTP client or the proxy: [one line each](#python-frameworks) |
 | LangChain and LangGraph, any chat model | `create_agent(..., middleware=[compache.langchain.middleware(live)])` |
 | LiteLLM, and what is built on it | `compache.litellm.install(live)`, or a [callback](#litellm) that records in your LiteLLM proxy |
@@ -121,7 +121,7 @@ compache proxy --policy policy.json --record compache-record --sample 0.1 --port
 
 As a container that is always on, it learns in a volume: `docker build -t compache . && docker run -d --restart unless-stopped -p 127.0.0.1:8787:8787 -v compache:/data compache`. Arguments of its own replace that, such as `--policy`.
 
-It serves `/v1/chat/completions`, `/v1/responses`, `/v1/messages` and Gemini's `:generateContent` on the provider's own paths, forwards the caller's credentials, and passes everything else through. `--upstream URL` sends all of it to one gateway. `/compache/stats` says what it has done, `/compache/metrics` the same for Prometheus.
+It serves `/v1/chat/completions`, `/v1/responses`, `/v1/messages` and Gemini's `:generateContent` on the provider's own paths, Azure's and Vertex AI's included, forwards the caller's credentials, and passes everything else through. What Bedrock takes is signed, so nothing can be changed in it. `--upstream URL` sends all of it to one gateway. `/compache/stats` says what it has done, `/compache/metrics` the same for Prometheus.
 
 | Harness | Setting |
 |---|---|
@@ -161,7 +161,7 @@ In order: `compache.thread(...)` around the call, the header `x-compache-thread`
 | Hermes 0.23.3 | The released agent with a local model. The engine, installed with Hermes' own installer: a conversation trimmed once its cache had expired, and a passage fetched back. The proxy, with the settings above |
 | Live providers | Chat Completions whole and streamed, Responses and Messages through the SDKs, the proxy and a LangChain agent, on Claude Haiku 5.5, GPT-6 Luna and Gemini 3.5 Flash Lite through OpenRouter. See [the live runs](../benchmarks/live/README.md) |
 | Gemini's own API | The stand-in only: OpenRouter does not serve it |
-| Claude Code 2.1, Codex 0.172, OpenCode 1.19 | Started with `compache wrap`, on Claude Haiku 5.5 and GPT-6 Luna: a small repository repaired by each. [Sessions of real issues](../benchmarks/agents/README.md) with Claude Code and Codex |
+| Claude Code 2.1, Codex 0.172, OpenCode 1.19 | Started with `compache wrap`, on Claude Haiku 5.5 and GPT-6 Luna: a small repository repaired by each. [Sessions of real issues](../benchmarks/agents/README.md) with Claude Code and Codex. Claude Code and the Anthropic SDK on Vertex AI and Foundry, against the stand-in |
 | OpenClaw 2026.11.7, Aider 0.86, CrewAI 1.15 | The released harness through the proxy with a local model, with the settings above. OpenClaw names its sessions itself |
 | LangChain 1.5 | An agent on a scripted chat model with the middleware, on every test run: results trimmed, one fetched back, sync and async |
 | Qwen Code 0.28, Goose 1.60, Crush 0.102, Copilot CLI 1.0, Kilo 7.8, pi 0.73, OpenHands 1.16, Cline 3.0 | The released agent in a loop of file reads, under `compache wrap` and Cline through the proxy, against the stand-in. Gemini CLI 0.71: one answer |

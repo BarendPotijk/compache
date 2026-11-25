@@ -857,10 +857,10 @@ class OpenAIChat:
 
 
 class Anthropic:
-    """`POST /messages`, the Anthropic Messages API."""
+    """`POST /messages`, the Anthropic Messages API, and the same on Google's Vertex AI."""
 
     name = "anthropic"
-    suffixes = ("/messages",)
+    suffixes = ("/messages", ":rawPredict", ":streamRawPredict")
 
     @staticmethod
     def scan(body: dict) -> Scan:
@@ -2212,6 +2212,11 @@ def instructs(message: Any) -> bool:
 def dialect_for(path: str):
     """The dialect of a request path, or None for an endpoint compache leaves alone."""
     path = path.split("?", 1)[0].rstrip("/")
+    if path.endswith("awPredict") and (
+        "/publishers/anthropic/" not in path or model_of(path) == "count-tokens"
+    ):
+        # Vertex AI has models of others under the same name, and asks for a count that way too.
+        return None
     for dialect in DIALECTS:
         if path.endswith(dialect.suffixes):
             return dialect
@@ -2234,14 +2239,15 @@ def volume(value: Any) -> int:
 
 
 def model_of(path: str) -> str | None:
-    """The model a path names, as Gemini's does."""
+    """The model a path names, as Gemini's and Vertex AI's do."""
     _, found, rest = path.partition("/models/")
-    return rest.partition(":")[0] or None if found else None
+    # Vertex AI puts the date of a model's version behind an @.
+    return rest.partition(":")[0].partition("@")[0] or None if found else None
 
 
 def streams(path: str) -> bool:
     """Whether a path alone says that its reply streams, as Gemini's does."""
-    return ":streamGenerateContent" in path
+    return ":streamGenerateContent" in path or ":streamRawPredict" in path
 
 
 def set_text(dialect, body: dict, path: tuple, text: str) -> dict:

@@ -565,7 +565,7 @@ class FakeModel:
 
     def handle(self, path: str, body: dict, headers=None):
         plain = path.split("?")[0].rstrip("/")
-        if plain.endswith("/messages"):
+        if plain.endswith(("/messages", ":rawPredict", ":streamRawPredict")):
             return self.messages(body, path, headers)
         if plain.endswith("/responses"):
             return self.responses(body, path, headers)

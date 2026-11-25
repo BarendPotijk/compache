@@ -83,20 +83,28 @@ _BODY = {
 }
 
 
-def _family(path: str, headers) -> str:
-    """Which provider's API a request speaks."""
+def _family(path: str, headers, other: str = "openai") -> str:
+    """Which provider's API a request speaks. `other` is the answer where nothing says."""
     dialect = wire.dialect_for(path)
     if dialect is not None:
         return {"anthropic": "anthropic", "gemini": "gemini"}.get(
             dialect.name, "openai"
         )
-    if "x-goog-api-key" in headers or "/v1beta/" in path:
-        return "gemini"
-    if "anthropic-version" in headers or (
-        "x-api-key" in headers and "authorization" not in headers
+    key = headers.get("x-api-key", headers.get("authorization", ""))
+    if (
+        "anthropic-version" in headers
+        or "sk-ant-" in key
+        or "/publishers/anthropic/" in path
+        or ("x-api-key" in headers and "authorization" not in headers)
     ):
         return "anthropic"
-    return "openai"
+    if (
+        "x-goog-api-key" in headers
+        or "/v1beta/" in path
+        or "/publishers/google/" in path
+    ):
+        return "gemini"
+    return other
 
 
 def _decoded(raw: bytes, encoding: str | None) -> bytes:
@@ -253,7 +261,7 @@ def serve(
     `openai`, `anthropic` or `gemini`. `server.live` is the `Live`.
     """
     targets = {**DEFAULTS, **(upstreams or {})}
-    forward = {"all": upstream}
+    forward = {"all": upstream, "other": "openai"}
 
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -324,7 +332,8 @@ def serve(
                 return self._answer(426, [], b"compache speaks HTTP")
             raw = self._read()
             headers = {k.lower(): v for k, v in self.headers.items()}
-            base = forward["all"] or targets[_family(self.path, headers)]
+            speaks = _family(self.path, headers, forward["other"])
+            base = forward["all"] or targets[speaks]
             if base in DEFAULTS.values() and self.path.startswith(_UNVERSIONED):
                 # SDKs differ in whether a base URL holds the version. Their providers do not.
                 self.path = "/v1" + self.path
@@ -405,9 +414,12 @@ def serve(
             pass
 
         @staticmethod
-        def forward(everything: str | None, named: dict) -> None:
-            """Where requests go on to, once that is known: one base URL, or one by API."""
-            forward["all"] = everything
+        def forward(everything: str | None, named: dict, other: str = "openai") -> None:
+            """Where requests go on to, once that is known: one base URL, or one by API.
+
+            `other` is the API of those that do not say which they speak.
+            """
+            forward["all"], forward["other"] = everything, other
             targets.update(named)
 
     server = Server((host, port), Handler)

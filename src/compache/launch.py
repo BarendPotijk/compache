@@ -73,6 +73,8 @@ class Agent:
     # The variables the agent itself takes a base URL from, by API. What they say already is where
     # requests go on to.
     reads: dict
+    # The one API it speaks, where it is one.
+    speaks: str | None = None
 
 
 def _reading(*apis: str) -> dict:
@@ -88,12 +90,44 @@ def _plain(*apis: str):
     return setup
 
 
+def _set(env: dict, name: str) -> bool:
+    return env.get(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
 def _claude(bases: dict, env: dict) -> tuple[dict, list, dict]:
-    changes = {"ANTHROPIC_BASE_URL": bases["anthropic"]}
-    if not env.get("ENABLE_TOOL_SEARCH", "").strip():
-        # Behind a base URL of one's own, Claude Code would send every tool's definition up front.
-        changes["ENABLE_TOOL_SEARCH"] = "true"
-    return changes, [], {}
+    origin, changes, told = _origin(bases["anthropic"]), {}, {}
+    if any(_set(env, f"CLAUDE_CODE_USE_{name}") for name in ("BEDROCK", "MANTLE")):
+        raise ValueError(
+            "Claude Code signs what it sends to AWS, so nothing can be changed in it. compache "
+            "carries what it sends to Anthropic, Vertex AI and Foundry"
+        )
+    if _set(env, "CLAUDE_CODE_USE_VERTEX"):
+        region = env.get("CLOUD_ML_REGION") or "global"
+        host = "aiplatform.googleapis.com"
+        if region in ("us", "eu"):
+            host = f"aiplatform.{region}.rep.googleapis.com"
+        elif region != "global":
+            host = f"{region}-{host}"
+        given = env.get("ANTHROPIC_VERTEX_BASE_URL") or f"https://{host}/v1"
+        changes["ANTHROPIC_VERTEX_BASE_URL"] = origin + _path(given)
+        told["anthropic"] = given
+    elif _set(env, "CLAUDE_CODE_USE_FOUNDRY"):
+        resource = env.get("ANTHROPIC_FOUNDRY_RESOURCE", "")
+        given = (
+            env.get("ANTHROPIC_FOUNDRY_BASE_URL")
+            or f"https://{resource}.services.ai.azure.com/anthropic"
+        )
+        changes["ANTHROPIC_FOUNDRY_BASE_URL"] = origin + _path(given)
+        if resource:
+            # It takes one of the two.
+            changes["ANTHROPIC_FOUNDRY_RESOURCE"] = ""
+        told["anthropic"] = given
+    else:
+        changes["ANTHROPIC_BASE_URL"] = bases["anthropic"]
+        if not env.get("ENABLE_TOOL_SEARCH", "").strip():
+            # Behind a base URL of one's own, Claude Code would send every tool's definition up front.
+            changes["ENABLE_TOOL_SEARCH"] = "true"
+    return changes, [], told
 
 
 def _codex_home(env: dict) -> Path:
@@ -240,14 +274,18 @@ def _pi(bases: dict, env: dict) -> tuple[dict, list, dict]:
 
 
 AGENTS = {
-    "claude": Agent("claude", "Claude Code", _claude, _reading("anthropic")),
-    "codex": Agent("codex", "Codex", _codex, {}),
+    "claude": Agent(
+        "claude", "Claude Code", _claude, _reading("anthropic"), "anthropic"
+    ),
+    "codex": Agent("codex", "Codex", _codex, {}, "openai"),
     "opencode": Agent(
         "opencode", "opencode", _configured("OPENCODE_CONFIG_CONTENT"), _VARIABLES
     ),
     "kilo": Agent("kilo", "Kilo", _configured("KILO_CONFIG_CONTENT"), _VARIABLES),
-    "gemini": Agent("gemini", "Gemini CLI", _plain("gemini"), _reading("gemini")),
-    "qwen": Agent("qwen", "Qwen Code", _plain("openai"), _reading("openai")),
+    "gemini": Agent(
+        "gemini", "Gemini CLI", _plain("gemini"), _reading("gemini"), "gemini"
+    ),
+    "qwen": Agent("qwen", "Qwen Code", _plain("openai"), _reading("openai"), "openai"),
     "aider": Agent(
         "aider",
         "aider",
@@ -361,7 +399,9 @@ def run(
     server = serve(live, port=port)
     origin = f"http://127.0.0.1:{server.server_address[1]}"
     changes, ahead, upstreams = prepared(agent, origin, env)
-    server.forward(upstream, upstreams)
+    # An agent of one API sends its credentials to that and to no other.
+    other = agent.speaks or "openai"
+    server.forward(upstream, upstreams, other)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     # Ctrl-C belongs to the agent.
     before = signal.getsignal(signal.SIGINT)

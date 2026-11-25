@@ -1014,6 +1014,32 @@ class ShapeTests(unittest.TestCase):
         (call,) = gemini.fetched(mixed, {"a": "text"})[0]["parts"]
         self.assertTrue(call["thoughtSignature"])
 
+    def test_claude_on_vertex_ai_is_claude(self):
+        class Vertex(Claude):
+            path = (
+                "/v1/projects/p/locations/global/publishers/anthropic/models/"
+                "claude-haiku-5-5@20260901:rawPredict"
+            )
+
+            def body(self, stream):
+                body = {k: v for k, v in super().body(stream).items() if k != "model"}
+                return {**body, "anthropic_version": "vertex-2023-10-16"}
+
+        for stream in (False, True):
+            model = FakeModel(worker(6))
+            with tempfile.TemporaryDirectory() as folder:
+                live = compache.Live(policy(rounds=2), record=folder)
+                app = Agent(live, Vertex(), model, stream=stream)
+                app.run("Read six files")
+                gone = [noticed(t) for t in Claude.results(model.bodies[-1])]
+                self.assertEqual(gone, [True] * 4 + [False] * 2)
+                (thread,), _ = load(folder)
+                self.assertEqual(thread["requested_model"], "claude-haiku-5-5")
+        count = Vertex.path.replace("claude-haiku-5-5@20260901", "count-tokens")
+        self.assertIsNone(wire.dialect_for(count))
+        other = Vertex.path.replace("anthropic", "mistralai")
+        self.assertIsNone(wire.dialect_for(other))
+
     def test_a_remark_is_what_stands_in_a_tag(self):
         for text, turns in (("<system-reminder>go on", 1), ("And then?", 2)):
             model = FakeModel(worker(3))

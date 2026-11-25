@@ -63,6 +63,53 @@ class SetupTests(unittest.TestCase):
         changes, _, _ = self.told("claude", {"ENABLE_TOOL_SEARCH": "auto:5"})
         self.assertNotIn("ENABLE_TOOL_SEARCH", changes)
 
+    def test_claude_code_on_other_clouds(self):
+        changes, _, upstreams = self.told(
+            "claude", {"CLAUDE_CODE_USE_VERTEX": "1", "CLOUD_ML_REGION": "us-east5"}
+        )
+        base = {"ANTHROPIC_VERTEX_BASE_URL": "http://127.0.0.1:9999/v1"}
+        self.assertEqual(changes, base)
+        to = "https://us-east5-aiplatform.googleapis.com"
+        self.assertEqual(upstreams, {"anthropic": to})
+        for region, host in (
+            ("global", "aiplatform.googleapis.com"),
+            ("eu", "aiplatform.eu.rep.googleapis.com"),
+        ):
+            env = {"CLAUDE_CODE_USE_VERTEX": "true", "CLOUD_ML_REGION": region}
+            _, _, upstreams = self.told("claude", env)
+            self.assertEqual(upstreams, {"anthropic": f"https://{host}"})
+        changes, _, upstreams = self.told(
+            "claude",
+            {"CLAUDE_CODE_USE_FOUNDRY": "1", "ANTHROPIC_FOUNDRY_RESOURCE": "ours"},
+        )
+        base = {"ANTHROPIC_FOUNDRY_BASE_URL": "http://127.0.0.1:9999/anthropic"}
+        base["ANTHROPIC_FOUNDRY_RESOURCE"] = ""
+        self.assertEqual(changes, base)
+        to = "https://ours.services.ai.azure.com"
+        self.assertEqual(upstreams, {"anthropic": to})
+        with self.assertRaisesRegex(ValueError, "AWS"):
+            self.told("claude", {"CLAUDE_CODE_USE_BEDROCK": "1"})
+
+    def test_credentials_go_to_the_api_they_are_for(self):
+        family = proxy._family
+        google = "/v1/projects/p/locations/global/publishers"
+        counted = google + "/anthropic/models/count-tokens:rawPredict"
+        bearer = {"authorization": "Bearer x"}
+        for path, headers, speaks in (
+            ("/v1/messages", bearer, "anthropic"),
+            (
+                "/api/oauth/usage",
+                {"authorization": "Bearer sk-ant-oat01-x"},
+                "anthropic",
+            ),
+            ("/v1/files", {"x-api-key": "sk-ant-x", **bearer}, "anthropic"),
+            (counted, bearer, "anthropic"),
+            (google + "/google/models/gemini:countTokens", bearer, "gemini"),
+            ("/v1/embeddings", bearer, "openai"),
+        ):
+            self.assertEqual(family(path, headers), speaks, path)
+        self.assertEqual(family("/anything", bearer, "anthropic"), "anthropic")
+
     def test_a_base_url_that_is_set_already_is_where_requests_go_on_to(self):
         changes, _, upstreams = self.told(
             "claude", {"ANTHROPIC_BASE_URL": "https://gateway.example/api/"}
