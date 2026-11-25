@@ -156,7 +156,7 @@ def _parser() -> argparse.ArgumentParser:
         "--experiment",
         action="append",
         default=[],
-        help="An MLflow experiment ID. Repeat for several. Left out, experiment 0",
+        help="An MLflow experiment, by name or ID. Repeat for several. Left out, experiment 0",
     )
     sub.add_argument(
         "--rows",

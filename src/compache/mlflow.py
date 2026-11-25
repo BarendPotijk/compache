@@ -127,13 +127,6 @@ def fetch(
     if until:
         conditions.append(f"trace.timestamp_ms < {_millis(until)}")
     query: dict[str, Any] = {
-        "locations": [
-            {
-                "type": "MLFLOW_EXPERIMENT",
-                "mlflow_experiment": {"experiment_id": str(experiment)},
-            }
-            for experiment in experiment_ids
-        ],
         # Oldest first: traces logged during the read land after the pages already read.
         "order_by": ["timestamp_ms ASC"],
         "max_results": min(500, max(1, page)),
@@ -189,6 +182,25 @@ def fetch(
             f"MLflow keeps failing on trace {trace} ({status}): {_detail(raw)}"
         )
 
+    def place(experiment: str) -> dict:
+        """Where its traces are. An experiment is named by its ID or by its name."""
+        if not experiment.isdigit():
+            name = urllib.parse.quote(experiment, safe="")
+            status, raw = ask(
+                f"{host}/api/2.0/mlflow/experiments/get-by-name?experiment_name={name}"
+            )
+            found = json.loads(raw).get("experiment") if status == 200 else None
+            if not found:
+                raise ContractError(
+                    f"MLflow has no experiment named {experiment!r}: {_detail(raw)}"
+                )
+            experiment = str(found["experiment_id"])
+        return {
+            "type": "MLFLOW_EXPERIMENT",
+            "mlflow_experiment": {"experiment_id": experiment},
+        }
+
+    query["locations"] = [place(str(experiment)) for experiment in experiment_ids]
     seen: set = set()
     while True:
         status, raw = ask(

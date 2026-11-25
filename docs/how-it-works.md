@@ -54,7 +54,7 @@ A request that should have hit the cache and read nothing suspends pings for tha
 | Read the request | A user message opens a turn. Tool results are its retrieved text, assistant text its answer. The text blocks of one tool result are one part, as in a recorded thread |
 | Find the conversation | By its name, or by what it has said so far |
 | Decide | A new user message: the session decides as above. Another call of the same turn, as in a tool loop: the decision stands, and what the tools returned joins the turn |
-| Rewrite a copy | Archived parts get their notice, and from the first notice on the model has a `reopen` tool. A part no larger than its notice stays. Tool calls, images, thinking blocks and anything unknown stay as they were |
+| Rewrite a copy | Archived parts get their notice, and from the first notice on the model has a `reopen` tool. A notice says that its part was read in full: where a model only finds a reference, it takes what it wrote from the part for made up. A part no larger than its notice stays. Tool calls, images, thinking blocks and anything unknown stay as they were |
 | Read the reply | The model's `reopen` calls are answered and the model asked again, inside a stream too. A model still fetching after three rounds, or saying nothing, gets the application's own request instead, and a conversation where that happens twice is left alone. Of a turn with several calls, the first call's usage says what the turn found cached and the last call's what it leaves |
 
 ## Agents
