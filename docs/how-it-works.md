@@ -73,7 +73,7 @@ A turn of an agent is a loop of many calls, so there the unit is the call. `comp
 
 `Flow`, what a conversation holds and what the provider has cached of it, is one class that the fit, the replay and the runtime share, so what was priced is what happens.
 
-In the request path a loop is recognized by the IDs of its tool calls, where these are found once, and by what was said. Conversations that share a name, as a main agent, those it starts and several that go on from one, are kept apart by what they were asked and what their tools returned, and a request that branches off, as a host's suggestion of what to say next, leaves the main line as it stood. What the model fetched back is put into the later requests at its place, and goes with the cut it would go with. Where an application rewrites what its tools had returned, the policy starts over from what it says now.
+In the request path a loop is recognized by the IDs of its tool calls, where these are found once, and by what was said. Conversations that share a name, as a main agent, those it starts and several that go on from one, are kept apart by what they were asked and what their tools returned, and a request that branches off, as a host's suggestion of what to say next, leaves the main line as it stood. What the model fetched back is put into the later requests at its place, and goes with the cut it would go with. Where an application rewrites what its tools had returned, the policy starts over from what it says now. A model that is switched away from and back goes on where it left off. Where one fetches the same back again, results stay for twice as long, while there is room.
 
 ## Notes from the model
 
