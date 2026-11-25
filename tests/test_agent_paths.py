@@ -813,7 +813,7 @@ class ResultTests(unittest.TestCase):
                     for found in last:
                         if noticed(found):
                             self.assertIsInstance(found, str)
-                            self.assertLess(len(found), 200)
+                            self.assertLess(len(found), 260)
                     # What it was fetched back with holds the picture.
                     again = [
                         body

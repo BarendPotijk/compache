@@ -45,7 +45,7 @@ from . import wire
 from .api import Policy
 from .learn import Learner
 from .models import binds_reasoning
-from .optimizer.parts import notice
+from .optimizer.parts import explained, notice
 from .optimizer.recovery import REOPEN_TOOL
 from .quotes import Quotes, spoken
 from .record import Recorder, left_out
@@ -1981,6 +1981,7 @@ class Live:
             # Where the host runs our tool, what it returned stands among the results of the others.
             hosted = _REOPEN in dialect.tool_names(body)
             known = {m.group() for m in map(_HANDLE.search, shown.values()) if m}
+            first = conversation.agentic
             for k, segment in enumerate(turns, 1):
                 pieces = [
                     (f"{name}:{k}:input", segment.inputs),
@@ -1994,6 +1995,12 @@ class Live:
                         # A copy is no text of its own: the notice names what it is a copy of,
                         # as long as that is there.
                         shown[part_id] = notice(of[1])
+                    if first and part_id in shown and found.slots:
+                        # Results are archived from the oldest on, so this one stays the first, and
+                        # what is cached of it is never written again.
+                        at = _HANDLE.search(shown[part_id])
+                        shown[part_id] = explained(at.group()) if at else shown[part_id]
+                        first = False
                 for part_id, slots in pieces:
                     if part_id in shown and slots and slots[0].whole is not None:
                         out = wire.put(out, slots[0].whole, shown[part_id])

@@ -380,6 +380,25 @@ class LoopTests(unittest.TestCase):
                     self.assertEqual(live.stats["stood_down"], 0)
                     self.assertEqual(live.stats["passed_through"], 0)
 
+    def test_the_first_notice_says_what_they_all_are_and_stays_as_it_is(self):
+        # Live, a model took a notice for what the tool had returned, and what it had written from
+        # the result for made up.
+        for shape in SHAPES:
+            with self.subTest(shape=shape.__name__):
+                model = FakeModel(worker(9))
+                live = compache.Live(policy(rounds=2))
+                Agent(live, shape(), model).run("Read nine files")
+                firsts = set()
+                for body in model.bodies:
+                    gone = [t for t in shape.results(body) if noticed(t)]
+                    long = ["what you wrote next comes from it" in t for t in gone]
+                    self.assertEqual(long, [k == 0 for k in range(len(gone))])
+                    firsts.update(map(json.dumps, gone[:1]))
+                self.assertEqual(len(gone), 7)
+                # Nothing that is cached ahead of a later cut is written again.
+                self.assertEqual(len(firsts), 1)
+                self.assertTrue(all(str(t).count("You read this") == 1 for t in gone))
+
     def test_an_agent_has_the_tool_from_its_first_call(self):
         model = FakeModel(worker(1))
         live = compache.Live(policy())

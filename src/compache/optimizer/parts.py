@@ -149,6 +149,15 @@ def notice(reference: str, said: bool = False) -> str:
     return f'[You {seen} this in full. Cleared since: reopen("{reference}") shows it.]'
 
 
+def explained(reference: str) -> str:
+    """The first notice of an agent's conversation, which says what the others are too."""
+    return (
+        "[You read this in full when it came in, and what you wrote next comes from it. It was "
+        "cleared since to save space, as older results are: each leaves a note like this one. "
+        f'reopen("{reference}") shows it again.]'
+    )
+
+
 def placeholder(thread_id: str, source: Source) -> str:
     return notice(handle(thread_id, source), source.kind == "output")
 
