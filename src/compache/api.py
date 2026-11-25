@@ -857,6 +857,21 @@ class Session:
         """Those of the messages with reasoning that go out without it."""
         return self._engine.without(places)
 
+    def binds(self, does: bool) -> None:
+        """Say whether the model takes its reasoning back only behind what stood ahead of it when it was made."""
+        if self.policy.agentic:
+            self._engine.flow.binds = does
+
+    def unbound(self, places) -> None:
+        """Say which messages go out without their reasoning from here on."""
+        if self.policy.agentic:
+            self._engine.unbound(places)
+
+    @property
+    def holds(self):
+        """What goes first with the next cut, where the policy decides call by call."""
+        return self._engine.holds if self.policy.agentic else None
+
     def reopened(self, name: str, text: str) -> None:
         """Say that fetched-back text now stands at the end of the conversation, under `name`."""
         if self.policy.agentic:

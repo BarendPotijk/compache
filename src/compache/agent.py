@@ -28,6 +28,7 @@ from dataclasses import asdict, dataclass, replace
 
 from .errors import ContractError
 from .labels import normalize_label
+from .models import binds_reasoning
 from .optimizer.contracts import ModelSpec, digest, number, seconds
 from .optimizer.distribution import _charge
 from .optimizer.parts import NOTICE_BYTES, placeholder
@@ -132,13 +133,16 @@ class Flow:
         "archived",
         "at",
         "back",
+        "binds",
         "cached",
         "cap",
+        "ended",
         "freed",
         "held",
         "live",
         "names",
         "notice",
+        "reasons",
         "recipe",
         "ripe",
         "round",
@@ -163,8 +167,13 @@ class Flow:
         # enough, and what those would free.
         self.live: list[int] = []
         self.ripe = self.freed = 0
-        # Reasoning of the turn that goes on.
+        # Reasoning of the turn that goes on, and all of it. Where the model binds it, what stands
+        # behind a cut is lost with the cut.
         self.held: list[int] = []
+        self.reasons: list[int] = []
+        self.binds = binds_reasoning(spec.model_id)
+        # The last block that went with the latest cut.
+        self.ended: int | None = None
         # Up to which block the tokens ahead of it were counted last, and how many there are.
         self.ahead = (0, 0)
         self.sizes: dict = {}
@@ -201,6 +210,7 @@ class Flow:
             self.back.add(name)
         if held:
             self.held.append(len(self.shown) - 1)
+            self.reasons.append(len(self.shown) - 1)
         elif again or tokens > self.notice:
             self.live.append(len(self.shown) - 1)
 
@@ -215,9 +225,15 @@ class Flow:
         if self.shown[i] or self.whole[i]:
             self.size -= self.shown[i]
             self.shown[i] = self.whole[i] = 0
-            self.live = [k for k in self.live if k != i]
-            self.held = [k for k in self.held if k != i]
+            for name in ("live", "held", "reasons"):
+                setattr(self, name, [k for k in getattr(self, name) if k != i])
             self.ripe, self.freed, self.ahead = 0, 0, (0, 0)
+
+    def settle(self, i: int, tokens: int) -> None:
+        """Block `i`, which can no longer go, is taken to hold so many tokens more."""
+        self.size += tokens
+        self.shown[i] += tokens
+        self.ahead = (0, 0)
 
     def resize(self, i: int, tokens: int) -> None:
         """What block `i`, which is in full view, turned out to hold. What could go is counted again."""
@@ -242,19 +258,38 @@ class Flow:
             self.ahead = (first, tokens)
         return tokens
 
-    def _pays(self, at: float, before: int) -> bool:
+    def _lost(self, first: int) -> list[int]:
+        """Reasoning that a cut at block `first` would take along: it was made behind what goes."""
+        if not self.binds:
+            return []
+        goes = set(self.live[: self.ripe])
+        return [i for i in self.reasons if i > first and i not in goes]
+
+    def _pays(self, at: float, before: int, lost: list[int]) -> bool:
         spec, freed = self.spec, self.freed
-        if self.size > self.cap or not self.warm(at):
+        if self.size > self.cap:
             return True
+        # Reasoning of the turn that goes on is only given up for as much again.
+        going_on = set(self.held)
+        worth = freed >= sum(self.shown[i] for i in lost if i in going_on)
+        if not self.warm(at):
+            return worth
+        # What stays behind the cut would be written again.
+        taken = sum(self.shown[i] for i in lost)
+        rest = max(0, self.size - before - freed - taken)
         ratio = self.recipe.ratio
-        if ratio is not None and freed >= ratio * (self.size - before - freed):
+        if ratio is not None and worth and freed >= ratio * rest:
             return True
-        # Or it is cheaper in this very call, as where a long request is billed dearer.
+        # Or it is cheaper in this very call, as where a long request is billed dearer. What is lost
+        # beside counts for no gain: it is taken to be read from the cache as before.
         held = min(self.cached, self.size)
+        read, write = spec.read_multiplier, spec.write_multiplier
         if spec.long_input_threshold is None:
-            read, write = spec.read_multiplier, spec.write_multiplier
-            return (write - read) * (held - min(held, before)) < write * freed
-        return _charge(spec, self.size - freed, min(held, before), 0) < (
+            again = max(0, held - min(held, before) - taken)
+            return worth and (write - read) * again < write * freed
+        after = self.size - freed - taken
+        kept = read * taken * spec.input_price_factor(after)
+        return _charge(spec, after, min(held, before, after), 0) + kept < (
             _charge(spec, self.size, held, 0)
         )
 
@@ -274,13 +309,13 @@ class Flow:
         if not self.ripe:
             return []
         first = live[0]
-        before = self._before(first)
-        if not self._pays(at, before):
+        before, lost = self._before(first), self._lost(first)
+        if not self._pays(at, before, lost):
             return []
         if self.warm(at):
             self.cached = min(self.cached, before)
         went = []
-        for i in live[: self.ripe]:
+        for i in [*live[: self.ripe], *lost]:
             name, again = self.names[i]
             self.size -= self.shown[i] - (0 if again else self.notice)
             self.shown[i] = 0 if again else self.notice
@@ -289,7 +324,13 @@ class Flow:
             else:
                 self.archived.add(name)
             went.append((name, again))
+        self.ended = live[self.ripe - 1]
         self.live, self.ripe, self.freed = live[self.ripe :], 0, 0
+        gone = {*live[: len(live) - len(self.live)], *lost}
+        self.reasons = [i for i in self.reasons if i not in gone]
+        if lost:
+            self.live = [i for i in self.live if i not in gone]
+            self.held = [i for i in self.held if i not in gone]
         return went
 
     def charge(self, at: float, output: int) -> float:
@@ -890,9 +931,12 @@ class AgentEngine:
         # Where reasoning of its replies stands: the block, by message. Whether the provider counts it
         # while its turn goes on, and once that is over, as far as that is known.
         self._thoughts: dict = {}
+        # The messages whose reasoning is out of view for good, whatever it is counted as.
+        self._out: set = set()
         self._counts_thoughts: bool | None = None
         self._keeps_thoughts: bool | None = None
-        self._just_cut = False
+        # Where the cut ended that the request under way was made with.
+        self._just_cut: int | None = None
         # The turn that is being answered, and how everything stood before it.
         self._turn: tuple | None = None
 
@@ -901,6 +945,7 @@ class AgentEngine:
         made.__dict__.update(self.__dict__)
         made.flow, made._known = self.flow.copy(), set(self._known)
         made._fresh, made._thoughts = list(self._fresh), dict(self._thoughts)
+        made._out = set(self._out)
         return made
 
     def _begins(self, run_id) -> None:
@@ -940,10 +985,16 @@ class AgentEngine:
         self._fresh.append((len(self.flow.shown), ruled))
         self.flow.add(round(ruled * self._off), name)
 
+    @property
+    def holds(self):
+        """What goes first with the next cut."""
+        live = self.flow.live
+        return self.flow.names[live[0]] if live else None
+
     def _plan(self, request, at) -> AgentPlan:
         self._due, self._sent_at = (), at
         went = self.flow.cut(at)
-        self._just_cut = bool(went)
+        self._just_cut = self.flow.ended if went else None
         archived = frozenset(self.flow.archived)
         parts = tuple(
             replace(p, text=placeholder(self.thread_id, p))
@@ -951,12 +1002,10 @@ class AgentEngine:
             else p
             for p in request.parts
         )
-        live = self.flow.live
         decision = {
             "action": "cut" if went else "keep",
-            # What went now, and what goes first with the next cut.
             "went": tuple(went),
-            "holds": self.flow.names[live[0]] if live else None,
+            "holds": self.holds,
         }
         return AgentPlan(
             request, AgentView(parts, archived, max(0, self.flow.size)), decision
@@ -1026,13 +1075,22 @@ class AgentEngine:
         """Those of the messages with reasoning whose reasoning has gone out of view."""
         names = self.flow.back
         return [
-            p for p in places if p in self._thoughts and ("thought", p) not in names
+            p
+            for p in places
+            if p in self._out or (p in self._thoughts and ("thought", p) not in names)
         ]
 
     def _drop(self, places) -> None:
         """The provider does not count the reasoning in those messages, so it takes none of the room."""
         for place in list(places):
+            if ("thought", place) not in self.flow.back:
+                self._out.add(place)
             self.flow.forget(self._thoughts.pop(place))
+
+    def unbound(self, places) -> None:
+        """Reasoning in those messages was made behind something else than is sent now: it stays out."""
+        self._drop([p for p in places if p in self._thoughts])
+        self._out.update(places)
 
     def _counted_thoughts(self, reported: int) -> None:
         """See whether the provider counts reasoning: each once, on a request that nothing else changed."""
@@ -1053,13 +1111,19 @@ class AgentEngine:
         # What a cut has taken already is a notice, and that is as long as it is.
         fresh = [(i, r) for i, r in self._fresh if r and flow.shown[i] == flow.whole[i]]
         self._fresh = []
-        if not self._just_cut:
-            self._counted_thoughts(reported)
+        if self._just_cut is not None:
+            # What went was larger, or smaller, than it was counted as.
+            flow.settle(self._just_cut, reported - flow.size)
+            return
+        self._counted_thoughts(reported)
         hidden = reported - flow.size
         held = sum(flow.shown[i] for i, _ in fresh)
         if not held or held + hidden <= 0:
-            if hidden:
+            if hidden > 0:
                 flow.add(hidden)
+            elif hidden and flow.shown:
+                # Something has gone from it, and nothing says where: ahead of all that can go.
+                flow.settle(0, hidden)
             return
         ruled = sum(r for _, r in fresh)
         if any(flow.names[i] is not None for i, _ in fresh):

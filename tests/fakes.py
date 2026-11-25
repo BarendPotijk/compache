@@ -52,10 +52,15 @@ class FakeModel:
     reasons first, `thinking` for how many tokens it reasons, and `status` with `error` for a refusal. `request` has the `body`, its `texts`
     (every text of the conversation in order), the `last` text and `n`, the
     number of the call. Without a script every reply is "Answer <n>.".
+
+    `binds` says what Anthropic's API does with reasoning that was made behind
+    something else than a request holds ahead of it: "error" refuses the
+    request, "drop" leaves it out and counts it in `dropped`.
     """
 
-    def __init__(self, script=None, *, ttl=300, clock=None, min_tokens=64):
+    def __init__(self, script=None, *, ttl=300, clock=None, min_tokens=64, binds=None):
         self.script, self.ttl, self.min_tokens = script, ttl, min_tokens
+        self.binds, self.dropped = binds, 0
         self.clock = clock or (lambda: 0.0)
         self.bodies: list[dict] = []
         self.paths: list[str] = []
@@ -106,6 +111,24 @@ class FakeModel:
                 for key, _ in keys:
                     self._cache[key] = now
         return {"total": total, "read": read, "write": max(0, written)}
+
+    # -- what reasoning is bound to -------------------------------------------
+
+    @staticmethod
+    def _behind(head, blocks) -> str:
+        said = json.dumps([head, blocks], sort_keys=True).encode()
+        return hashlib.sha256(said).hexdigest()[:16]
+
+    def _bound(self, head, blocks) -> list[int]:
+        """The blocks of a request without reasoning that was made behind something else."""
+        kept: list[int] = []
+        for i, (_, block) in enumerate(blocks):
+            if block.get("type") == "thinking":
+                behind = self._behind(head, [blocks[k] for k in kept])
+                if not block["signature"].startswith(behind):
+                    continue
+            kept.append(i)
+        return kept
 
     # -- scripts -------------------------------------------------------------
 
@@ -267,14 +290,27 @@ class FakeModel:
                 )
                 if "cache_control" in block:
                     marks.append(len(blocks) - 1)
+        head = [body.get("tools"), body.get("system"), body.get("output_config")]
+        head = unmarked(head)
+        if self.binds:
+            kept, at = self._bound(head[:2], blocks), []
+            if len(kept) < len(blocks) and self.binds == "error":
+                return 400, {
+                    "type": "error",
+                    "error": {
+                        "message": "Invalid signature in thinking block. "
+                        "The block is bound to a different conversation."
+                    },
+                }
+            self.dropped += len(blocks) - len(kept)
+            marks = [k for k, i in enumerate(kept) if i in set(marks)]
+            blocks = [blocks[i] for i in kept]
         made = self._decide(body, texts)
         if made.get("status"):
             return made["status"], {
                 "type": "error",
                 "error": {"message": made.get("error", "refused")},
             }
-        head = [body.get("tools"), body.get("system"), body.get("output_config")]
-        head = unmarked(head)
         if "cache_control" in body and blocks:
             marks.append(len(blocks) - 1)
         meter = self._meter(head, blocks, marks[-1] if marks else None, marks)
@@ -288,8 +324,10 @@ class FakeModel:
         }
         content = [{"type": "text", "text": made["text"]}] if made["text"] else []
         if made.get("thinking"):
-            # So many tokens of reasoning, enclosed, which later requests carry and pay for.
-            enclosed = "s" * 4 * made["thinking"]
+            # So many tokens of reasoning, enclosed, which later requests carry and pay for. It is bound
+            # to what the request held.
+            enclosed = f"{self._behind(head[:2], blocks)}-{made['id']}-"
+            enclosed = enclosed.ljust(4 * made["thinking"], "s")
             block = {"type": "thinking", "thinking": "", "signature": enclosed}
             content.insert(0, block)
             usage["output_tokens"] += made["thinking"]

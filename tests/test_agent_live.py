@@ -6,9 +6,11 @@ import json
 import tempfile
 import threading
 import unittest
+from dataclasses import replace
 
 import compache
 from compache import agent, wire
+from compache.models import binds_reasoning
 from compache.record import load, load_calls
 from fakes import NOTICE, FakeModel, noticed, tokens
 
@@ -711,6 +713,12 @@ def reasoning(count, tokens=200):
     return made
 
 
+class OldClaude(Claude):
+    """One that takes its reasoning back whatever has changed ahead of it."""
+
+    model = "claude-opus-5"
+
+
 class ReasoningTests(unittest.TestCase):
     """What the model reasoned stays in later requests, and goes with the results of its time."""
 
@@ -731,7 +739,7 @@ class ReasoningTests(unittest.TestCase):
         ]
 
     def test_that_of_a_finished_turn_goes_with_the_cut(self):
-        for shape in (Claude, Codex):
+        for shape in (OldClaude, Codex):
             for stream in (False, True):
                 with self.subTest(shape=shape.__name__, stream=stream):
                     model = FakeModel(reasoning(5))
@@ -754,7 +762,7 @@ class ReasoningTests(unittest.TestCase):
         clock = Clock()
         model = FakeModel(reasoning(8), clock=lambda: clock.at)
         live = compache.Live(policy(rounds=3, ratio=1.0), clock=clock)
-        app = Agent(live, Claude(), model, clock=clock)
+        app = Agent(live, OldClaude(), model, clock=clock)
         app.run("Read eight files")
         model.script = reasoning(16)
         app.run("Read eight more")
@@ -766,7 +774,7 @@ class ReasoningTests(unittest.TestCase):
     def test_an_application_that_drops_it_itself(self):
         model = FakeModel(reasoning(4))
         live = compache.Live(policy(rounds=2))
-        app = Agent(live, Claude(), model)
+        app = Agent(live, OldClaude(), model)
         app.run("Read four files")
         for message in app.shape.said:
             if message["role"] == "assistant":
@@ -782,7 +790,7 @@ class ReasoningTests(unittest.TestCase):
 
     def test_a_conversation_met_in_the_middle(self):
         model = FakeModel(reasoning(5))
-        app = Agent(compache.Live(), Claude(), model)
+        app = Agent(compache.Live(), OldClaude(), model)
         app.run("Read five files")
         app.live = compache.Live(policy(rounds=2))
         model.script = reasoning(9)
@@ -802,7 +810,7 @@ class ReasoningTests(unittest.TestCase):
                 made = {**made, "text": "", "tool": (REOPEN, {"reference": handle})}
             return made
 
-        for shape in (Claude, Codex):
+        for shape in (OldClaude, Codex):
             with self.subTest(shape=shape.__name__):
                 fetched.clear()
                 model = FakeModel(reasoning(5))
@@ -830,12 +838,242 @@ class ReasoningTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             model = FakeModel(reasoning(4))
             live = compache.Live(record=folder)
-            Agent(live, Claude(), model).run("Read four files")
+            Agent(live, OldClaude(), model).run("Read four files")
             steps = load(folder)[0][0]["runs"][0]["steps"]
             self.assertEqual([s["thought_tokens"] for s in steps], [200] * 5)
             thread = compache.load_threads(load(folder)[0], model="agent-model")[0]
             calls = agent.calls_of(thread, SPEC)
             self.assertEqual([c.thought for c in calls], [0] + [200] * 4)
+
+
+class BoundReasoningTests(unittest.TestCase):
+    """Claude from 5.1 on takes its reasoning back only behind what stood ahead of it when it was made."""
+
+    SPEC = replace(SPEC, model_id="claude-haiku-5-5")
+
+    def play(self, *runs, live=None, rounds=2, ratio=0.0, away=0, **options):
+        clock = options.get("clock") or Clock()
+        model = options.get("model") or FakeModel(clock=lambda: clock.at, binds="error")
+        live = live or compache.Live(policy(rounds, ratio, spec=self.SPEC), clock=clock)
+        shape = options.get("shape") or Claude()
+        app = Agent(live, shape, model, stream=options.get("stream", False), clock=clock)
+        for count in runs:
+            self.more(app, count)
+            clock.at += away
+        return app, model
+
+    def more(self, app, count):
+        """One more prompt, worked on in so many rounds."""
+        app.model.script = reasoning(app.made + count)
+        self.assertEqual(app.run(f"Work through {count} files"), "All done.")
+
+    def check(self, app, model):
+        """Nothing was refused, and what the policy counts is what goes out."""
+        self.assertEqual(app.live.stats["retried"], 0)
+        self.assertEqual(app.live.stats["stood_down"], 0)
+        self.assertEqual(model.dropped, 0)
+        for conversation in app.live.conversations():
+            flow = conversation.session._engine.flow
+            self.assertEqual(flow.size, sum(flow.shown))
+            counted = tokens([model.bodies[-1]["messages"]])
+            self.assertLess(abs(flow.size - counted) / counted, 0.3)
+
+    def held(self, body):
+        replies = [m for m in body["messages"] if m["role"] == "assistant"]
+        return [
+            k
+            for k, m in enumerate(replies)
+            if any(b["type"] == "thinking" for b in m["content"])
+        ]
+
+    def test_a_cut_takes_what_was_made_behind_it(self):
+        for stream in (False, True):
+            for away in (0, 400):
+                with self.subTest(stream=stream, away=away):
+                    app, model = self.play(5, 9, 7, stream=stream, away=away)
+                    self.check(app, model)
+                    last = model.bodies[-1]
+                    self.assertTrue(noticed(last))
+                    replies = sum(m["role"] == "assistant" for m in last["messages"])
+                    kept = self.held(last)
+                    # What was reasoned since the latest cut is there, and it is the newest.
+                    self.assertEqual(kept, list(range(replies - len(kept), replies)))
+
+    def test_it_stays_until_something_is_cut(self):
+        app, model = self.play(6, 6, rounds=30)
+        self.assertEqual(self.held(model.bodies[-1]), list(range(13)))
+        self.check(app, model)
+
+    def test_what_is_made_after_a_cut_stays(self):
+        app, model = self.play(6, rounds=4, ratio=0.0)
+        before = [len(self.held(b)) for b in model.bodies]
+        # Four rounds stay whole, so from the fifth result on every call cuts one more.
+        self.assertEqual(before[:5], [0, 1, 2, 3, 4])
+        app, model = self.play(6, 1, rounds=4, ratio=None, away=400)
+        # Cut once, when the cache had expired. What came after it stayed.
+        self.assertEqual([len(self.held(b)) for b in model.bodies[-2:]], [0, 1])
+        self.check(app, model)
+
+    def test_reasoning_of_the_turn_that_goes_on_is_worth_keeping(self):
+        """Little that is old does not cost the model what it has in mind, though the cache is gone."""
+        clock = Clock()
+        model = FakeModel(clock=lambda: clock.at, binds="error")
+        live = compache.Live(policy(2, None, spec=self.SPEC), clock=clock)
+        app = Agent(live, Claude(), model, clock=clock)
+        app.shape.ask("Work")
+        small = [60, 60, 60, 60]
+        for k, size in enumerate(small, 1):
+            model.script = lambda request: {"tool": ("read", {}), "thinking": 3000}
+            _, calls = app.call()
+            clock.at += 400
+            app.shape.answer([(c, f"line {k} " * size) for c, _ in calls])
+        app.call()
+        self.assertEqual(len(self.held(model.bodies[-1])), 4)
+        self.assertFalse(noticed(model.bodies[-1]))
+
+    def test_a_conversation_met_in_the_middle(self):
+        clock = Clock()
+        model = FakeModel(clock=lambda: clock.at, binds="error")
+        app, _ = self.play(
+            5, live=compache.Live(clock=clock), clock=clock, model=model
+        )
+        self.assertEqual(self.held(model.bodies[-1]), list(range(5)))
+        # Its reasoning was made without our tool. It is left out, and what comes after it stays.
+        app.live = compache.Live(policy(30, spec=self.SPEC), clock=clock)
+        self.more(app, 4)
+        self.check(app, model)
+        self.assertEqual(self.held(model.bodies[-1]), [6, 7, 8, 9])
+        # And met once more, by a process that knows nothing of the first.
+        app.live = compache.Live(policy(30, spec=self.SPEC), clock=clock)
+        self.more(app, 4)
+        self.check(app, model)
+
+    def test_a_policy_that_is_refused(self):
+        """What was reasoned under the policy does not go back as the application wrote it."""
+        for stream in (False, True):
+            with self.subTest(stream=stream):
+                app, model = self.play(6, stream=stream)
+                refusing = reasoning(11)
+
+                def script(request, refusing=refusing):
+                    if noticed(request["body"]):
+                        return {"status": 400, "error": "no notices here"}
+                    return refusing(request)
+
+                model.script = script
+                self.assertEqual(app.run("Work through five more"), "All done.")
+                self.assertEqual(app.live.stats["policy_refused"], 1)
+                self.assertFalse(noticed(model.bodies[-1]))
+                # From there on its reasoning is made behind what the application writes.
+                self.assertEqual(self.held(model.bodies[-1]), [7, 8, 9, 10, 11])
+                self.more(app, 3)
+
+    def test_after_a_fetch(self):
+        for stream in (False, True):
+            for beside in (False, True):
+                with self.subTest(stream=stream, beside=beside):
+                    fetched = []
+
+                    def script(request, fetched=fetched, beside=beside):
+                        made = reasoning(12)(request)
+                        body = json.dumps(request["body"])
+                        if "tool" in made and len(fetched) < 3 and noticed(body):
+                            handle = NOTICE.findall(body)[0]
+                            fetched.append(handle)
+                            ask = (REOPEN, {"reference": handle})
+                            made.pop("tool")
+                            made["tools"] = [ask, ("read", {})] if beside else [ask]
+                            made["text"] = "Let me look."
+                        return made
+
+                    clock = Clock()
+                    model = FakeModel(script, clock=lambda: clock.at, binds="error")
+                    live = compache.Live(
+                        policy(3, spec=self.SPEC, ratio=1.0), clock=clock
+                    )
+                    app = Agent(live, Claude(), model, stream=stream, clock=clock)
+                    said = app.run("Work through twelve files")
+                    self.assertTrue(said.endswith("All done."), said)
+                    self.assertEqual(live.stats["reopened"], 3)
+                    self.assertEqual(live.stats["retried"], 0)
+                    self.assertEqual(live.stats["stood_down"], 0)
+
+    def test_reasoning_after_a_fetch_goes_back(self):
+        """A reply that was read in full goes back as it was made: behind what it had fetched."""
+        clock = Clock()
+        model = FakeModel(clock=lambda: clock.at, binds="error")
+        live = compache.Live(policy(3, None, spec=self.SPEC), clock=clock)
+        app = Agent(live, Claude(), model, clock=clock)
+        model.script = reasoning(6)
+        app.run("Work through six files")
+        clock.at += 400
+        fetched = []
+
+        def script(request):
+            made = reasoning(11)(request)
+            body = json.dumps(request["body"])
+            if not fetched and noticed(body):
+                fetched.append(NOTICE.findall(body)[0])
+                made["tool"] = (REOPEN, {"reference": fetched[0]})
+                made["text"] = "Let me look."
+            return made
+
+        model.script = script
+        app.run("Work through five more")
+        self.assertEqual(live.stats["reopened"], 1)
+        # That of the reply which fetched, and of the four that read on.
+        self.assertEqual(len(self.held(model.bodies[-1])), 5)
+        self.check(app, model)
+
+    def test_two_that_go_on_from_the_same_start(self):
+        app, model = self.play(8)
+        other = Agent(app.live, Claude(), model, clock=app.clock)
+        other.shape.said = list(app.shape.said)
+        for k in range(3):
+            for one in (app, other):
+                one.made = app.made
+                self.more(one, 2 + k)
+        self.assertEqual(app.live.stats["retried"], 0)
+        self.assertEqual(app.live.stats["stood_down"], 0)
+
+    def test_an_application_that_rewrites_what_it_had_said(self):
+        app, model = self.play(8)
+        for message in app.shape.said[3:6]:
+            if message["role"] == "user" and isinstance(message["content"], list):
+                for block in message["content"]:
+                    if block["type"] == "tool_result":
+                        block["content"] = "[cleared]"
+        self.more(app, 3)
+        self.assertEqual(app.live.stats["retried"], 0)
+
+    def test_older_models_keep_theirs(self):
+        app, model = self.play(5, 4, shape=OldClaude(), model=FakeModel())
+        self.assertEqual(len(self.held(model.bodies[-1])), 4)
+        shape = Claude()
+        plain = shape.body
+        manual = {"type": "enabled", "budget_tokens": 2000}
+        shape.body = lambda stream: {**plain(stream), "thinking": manual}
+        app, model = self.play(5, shape=shape, model=FakeModel())
+        self.assertEqual(len(self.held(model.bodies[-1])), 5)
+
+    def test_names_of_models(self):
+        for name, binds in (
+            ("claude-haiku-5-5", True),
+            ("anthropic/claude-haiku-5.5", True),
+            ("claude-sonnet-5-5-20260928", True),
+            ("us.anthropic.claude-opus-5-5-v1:0", True),
+            ("claude-fable-5-1", True),
+            ("claude-opus-6", True),
+            ("claude-sonnet-5-20260601", False),
+            ("claude-opus-5", False),
+            ("claude-opus-4-8", False),
+            ("claude-3-5-sonnet-20241022", False),
+            ("gpt-6-luna", False),
+            ("kimi-k3", False),
+            ("haiku", True),
+            (None, False),
+        ):
+            self.assertEqual(binds_reasoning(name), binds, name)
 
 
 class ParallelTests(unittest.TestCase):

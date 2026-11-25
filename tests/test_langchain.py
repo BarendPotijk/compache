@@ -117,6 +117,74 @@ class MiddlewareTests(unittest.TestCase):
         ]
         self.assertEqual(gone, [True, True, False, False])
 
+    def test_reasoning_behind_a_cut_goes_with_it(self):
+        """Claude takes its reasoning back only behind what stood ahead of it when it was made."""
+        import hashlib
+        import json
+
+        from langchain.agents import create_agent
+        from langchain_core.language_models import BaseChatModel
+        from langchain_core.messages import AIMessage
+        from langchain_core.outputs import ChatGeneration, ChatResult
+        from langchain_core.tools import tool
+        from langgraph.checkpoint.memory import InMemorySaver
+
+        kept: list = []
+
+        def behind(messages):
+            said = [[m.type, m.content, getattr(m, "tool_calls", [])] for m in messages]
+            said = json.dumps(said, sort_keys=True, default=str).encode()
+            return hashlib.sha256(said).hexdigest()[:16]
+
+        class Claude(BaseChatModel):
+            model: str = "claude-haiku-5-5"
+
+            @property
+            def _llm_type(self):
+                return "scripted"
+
+            def bind_tools(self, tools, **kwargs):
+                return self
+
+            def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+                held = 0
+                for k, message in enumerate(messages):
+                    blocks = message.content if isinstance(message.content, list) else ()
+                    for block in blocks:
+                        if block["type"] == "thinking":
+                            held += 1
+                            assert block["signature"] == behind(messages[:k])
+                kept.append(held)
+                read = sum(m.type == "tool" for m in messages)
+                sign = {"type": "thinking", "thinking": "", "signature": ""}
+                sign["signature"] = behind(messages)
+                usage = {"input_tokens": 100, "output_tokens": 5, "total_tokens": 105}
+                said = {"content": [sign, {"type": "text", "text": "Step."}]}
+                if read < 9:
+                    call = {"name": "read", "args": {"file": read + 1}, "id": f"c{read}"}
+                    said["tool_calls"] = [call]
+                message = AIMessage(**said, usage_metadata=usage)
+                return ChatResult(generations=[ChatGeneration(message=message)])
+
+        @tool
+        def read(file: int) -> str:
+            """Read a file."""
+            return result(file)
+
+        live = compache.Live(policy(rounds=5, ratio=1.0))
+        agent = create_agent(
+            Claude(),
+            [read],
+            middleware=[compache.langchain.middleware(live)],
+            checkpointer=InMemorySaver(),
+        )
+        config = {"configurable": {"thread_id": "t-9"}, "recursion_limit": 200}
+        self.ask(agent, config)
+        self.assertEqual(kept[:6], [0, 1, 2, 3, 4, 5])
+        self.assertLess(min(kept[6:]), 5, "a cut took it along")
+        self.assertGreater(kept[-1], 0, "what came after the cut stays")
+        self.assertEqual(live.stats["stood_down"], 0)
+
     def test_async_and_learning(self):
         import asyncio
 

@@ -8,6 +8,7 @@ a dict or JSON file of `ModelSpec` fields.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import replace
 from functools import lru_cache
 from importlib import resources
@@ -16,7 +17,13 @@ from pathlib import Path
 from .errors import ContractError
 from .optimizer.contracts import ModelSpec
 
-__all__ = ["cache_lifetimes", "known_models", "model_spec", "pricing"]
+__all__ = [
+    "binds_reasoning",
+    "cache_lifetimes",
+    "known_models",
+    "model_spec",
+    "pricing",
+]
 
 # A keep-warm ping and a fetch-back request each ask the model for a few tokens.
 PING_OUTPUT_TOKENS = 16
@@ -132,6 +139,29 @@ def cache_lifetimes(model) -> tuple[ModelSpec, ...]:
         )
         for lifetime in found[1].get("cache_lifetimes", ())
     )
+
+
+_CLAUDE = re.compile(r"claude|opus|sonnet|haiku|fable|mythos")
+_CLAUDE_VERSION = re.compile(
+    r"(?:opus|sonnet|haiku|fable|mythos)[-.]?(\d{1,2})(?:[-.](\d{1,2}))?(?!\d)"
+)
+_OLD_CLAUDE = re.compile(r"claude-(?:instant|v?[0-4])")
+
+
+def binds_reasoning(model) -> bool:
+    """Whether a model's reasoning is only good behind what stood ahead of it when it was made.
+
+    So it is with Claude from 5.1 on: where an earlier message, the instructions or
+    the tools have changed since, the provider drops the reasoning or refuses the
+    request. https://platform.claude.com/docs/en/build-with-claude/preserved-thinking
+    """
+    name = str(model or "").lower()
+    if not _CLAUDE.search(name):
+        return False
+    version = _CLAUDE_VERSION.search(name)
+    if version is not None:
+        return (int(version[1]), int(version[2] or 0)) >= (5, 1)
+    return not _OLD_CLAUDE.search(name)
 
 
 def pricing(model) -> dict | None:

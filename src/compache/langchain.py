@@ -69,6 +69,13 @@ def _body(request) -> tuple[dict, list]:
         owners += [None] * len(said)
     for k, message in enumerate(request.messages):
         made = convert_to_openai_messages([message])
+        thoughts = _thoughts(message)
+        if thoughts and made:
+            content = made[0].get("content")
+            if isinstance(content, list):
+                content = [p for p in content if not _thinks(p)] or None
+            held = {"content": content, "thinking_blocks": thoughts}
+            made = [{**made[0], **held}, *made[1:]]
         said += made
         owners += [k] * len(made)
     tools = []
@@ -84,6 +91,18 @@ def _body(request) -> tuple[dict, list]:
     )
     body = {"model": model, "messages": said}
     return {**body, "tools": tools} if tools else body, owners
+
+
+def _thinks(block: Any) -> bool:
+    return isinstance(block, dict) and str(block.get("type")).endswith("thinking")
+
+
+def _thoughts(message) -> list:
+    """What Claude reasoned in a message, enclosed."""
+    content = getattr(message, "content", None)
+    if getattr(message, "type", "") != "ai" or not isinstance(content, list):
+        return []
+    return [block for block in content if _thinks(block)]
 
 
 def _text(content: Any) -> str | None:
@@ -104,8 +123,12 @@ def _shown(request, body: dict, shown: dict, owners: list) -> list:
         if owner is None or before is after or before == after:
             continue
         text = _text(after.get("content"))
-        if text is not None:
+        if before.get("content") != after.get("content") and text is not None:
             messages[owner] = messages[owner].model_copy(update={"content": text})
+        elif before.get("thinking_blocks") and not after.get("thinking_blocks"):
+            kept = [b for b in messages[owner].content if not _thinks(b)]
+            kept = kept or [{"type": "text", "text": "\u2026"}]
+            messages[owner] = messages[owner].model_copy(update={"content": kept})
     return messages
 
 

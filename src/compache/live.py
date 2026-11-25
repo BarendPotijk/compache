@@ -42,6 +42,7 @@ from . import notes as notes_
 from . import wire
 from .api import Policy
 from .learn import Learner
+from .models import binds_reasoning
 from .optimizer.recovery import REOPEN_TOOL
 from .quotes import Quotes, spoken
 from .record import Recorder
@@ -361,6 +362,14 @@ class _Conversation:
     quotes: Quotes | None = None
     # Whether its requests carry what the model reasoned before.
     carries: bool = False
+    # Whether the model binds its reasoning to what stood ahead of it. What its latest request held, as
+    # hashes, and the reasoning that was made behind something else and stays out.
+    binds: bool = False
+    sent_as: tuple | None = None
+    planned: tuple | None = None
+    unbound: set = field(default_factory=set)
+    # The model its replies name.
+    answered: str | None = None
     # How often a turn had to be asked again as the application wrote it.
     fell_back: int = 0
     system_bytes: int = 0
@@ -908,6 +917,8 @@ class Live:
         made.header_lifetime = other.header_lifetime
         made.default_lifetime = other.default_lifetime
         made.model, made.policy = other.model, other.policy
+        made.binds, made.sent_as = other.binds, other.sent_as
+        made.unbound, made.answered = set(other.unbound), other.answered
         made.requested = point.requested
         made.turns, made.at = done, other.at
         if point.session is not None and other.session is not None:
@@ -1049,6 +1060,7 @@ class Live:
                 self.stats["passed_through"] += 1
                 return Shown(self, path, body)
             self.stats["calls"] += 1
+            self._goes(call, call.plain)
             return Shown(self, path, call.plain, conversation, conversation.pending)
         finally:
             conversation.lock.release()
@@ -1170,6 +1182,7 @@ class Live:
         if conversation.default_lifetime:
             policy = policy.at_default_lifetime()
         conversation.session = policy.session(name)
+        conversation.session.binds(conversation.binds)
         conversation.agentic = policy.agentic
         conversation.lifetime = policy.cache_lifetime
         conversation.header_lifetime = policy.header_lifetime
@@ -1269,8 +1282,11 @@ class Live:
             session = conversation.session
             same = not scan.model or conversation.requested in (None, scan.model)
             warm = same and session is not None and session.warm(now)
-            if session is not None and conversation.agentic:
-                session.carries(scan.thoughts)
+            conversation.binds = self._binds(conversation, dialect, body, scan)
+            if session is not None:
+                session.binds(conversation.binds)
+                if conversation.agentic:
+                    session.carries(scan.thoughts)
             self._catch_up(conversation, chains, turns, now, scan)
             pending, found = conversation.pending, current.retrievals
             earlier = None
@@ -1307,6 +1323,18 @@ class Live:
                         )
                     self.learner.opened(conversation.model, now)
                 plain = self._apply(conversation, dialect, body, scan, turns)
+                if self._unbind(conversation, dialect, body, plain):
+                    held = dialect.said_so_far(body)
+                    conversation.session.unbound(
+                        [
+                            place
+                            for place in scan.thoughts
+                            if dialect.reasoned(held[place]) in conversation.unbound
+                        ]
+                    )
+                    conversation.holds = conversation.session.holds
+                    plain = self._apply(conversation, dialect, body, scan, turns)
+                    self._unbind(conversation, dialect, body, plain)
             conversation.here = self._point(conversation, conversation.chain, pending)
         except Exception:
             # The policy cannot be applied here. From now on this conversation is only recorded.
@@ -1314,7 +1342,8 @@ class Live:
                 "compache: policy not applied to a conversation", exc_info=True
             )
             self._stand_down(conversation, number, now)
-            plain = body
+        if conversation.session is None:
+            body = plain = self._written(conversation, dialect, body)
         marked = plain
         if conversation.session is not None:
             marked = dialect.with_cache_mark(plain)
@@ -1339,6 +1368,60 @@ class Live:
             logger.warning("compache: a note was not asked", exc_info=True)
         return call
 
+    # -- what reasoning is bound to ----------------------------------------------
+
+    @staticmethod
+    def _binds(conversation, dialect, body, scan) -> bool:
+        """Whether the model only takes its reasoning back behind what stood ahead of it when it was made."""
+        manual = body.get("thinking")
+        if not hasattr(dialect, "reasoned") or (
+            isinstance(manual, dict) and manual.get("type") == "enabled"
+        ):
+            return False
+        return any(binds_reasoning(m) for m in (scan.model, conversation.answered))
+
+    @staticmethod
+    def _unbind(conversation, dialect, written, out) -> bool:
+        """Find the reasoning in a request that was made behind something else than it holds now.
+
+        The provider drops it, or refuses the request for it. Returns whether there
+        is any. `written` is the request as the application wrote it, which its
+        first reasoning was made behind.
+        """
+        if not conversation.binds:
+            return False
+        conversation.planned = now = wire.shape(out)
+        before = conversation.sent_as or wire.shape(written)
+        first = wire.changed(before, now)
+        if first is None:
+            # Nothing has. The reply to what went out last comes next, and it is bound to all of that.
+            first = len(before)
+        found = {dialect.reasoned(m) for m in dialect.said_so_far(out)[first:]}
+        found -= {None, *conversation.unbound}
+        conversation.unbound |= found
+        return bool(found)
+
+    def _written(self, conversation, dialect, body) -> Any:
+        """A request as the application wrote it, without reasoning that was made behind something else."""
+        if not conversation.binds or conversation.sent_as is None:
+            return body
+        said = dialect.said_so_far(body)
+        out = body
+        for _ in range(2):
+            kept = self._bound(conversation, dialect, said)
+            out = body if kept is said else {**body, "messages": kept}
+            if not self._unbind(conversation, dialect, body, out):
+                break
+        return out
+
+    @staticmethod
+    def _goes(call: _Call, body) -> None:
+        """Remember what goes out: that is what the model reasons behind."""
+        conversation = call.conversation
+        if conversation.binds and (conversation.session or conversation.sent_as):
+            planned = conversation.planned if body is call.marked else None
+            conversation.sent_as = planned or wire.shape(body)
+
     def _carry(self, call: _Call, scan) -> Result:
         """Send the request, fall back to plainer forms of it if it is refused, and read the reply."""
         pending = call.conversation.pending
@@ -1354,6 +1437,7 @@ class Live:
 
     def _sent(self, call: _Call, pending: _Pending) -> Result:
         conversation = call.conversation
+        self._goes(call, call.outgoing)
         result = call.send(call.outgoing)
         result = self._under_default(call, result)
         if result.status in _REFUSED and call.outgoing is not call.marked:
@@ -1361,10 +1445,13 @@ class Live:
             self._note_refused(call)
             self.stats["retried"] += 1
             call.outgoing, call.asked, call.carrier = call.marked, False, None
+            self._goes(call, call.outgoing)
             result = self._under_default(call, call.send(call.outgoing))
         if result.status in _REFUSED and call.outgoing is not call.body:
             # Refused with the policy applied: send what the application wrote.
             self.stats["retried"] += 1
+            call.body = self._written(conversation, call.dialect, call.body)
+            self._goes(call, call.body)
             result = call.send(call.body)
             if result.status < 400:
                 # So it was the policy. What is refused either way is none of its doing.
@@ -1610,14 +1697,21 @@ class Live:
             if placed is not None
         ]
         gone: list = []
+        left_out: set = set()
         if conversation.agentic and scan.thoughts:
-            out, gone = dialect.without_thoughts(
-                out, conversation.session.without(scan.thoughts)
+            left_out.update(conversation.session.without(scan.thoughts))
+        if conversation.unbound:
+            unbound = conversation.unbound
+            left_out.update(
+                p for p in scan.thoughts if dialect.reasoned(said[p]) in unbound
             )
+        if left_out:
+            out, gone = dialect.without_thoughts(out, sorted(left_out))
         # From the last to the first, so that the places of the others hold.
         for insert in reversed(conversation.inserts):
             at = insert.at - sum(place < insert.at for place in gone)
-            out = dialect.with_inserted(out, at, insert.messages)
+            extra = self._bound(conversation, dialect, insert.messages)
+            out = dialect.with_inserted(out, at, extra)
         put_in = sum(len(insert.messages) for insert in conversation.inserts)
         if conversation.agentic and scan.tools:
             # An agent works its way to a first cut soon enough. A tool that joins only then would
@@ -1645,6 +1739,19 @@ class Live:
             for at in places
         )
         return out
+
+    @staticmethod
+    def _bound(conversation, dialect, messages) -> list:
+        """Messages of ours, without reasoning that was made behind something else."""
+        if conversation.unbound and hasattr(dialect, "reasoned"):
+            unbound = conversation.unbound
+            places = [
+                i for i, m in enumerate(messages) if dialect.reasoned(m) in unbound
+            ]
+            if places:
+                bare, _ = dialect.without_thoughts({"messages": messages}, places)
+                return bare["messages"]
+        return messages
 
     @staticmethod
     def _placed(conversation, dialect, said, insert, turn) -> _Insert | None:
@@ -1817,10 +1924,11 @@ class Live:
                 rounds += 1
                 if rounds > most:
                     break
-                answers = self._reopen(conversation, reply.calls, call, data)
+                answers = self._reopen(conversation, reply.calls, call, data, True)
                 sent = self._asking(
                     conversation, dialect, dialect.after_tools(sent, data, answers)
                 )
+                self._goes(call, sent)
                 again, written = self._followed(call, sent)
                 if again.status >= 400 or again.json is None:
                     return again
@@ -1865,6 +1973,7 @@ class Live:
             if call.outgoing is not call.marked and self._spoiled(call, reply, found):
                 # The note got in the way of the answer: ask again without it.
                 self.stats["retried"] += 1
+                self._goes(call, call.marked)
                 again = call.send(call.marked)
                 if again.status < 400 and again.json is not None:
                     plain = replace(
@@ -1958,6 +2067,7 @@ class Live:
                             dialect,
                             dialect.after_tools(sent, editor.said, answers),
                         )
+                        self._goes(call, sent)
                         again, written = self._followed(call, sent)
                         kind = "retry" if written else "reopen"
                 closers.append(again.close)
@@ -2008,6 +2118,8 @@ class Live:
         conversation = call.conversation
         self.stats["retried"] += 1
         call.asked, call.carrier = False, None
+        call.body = self._written(conversation, call.dialect, call.body)
+        self._goes(call, call.body)
         try:
             result = call.send(call.body)
         except Exception as error:
@@ -2024,12 +2136,14 @@ class Live:
             self._stand_down(conversation, pending.index, pending.started_at)
         return result
 
-    def _reopen(self, conversation, calls, asked: _Call | None = None, said=None):
+    def _reopen(
+        self, conversation, calls, asked: _Call | None = None, said=None, alone=False
+    ):
         """Answers to the model's `reopen` calls, by call ID.
 
         `asked` is the call whose reply `said` made them. The application never
         sees them, so they are put into its later requests for as long as what
-        they returned is new.
+        they returned is new. `alone` says that it sees nothing of that reply.
         """
         answers, names = {}, []
         for call in calls:
@@ -2061,11 +2175,17 @@ class Live:
                 while at and wire.instructs(heard[at - 1]):
                     # It may be there for this one request.
                     at -= 1
+                if alone and conversation.binds:
+                    # As it was asked on: what was reasoned in the next reply is bound to that.
+                    after = asked.dialect.after_tools(asked.body, said, answers)
+                    messages = asked.dialect.said_so_far(after)[len(heard) :]
+                else:
+                    messages = asked.dialect.fetched(said, answers)
                 insert = _Insert(
                     at,
                     wire.landmark(heard[at - 1]) if at else None,
                     asked.dialect.name,
-                    asked.dialect.fetched(said, answers),
+                    messages,
                     tuple(name for name, _ in names),
                     conversation.pending.index,
                 )
@@ -2330,6 +2450,7 @@ class Live:
     def _ledger(self, conversation, kind, source, turn=None, pending=None) -> None:
         """Count one model call. `source` has the `usage`, `cost` and `model` of its reply."""
         pending = pending or conversation.pending
+        conversation.answered = source.model or conversation.answered
         if pending is not None and kind in ("answer", "reopen", "retry"):
             if pending.first_usage is None:
                 pending.first_usage = source.usage

@@ -101,6 +101,63 @@ def _enclosed(held: str, base: int, per_token: float) -> int:
     return max(16, round((len(held) - base) / per_token))
 
 
+# -- what reasoning is bound to ----------------------------------------------------
+
+# A line of Claude Code's that no model reads, and that may differ from call to call.
+_BILLING = "x-anthropic-billing-header"
+
+
+def _unmarked(value: Any) -> Any:
+    return {k: v for k, v in value.items() if k != "cache_control"}
+
+
+def _blocks_of(content: Any) -> Any:
+    """Content as the provider reads it: without cache marks, and a string as the one text it is."""
+    if isinstance(content, str):
+        return [{"type": "text", "text": content}]
+    if isinstance(content, list):
+        return [_unmarked(b) if isinstance(b, dict) else b for b in content]
+    return content
+
+
+def _hashed(value: Any) -> str:
+    said = json.dumps(value, sort_keys=True, ensure_ascii=False, default=str)
+    said = said.encode("utf-8", "surrogatepass")
+    return hashlib.blake2b(said, digest_size=12).hexdigest()
+
+
+def shape(body: dict) -> tuple[str, ...]:
+    """What reasoning in a request is bound to, as hashes: what opens it, then each of its messages."""
+    system = _blocks_of(body.get("system"))
+    if isinstance(system, list):
+        system = [
+            b
+            for b in system
+            if not (isinstance(b, dict) and str(b.get("text")).startswith(_BILLING))
+        ]
+    tools = [
+        _unmarked(t)
+        for t in body.get("tools") or ()
+        # One that is only loaded once it is asked for is not there yet.
+        if isinstance(t, dict) and not t.get("defer_loading")
+    ]
+    return (
+        _hashed([system, tools]),
+        *(
+            _hashed({**_unmarked(m), "content": _blocks_of(m.get("content"))})
+            for m in body["messages"]
+        ),
+    )
+
+
+def changed(before: tuple, now: tuple) -> int | None:
+    """The first message from which on a request holds something else than one before it. None where none."""
+    for k, (was, is_) in enumerate(zip(before, now)):
+        if was != is_:
+            return max(0, k - 1)
+    return None
+
+
 def get(body: Any, path: tuple) -> Any:
     for key in path:
         body = body[key]
@@ -422,7 +479,12 @@ class TextStream:
 
 
 # Where a chat-completions message carries reasoning, as gateways and model makers name it.
-_REASONING = ("reasoning_details", "reasoning_content", "reasoning")
+_REASONING = (
+    "reasoning_details",
+    "reasoning_content",
+    "reasoning",
+    "thinking_blocks",
+)
 
 
 class OpenAIChat:
@@ -553,6 +615,14 @@ class OpenAIChat:
     def said_so_far(body: dict) -> list:
         """The conversation, as the list that grows with every request."""
         return body["messages"]
+
+    @staticmethod
+    def reasoned(message: dict) -> str | None:
+        """What the reasoning in a message is known by. None where it holds none."""
+        if message.get("role") != "assistant":
+            return None
+        found = {k: message[k] for k in _REASONING if message.get(k)}
+        return _hashed(found) if found else None
 
     @staticmethod
     def without_thoughts(body: dict, places) -> tuple[dict, list]:
@@ -983,18 +1053,25 @@ class Anthropic:
     with_inserted = OpenAIChat.with_inserted
 
     @staticmethod
-    def without_thoughts(body: dict, places) -> tuple[dict, list]:
+    def _thinks(block: Any) -> bool:
+        return isinstance(block, dict) and "thinking" in str(block.get("type"))
+
+    @classmethod
+    def reasoned(cls, message: dict) -> str | None:
+        content = message.get("content")
+        if message.get("role") != "assistant" or not isinstance(content, list):
+            return None
+        found = [_unmarked(b) for b in content if cls._thinks(b)]
+        return _hashed(found) if found else None
+
+    @classmethod
+    def without_thoughts(cls, body: dict, places) -> tuple[dict, list]:
         messages = list(body["messages"])
         for i in places:
-            content = messages[i].get("content")
-            kept = [
-                b
-                for b in content
-                if not (isinstance(b, dict) and "thinking" in str(b.get("type")))
-            ]
-            # A message that held nothing else has to keep something.
-            if kept:
-                messages[i] = {**messages[i], "content": kept}
+            kept = [b for b in messages[i]["content"] if not cls._thinks(b)]
+            # A message that held nothing else has to say something.
+            kept = kept or [{"type": "text", "text": "\u2026"}]
+            messages[i] = {**messages[i], "content": kept}
         return {**body, "messages": messages}, []
 
     @staticmethod

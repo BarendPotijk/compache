@@ -313,9 +313,14 @@ class Wrapped(unittest.TestCase):
         self.folder = tempfile.TemporaryDirectory()
         self.addCleanup(self.folder.cleanup)
         self.home = Path(self.folder.name)
-        script = self.home / "claude"
-        script.write_text(f"#!{sys.executable}\n{AGENT}")
-        script.chmod(script.stat().st_mode | stat.S_IEXEC)
+        if os.name == "nt":
+            (self.home / "claude.py").write_text(AGENT)
+            starts = f'@"{sys.executable}" "%~dp0claude.py" %*\n'
+            (self.home / "claude.cmd").write_text(starts)
+        else:
+            script = self.home / "claude"
+            script.write_text(f"#!{sys.executable}\n{AGENT}")
+            script.chmod(script.stat().st_mode | stat.S_IEXEC)
         self.model = FakeModel(worker(40))
         self.url, stop = serve(self.model)
         self.addCleanup(stop)
