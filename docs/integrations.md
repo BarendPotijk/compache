@@ -6,7 +6,7 @@ compache goes in at two places: where your model calls leave, and where your tra
 
 | Your stack | compache goes in with |
 |---|---|
-| Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code, Copilot CLI, Aider, Goose, Crush, Kilo, pi, or any other agent on the command line | `compache wrap claude`, see [Agents](agents.md) |
+| Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code, Copilot CLI, Aider, Goose, Crush, Kilo, pi, OpenHands, or any other agent on the command line | `compache wrap claude`, see [Agents](agents.md) |
 | OpenAI SDK (Chat Completions, Responses), Anthropic SDK, Google GenAI SDK, sync or async | `client = compache.wrap(client, "policy.json")` |
 | A Python framework on one of these SDKs: OpenAI Agents SDK, Claude Agent SDK, Google ADK, Pydantic AI, LlamaIndex, Microsoft Agent Framework, Semantic Kernel, Agno, AutoGen, Strands, Haystack, Instructor, Langfuse's OpenAI drop-in | The wrapped client, an HTTP client or the proxy: [one line each](#python-frameworks) |
 | LangChain and LangGraph, any chat model | `create_agent(..., middleware=[compache.langchain.middleware(live)])` |
@@ -164,4 +164,4 @@ In order: `compache.thread(...)` around the call, the header `x-compache-thread`
 | Claude Code 2.1, Codex 0.172, OpenCode 1.19 | Started with `compache wrap`, on Claude Haiku 5.5 and GPT-6 Luna: a small repository repaired by each. [Sessions of real issues](../benchmarks/agents/README.md) with Claude Code and Codex |
 | OpenClaw 2026.11.7, Aider 0.86, CrewAI 1.15 | The released harness through the proxy with a local model, with the settings above. OpenClaw names its sessions itself |
 | LangChain 1.5 | An agent on a scripted chat model with the middleware, on every test run: results trimmed, one fetched back, sync and async |
-| Qwen Code 0.28, Goose 1.60, Crush 0.102, Copilot CLI 1.0, Kilo 7.8, pi 0.73, Cline 3.0 | The released agent in a loop of file reads, under `compache wrap` and Cline through the proxy, against the stand-in. Gemini CLI 0.71: one answer |
+| Qwen Code 0.28, Goose 1.60, Crush 0.102, Copilot CLI 1.0, Kilo 7.8, pi 0.73, OpenHands 1.16, Cline 3.0 | The released agent in a loop of file reads, under `compache wrap` and Cline through the proxy, against the stand-in. Gemini CLI 0.71: one answer |

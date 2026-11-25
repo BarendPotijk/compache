@@ -213,6 +213,16 @@ class SetupTests(unittest.TestCase):
         self.assertEqual(told["anthropic"], "http://127.0.0.1:9999")
         self.assertEqual(told["openai"], "http://127.0.0.1:9999/v1")
 
+    def test_openhands(self):
+        changes, ahead, upstreams = self.told("openhands")
+        self.assertEqual(changes, {"LLM_BASE_URL": "http://127.0.0.1:9999"})
+        self.assertEqual((ahead, upstreams), (["--override-with-envs"], {}))
+        changes, _, upstreams = self.told(
+            "openhands", {"LLM_BASE_URL": "https://gateway.example/api/v1"}
+        )
+        self.assertEqual(changes, {"LLM_BASE_URL": "http://127.0.0.1:9999/api/v1"})
+        self.assertEqual(set(upstreams.values()), {"https://gateway.example"})
+
     def test_crush(self):
         changes, _, upstreams = self.told(
             "crush", {"OPENAI_API_ENDPOINT": "https://gateway.example/api/v1"}

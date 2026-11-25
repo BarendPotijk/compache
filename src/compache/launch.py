@@ -209,6 +209,15 @@ def _copilot(bases: dict, env: dict) -> tuple[dict, list, dict]:
     return changes, [], {api: given}
 
 
+def _openhands(bases: dict, env: dict) -> tuple[dict, list, dict]:
+    given = env.get("LLM_BASE_URL")
+    # Without the version: what it calls for Claude has it on its own path, and the proxy puts it
+    # where it is missing.
+    base = _origin(bases["openai"]) + (_path(given) if given else "")
+    told = {"openai": given, "anthropic": given} if given else {}
+    return {"LLM_BASE_URL": base}, ["--override-with-envs"], told
+
+
 # What pi loads to be told: its own way of sending a provider's models elsewhere.
 _PI = """// Written by compache wrap: what pi asks of these providers goes through it.
 export default function (pi) {
@@ -249,6 +258,7 @@ AGENTS = {
     "crush": Agent("crush", "Crush", _crush, _CRUSH),
     "copilot": Agent("copilot", "Copilot CLI", _copilot, {}),
     "pi": Agent("pi", "pi", _pi, {}),
+    "openhands": Agent("openhands", "OpenHands", _openhands, {}),
 }
 
 

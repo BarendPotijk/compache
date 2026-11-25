@@ -105,7 +105,7 @@ An agent sends every tool result again with every call. compache keeps the newes
 
 | Your stack | What you add |
 |---|---|
-| Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code, Copilot CLI, Aider, Goose, Crush, Kilo, pi and other agents on the command line | `compache wrap <agent>` |
+| Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code, Copilot CLI, Aider, Goose, Crush, Kilo, pi, OpenHands and other agents on the command line | `compache wrap <agent>` |
 | OpenAI, Anthropic and Google GenAI SDKs, sync, async and streaming | `compache.wrap(client, "policy.json")` |
 | LangChain and LangGraph, any chat model | `compache.langchain.middleware(...)` |
 | OpenAI Agents SDK, Claude Agent SDK, Google ADK, Pydantic AI, LlamaIndex, Microsoft Agent Framework, Semantic Kernel, Agno, AutoGen, Strands, Haystack, Langfuse's OpenAI drop-in | [One line each](docs/integrations.md#python-frameworks) |

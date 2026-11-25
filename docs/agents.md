@@ -11,7 +11,7 @@ An agent makes dozens of model calls per message, and every call sends every too
 
 | | |
 |---|---|
-| `compache wrap claude` | Claude Code. Also `codex`, `opencode`, `gemini`, `qwen`, `aider`, `goose`, `crush`, `copilot`, `kilo`, `pi` |
+| `compache wrap claude` | Claude Code. Also `codex`, `opencode`, `gemini`, `qwen`, `aider`, `goose`, `crush`, `copilot`, `kilo`, `pi`, `openhands` |
 | `compache wrap codex -- exec "fix the failing test"` | With arguments of its own |
 | `compache wrap -- my-agent` | Any other command. It is told by the variables that SDKs read |
 | `compache wrap --watch claude` | Record only, and change nothing |

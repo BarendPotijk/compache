@@ -4,7 +4,7 @@
 
 Install: `pip install compache` (Python 3.11 or later).
 
-- Around a coding agent: `compache wrap claude` (also codex, opencode, gemini, qwen, copilot, aider, goose, crush, kilo, pi, or `compache wrap -- <command>`). `compache stats` says what was saved, `compache doctor` checks the setup.
+- Around a coding agent: `compache wrap claude` (also codex, opencode, gemini, qwen, copilot, aider, goose, crush, kilo, pi, openhands, or `compache wrap -- <command>`). `compache stats` says what was saved, `compache doctor` checks the setup.
 - In Python: `client = compache.wrap(Anthropic(), learn="compache-record")`, for clients of the OpenAI, Anthropic and Google GenAI SDKs, sync and async.
 - LangChain and LangGraph: `create_agent(model, tools, middleware=[compache.langchain.middleware(compache.Live(learn="compache-record"))])`.
 - Any other stack: `compache proxy --learn compache-record`, with the base URL set to it.
