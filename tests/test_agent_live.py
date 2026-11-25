@@ -380,6 +380,25 @@ class LoopTests(unittest.TestCase):
                     self.assertEqual(live.stats["stood_down"], 0)
                     self.assertEqual(live.stats["passed_through"], 0)
 
+    def test_the_first_notice_says_what_they_all_are_and_stays_as_it_is(self):
+        # Live, a model took a notice for what the tool had returned, and what it had written from
+        # the result for made up.
+        for shape in SHAPES:
+            with self.subTest(shape=shape.__name__):
+                model = FakeModel(worker(9))
+                live = compache.Live(policy(rounds=2))
+                Agent(live, shape(), model).run("Read nine files")
+                firsts = set()
+                for body in model.bodies:
+                    gone = [t for t in shape.results(body) if noticed(t)]
+                    long = ["what you wrote next comes from it" in t for t in gone]
+                    self.assertEqual(long, [k == 0 for k in range(len(gone))])
+                    firsts.update(map(json.dumps, gone[:1]))
+                self.assertEqual(len(gone), 7)
+                # Nothing that is cached ahead of a later cut is written again.
+                self.assertEqual(len(firsts), 1)
+                self.assertTrue(all(str(t).count("You read this") == 1 for t in gone))
+
     def test_an_agent_has_the_tool_from_its_first_call(self):
         model = FakeModel(worker(1))
         live = compache.Live(policy())
@@ -1483,6 +1502,49 @@ class AgainTests(unittest.TestCase):
                 (conversation,) = live.conversations()
                 self.assertGreaterEqual(conversation.session._engine.flow.longer, 14)
                 self.assertEqual(live.stats["stood_down"], 0)
+
+    def test_what_its_own_tools_return_again_makes_results_stay_longer(self):
+        """It needs six results at once, writes nothing down and reads them over and over."""
+        for shape in SHAPES:
+            with self.subTest(shape.__name__):
+                live, reads = compache.Live(policy(2)), []
+                app = Agent(live, shape(), FakeModel(None))
+
+                def script(request, reads=reads):
+                    body = json.dumps(request["body"])
+                    if all(
+                        f"line of file number {k} that" in body for k in range(1, 7)
+                    ):
+                        return {"text": "All done."}
+                    reads.append(len(reads) % 6 + 1)
+                    return {"text": "", "tool": ("read", {"file": reads[-1]})}
+
+                app.model.script = script
+                app.shape.ask("Compare six files")
+                for _ in range(80):
+                    _, calls = app.call()
+                    if not calls:
+                        break
+                    app.shape.answer([(call, result(reads[-1])) for call, _ in calls])
+                self.assertFalse(calls, "it goes round for ever")
+                self.assertLess(len(reads), 40)
+                self.assertEqual(live.stats["stood_down"], 0)
+
+    def test_a_test_that_is_run_again_and_again_is_no_sign_of_that(self):
+        live, made = compache.Live(policy(2)), [0]
+
+        def script(request):
+            made[0] += 1
+            return {"text": "", "tool": ("test" if made[0] % 3 else "read", {})}
+
+        app = Agent(live, Claude(), FakeModel(script))
+        app.shape.ask("Mend it")
+        for k in range(60):
+            _, calls = app.call()
+            said = "all tests pass\n" * 40 if made[0] % 3 else result(k)
+            app.shape.answer([(call, said) for call, _ in calls])
+        (conversation,) = live.conversations()
+        self.assertEqual(conversation.session._engine.flow.longer, 0)
 
     def test_there_has_to_be_room_for_what_stays_longer(self):
         """And a request that is billed dearer for its size is none to grow into."""

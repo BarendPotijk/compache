@@ -6,7 +6,7 @@ import threading
 import time
 import unittest
 from dataclasses import replace
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 from urllib.parse import parse_qs, urlsplit
@@ -15,7 +15,8 @@ import compache
 from compache.errors import ContractError
 from compache.models import model_spec, pricing
 from compache.optimizer.contracts import ModelSpec
-from compache.threads import Thread, write_threads
+from compache.learn import seconds
+from compache.threads import Thread, recorded, write_threads
 
 from helpers import labels_for, thread
 
@@ -86,6 +87,35 @@ class FitTests(unittest.TestCase):
             again = compache.Policy.load(path)
             self.assertEqual(again.summary, summary)
             self.assertEqual(again.recipe, policy.recipe)
+
+    def test_threads_read_minutes_after_they_ended_fit_too(self):
+        # Read off a trace store the same day, nobody can have been seen to stay away for a day:
+        # the threads are taken to be over then, as those of a record are.
+        sample = threads()
+        ended = max(seconds(t.runs[-1].ended_at) for t in sample)
+
+        def fit(**said):
+            return compache.fit(
+                sample, labels(sample), model=SPEC, folds=2, share_headers=False, **said
+            )
+
+        def read(after):
+            at = datetime.fromtimestamp(ended + after, timezone.utc).isoformat()
+            return mock.patch(
+                "compache.api.recorded",
+                lambda rows: {**recorded(rows), "observed_until": at},
+            )
+
+        with read(after=60):
+            soon = fit()
+        self.assertEqual(soon.recipe, fit().recipe)
+        self.assertEqual(soon.summary, fit().summary)
+        # What somebody says themselves holds, and a read that is long after counts.
+        at = datetime.fromtimestamp(ended + 60, timezone.utc).isoformat()
+        with self.assertRaisesRegex(ContractError, "fully observed"):
+            fit(observed_until=at)
+        with read(after=90_000):
+            fit()
 
     def test_the_cache_lifetime_is_fitted_where_a_model_has_several(self):
         sample = threads(gap=1500)

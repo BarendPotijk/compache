@@ -156,7 +156,7 @@ def _parser() -> argparse.ArgumentParser:
         "--experiment",
         action="append",
         default=[],
-        help="An MLflow experiment ID. Repeat for several. Left out, experiment 0",
+        help="An MLflow experiment, by name or ID. Repeat for several. Left out, experiment 0",
     )
     sub.add_argument(
         "--rows",
@@ -778,7 +778,7 @@ def _stats(args):
     if not folders:
         return (
             {},
-            f"Nothing on record in {home()} yet. Start with: compache wrap claude",
+            f"No session with compache on record in {home()} yet. Start with: compache wrap claude",
         )
     found, text = {}, []
     for folder in folders:

@@ -145,7 +145,7 @@ class SkillTests(unittest.TestCase):
 
 class LinkTests(unittest.TestCase):
     LINK = re.compile(r"\]\((?!https?://|mailto:)([^)\s]+)\)")
-    IMAGE = re.compile(r'\b(?:src|srcset)="(?!https?://)([^"]+)"')
+    IMAGE = re.compile(r'\b(?:src|srcset|href)="(?!https?://|mailto:)([^"]+)"')
 
     @staticmethod
     def anchors(page):
@@ -187,6 +187,11 @@ class LinkTests(unittest.TestCase):
         self.assertIn('/compache/v1.2.3/docs/assets/logo.svg"', text)
         self.assertNotIn("logo-dark", text)
         self.assertIn("/compache/blob/v1.2.3/docs/guide.md)", text)
+        html = pypi_readme.absolute(
+            '<a href="#x">a</a> <a href="docs/b.md">b</a>', "v1"
+        )
+        self.assertIn('href="https://github.com/BarendPotijk/compache/tree/v1#x"', html)
+        self.assertIn("/compache/blob/v1/docs/b.md", html)
         self.assertNotIn("git+https", text)
 
     def test_the_mark_is_the_same_wherever_it_is_drawn(self):

@@ -64,7 +64,7 @@ class WorkloadAccountingTests(unittest.TestCase):
     def session(self, tid, policy=None):
         def measure(p):
             self.calls.append((p.part_id, p.text))
-            return 12 if p.text.startswith("[Compacted passage") else len(p.text)
+            return 12 if p.text.startswith("[You ") else len(p.text)
 
         def measure_header(payload):
             self.headers.append(payload)

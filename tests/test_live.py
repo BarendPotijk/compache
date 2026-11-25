@@ -697,7 +697,7 @@ class PolicyTests(unittest.TestCase):
             clock.at += 3600
         first = model.bodies[-1]["messages"][3]["content"]
         # The first piece carries the notice and the second a stand-in, so the message keeps its shape.
-        self.assertIn('Call reopen("ctx:', first[0]["text"])
+        self.assertIn('reopen("ctx:', first[0]["text"])
         self.assertEqual(first[1]["text"], "…")
         self.assertEqual(len(model.bodies[-1]["messages"][-1]["content"]), 2)
 
@@ -1256,7 +1256,7 @@ class LifetimeTests(unittest.TestCase):
             self.clock.at += 400
             app.turn(f"Question {n}?", passage(n))
         self.assertNotIn('"ttl"', json.dumps(self.model.bodies[before:]))
-        archived = json.dumps(self.model.bodies[-1]).count("Archived to save space")
+        archived = json.dumps(self.model.bodies[-1]).count("You read this in full.")
         self.assertGreater(archived, 0)
         self.assertIsNone(live.policy.cache_lifetime)
         self.assertEqual(live.policy.recipe, lasting.recipe)
@@ -1741,14 +1741,20 @@ class ClockTests(unittest.TestCase):
 
 
 class NoticeTests(unittest.TestCase):
-    def test_the_notice_a_model_reads_is_as_long_as_the_one_the_policy_counted(self):
-        from compache.live import _notice
-        from compache.optimizer.parts import Source, placeholder
+    def test_a_notice_says_its_part_was_seen_in_full_and_is_as_long_as_it_counts(self):
+        # A model that only finds a reference where text should be takes what it wrote from that
+        # text for made up: live, it fetched everything again, or took right answers back.
+        from compache.optimizer.parts import NOTICE_BYTES, Source, placeholder
 
-        counted = placeholder(
-            "thread", Source("thread:1:retrieval:1", "retrieval", 1, "text")
-        )
-        shown = _notice(counted)
-        self.assertEqual(len(shown), len(counted))
-        self.assertIn('Call reopen("ctx:', shown)
-        self.assertEqual(_notice("something else"), "something else")
+        for kind, seen in (
+            ("input", "read"),
+            ("retrieval", "read"),
+            ("output", "said"),
+        ):
+            shown = placeholder("thread", Source(f"thread:1:{kind}", kind, 1, "text"))
+            self.assertEqual(len(shown.encode()), NOTICE_BYTES)
+            self.assertTrue(
+                shown.startswith(
+                    f'[You {seen} this in full. Cleared since: reopen("ctx:'
+                )
+            )

@@ -92,7 +92,7 @@ A session becomes a thread. The file carries the model, the system prompt, the t
 ### From MLflow or an OpenTelemetry export
 
 ```sh
-compache pull mlflow --tracking-uri http://localhost:5000 --experiment 1 -o threads.jsonl.gz
+compache pull mlflow --tracking-uri http://localhost:5000 --experiment chat -o threads.jsonl.gz
 compache pull otel spans.jsonl -o threads.jsonl.gz
 ```
 

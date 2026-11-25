@@ -105,12 +105,18 @@ def _calls(threads):
     return counts if any(n > 1 for n in counts.values()) else None
 
 
-def _observed_until(threads, given):
-    """When the record ends. Unless told otherwise, every thread is taken to be over."""
+def _observed_until(threads, given, read=None):
+    """When the record ends, where that is given. Otherwise when the threads were read.
+
+    Where neither is known every thread is taken to be over, and where all of them are so young at
+    the time of the read that nobody can be seen to stay away.
+    """
     if given is not None:
         return given
-    last = max(seconds(t.runs[-1].ended_at) for t in threads)
-    end = datetime.fromtimestamp(last, timezone.utc) + timedelta(
+    ends = [seconds(run.ended_at) for t in threads for run in t.runs]
+    if read is not None and seconds(read) - min(ends) >= _HORIZON_SECONDS:
+        return read
+    end = datetime.fromtimestamp(max(ends), timezone.utc) + timedelta(
         seconds=_HORIZON_SECONDS
     )
     return end.isoformat().replace("+00:00", "Z")
@@ -188,7 +194,7 @@ def fit(
         labels,
         spec,
         observation_end=_observed_until(
-            threads, observed_until or found["observed_until"]
+            threads, observed_until, found["observed_until"]
         ),
         system_prompt=system_prompt,
         default_tools=tools,
@@ -266,7 +272,7 @@ def replay(policy, threads, labels=None, *, observed_until=None, **options) -> d
         labels,
         policy.artifact,
         observation_end=_observed_until(
-            threads, observed_until or found["observed_until"]
+            threads, observed_until, found["observed_until"]
         ),
         system_prompt=header.get("system_prompt", ""),
         default_tools=header.get("default_tools", []),
@@ -906,6 +912,10 @@ class Session:
         """Say that the model fetches back what it had fetched back before."""
         if self.policy.agentic:
             self._engine.flow.stay_longer()
+
+    def gone(self, name: str) -> bool:
+        """Whether a result is out of view, where the policy decides call by call."""
+        return self.policy.agentic and self._engine.flow.gone(name)
 
     def lost(self) -> None:
         """Say that the provider has nothing of the conversation in its cache any more."""

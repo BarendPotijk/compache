@@ -687,6 +687,27 @@ class FetchTests(unittest.TestCase):
         )
         self.assertEqual(seen[4][2]["page_token"], "next")
 
+    def test_an_experiment_is_named_by_its_name_too(self):
+        found = {"experiment": {"experiment_id": "12", "name": "chat app"}}
+        replies = {
+            "get-by-name": [self.reply(200, found)],
+            "search": [self.reply(200, {"traces": []})],
+        }
+        seen = []
+        options = {"tracking_uri": "http://localhost:5000", "pause": lambda s: None}
+        with mock.patch.object(mlflow, "_send", self.served_by(replies, seen)):
+            self.assertEqual(
+                list(fetch(experiment_ids=["chat app", "7"], **options)), []
+            )
+        self.assertIn("get-by-name?experiment_name=chat%20app", seen[0][0])
+        places = [place["mlflow_experiment"] for place in seen[1][2]["locations"]]
+        self.assertEqual(places, [{"experiment_id": "12"}, {"experiment_id": "7"}])
+        missing = {"error_code": "RESOURCE_DOES_NOT_EXIST", "message": "No such thing"}
+        replies = {"get-by-name": [self.reply(404, missing)]}
+        with mock.patch.object(mlflow, "_send", self.served_by(replies, [])):
+            with self.assertRaisesRegex(ContractError, "no experiment named 'chat'"):
+                list(fetch(experiment_ids="chat", **options))
+
     def test_spans_the_store_does_not_hold_come_from_the_trace_artifact(self):
         spans = [stored(span("root", 0, 1, "CHAIN"))]
         elsewhere = {"error_code": "INTERNAL_ERROR"}

@@ -335,6 +335,22 @@ class SetupTests(Told):
         )
         self.assertEqual(upstreams, {"openai": "https://gateway.example"})
 
+    def test_gemini_cli_that_fails_for_want_of_a_way_to_sign_in_is_explained(self):
+        # With a base URL, unattended and without settings, Gemini CLI 0.71 ends on "Invalid auth
+        # method selected".
+        hint, env = launch.AGENTS["gemini"].hint, {"HOME": str(self.home)}
+        self.assertIn(str(self.home / ".gemini" / "settings.json"), hint(env))
+        self.assertIsNone(hint({**env, "GOOGLE_GENAI_USE_VERTEXAI": "true"}))
+        chosen = {"security": {"auth": {"selectedType": "gemini-api-key"}}}
+        for said in (chosen, {"selectedAuthType": "gemini-api-key"}):
+            self.put(".gemini/settings.json", said)
+            self.assertIsNone(hint(env))
+        self.put(".gemini/settings.json", {"ui": {"theme": "dark"}})
+        self.assertIn("gemini-api-key", hint(env))
+        self.put(".gemini/.env", "GOOGLE_GENAI_USE_GCA=true\n")
+        self.assertIsNone(hint(env))
+        self.assertIsNone(launch.AGENTS["claude"].hint(env))
+
     def test_gemini_aider_and_goose(self):
         self.assertEqual(
             self.told("gemini")[0]["GOOGLE_GEMINI_BASE_URL"], "http://127.0.0.1:9999"

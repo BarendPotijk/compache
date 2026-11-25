@@ -688,7 +688,7 @@ class SessionTests(unittest.TestCase):
             turn = session.extend(turn, ["content " * 500], at=10.0 * k + 10)
         self.assertEqual(turn.archived_ids, {f"t:1:retrieval:{k}" for k in range(1, 4)})
         shown = {p.part_id: p.text for p in turn.parts}
-        self.assertIn("Compacted passage", shown["t:1:retrieval:1"])
+        self.assertIn("You read this in full.", shown["t:1:retrieval:1"])
         self.assertIn("content", shown["t:1:retrieval:5"])
         found = session.reopen("t:1:retrieval:1")
         self.assertIn("content content", found["text"])

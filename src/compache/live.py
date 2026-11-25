@@ -45,6 +45,7 @@ from . import wire
 from .api import Policy
 from .learn import Learner
 from .models import binds_reasoning
+from .optimizer.parts import explained, notice
 from .optimizer.recovery import REOPEN_TOOL
 from .quotes import Quotes, spoken
 from .record import Recorder, left_out
@@ -67,11 +68,12 @@ _REOPEN_TOOL = {
     "function": {
         "name": _REOPEN,
         "description": (
-            "Read text of this conversation that was archived to save space. An archived part "
+            "Read text of this conversation again that was cleared to save space. A cleared part "
             "shows a short notice with a reference such as ctx:1a2b3c in place of its text. Give "
             "that reference to read the part, or give a short distinctive phrase to search every "
-            "archived part for it. Use it whenever what you need is no longer visible, and before "
-            "telling the user that you do not have something."
+            "cleared part for it. Use it when a question needs something that is no longer visible, "
+            "and before telling the user that you do not have something. What you answered before "
+            "came from the full text: do not read it again to check that."
         ),
         "parameters": {
             "type": "object",
@@ -80,7 +82,7 @@ _REOPEN_TOOL = {
                     "type": "string",
                     "description": (
                         "The ctx: reference from a notice, or a few distinctive words to search "
-                        "the archived parts for."
+                        "the cleared parts for."
                     ),
                 },
                 "offset": {
@@ -94,17 +96,18 @@ _REOPEN_TOOL = {
     },
 }
 _REOPEN_HOW = (
-    "Earlier parts of this conversation may be archived to save space. An archived part shows a "
-    'notice like [Archived to save space. Call reopen("ctx:...") to read this part.] in place of '
-    "its text. Nothing is lost: an archived part is still part of the conversation, and the "
-    "reopen tool reads it. When a question needs something that is not visible, and always "
-    "before you tell the user that you do not have or cannot find something, call reopen: with "
-    "the reference from a notice to read that part, or with a few distinctive words to search "
-    "all archived parts. Then answer from what it returns. Do not reopen parts you do not need, "
-    "and never mention archiving, notices or the reopen tool to the user."
+    "Earlier parts of this conversation are cleared after a while to save space. You read each "
+    "of them in full when it came in, and what you answered then came from it: rely on your "
+    "earlier answers, and do not take them back or check them because the text is no longer "
+    f"shown. A cleared part shows a notice like {notice('ctx:...')} in place of its text, and the "
+    "reopen tool shows the text again. When a question needs something that is not visible, and "
+    "always before you tell the user that you do not have or cannot find something, call reopen: "
+    "with the reference from a notice to read that part, or with a few distinctive words to "
+    "search all cleared parts. Then answer from what it returns. Never mention notices, cleared "
+    "text or the reopen tool to the user."
 )
 _NOT_FOUND = (
-    "No archived part matches that. Try other or fewer distinctive words from the text you "
+    "No cleared part matches that. Try other or fewer distinctive words from the text you "
     "need, or the reference of a notice."
 )
 # What a model is shown of a fetched part: its text and where it goes on, not the names parts go by here.
@@ -126,9 +129,12 @@ _AGENT_TOOL = {
     "function": {
         "name": _REOPEN,
         "description": (
-            "Read back a tool result that was archived to save space. Its place shows a notice with "
-            "a reference such as ctx:1a2b3c. Use it when you need what is no longer visible, rather "
-            "than running the tool again."
+            "Old tool results are cleared from this conversation to save space, some steps after "
+            "you read them. In the place of a cleared result you see a notice with a reference "
+            "such as ctx:1a2b3c. You did read that result in full, and what you wrote right after "
+            "it comes from it: rely on that, and do not reopen results to check it. Call this "
+            "tool with the reference only when you need something from a result that you did "
+            "not write down, rather than running the other tool again."
         ),
         "parameters": {
             "type": "object",
@@ -151,6 +157,8 @@ _HANDLE = re.compile(r"ctx:[0-9a-f]{24}")
 _REFUSED = (400, 422)
 # What Claude's cache marks ask for where they name no lifetime.
 _FIVE_MINUTES = 300
+# How many results have to come back again and again before a model is taken to be going round.
+_SEVERAL = 3
 # How often in a row the model may fetch something back within one call of the application's.
 _ROUNDS = 3
 _AGENT_ROUNDS = 8
@@ -340,6 +348,49 @@ class _Pending:
             setattr(self, name, getattr(earlier, name))
 
 
+class _Wanted:
+    """What comes back into an agent's conversation after it went out of view.
+
+    A model that works with more than stays in view may run its own tools again, and they return
+    the same words. One result that comes again and again, as that of a test, is no sign of that.
+    Several are.
+    """
+
+    def __init__(self):
+        # By text: the latest result, and by result its text.
+        self.latest: dict[int, str] = {}
+        self.texts: dict[str, int] = {}
+        # What came back, and what did so more than once.
+        self.once: set[int] = set()
+        self.twice: set[int] = set()
+
+    def copy(self) -> _Wanted:
+        made = _Wanted()
+        made.latest, made.texts = dict(self.latest), dict(self.texts)
+        made.once, made.twice = set(self.once), set(self.twice)
+        return made
+
+    def fetched(self, name: str) -> None:
+        """A result was fetched back."""
+        if name in self.texts:
+            self.once.add(self.texts[name])
+
+    def returned(self, name: str, text: str, gone) -> bool:
+        """A tool returned this. Says whether the model is going round, by what is `gone`."""
+        said = hash(text)
+        before = self.latest.get(said)
+        self.latest[said], self.texts[name] = name, said
+        if before is None or not gone(before):
+            return False
+        if said in self.once:
+            self.twice.add(said)
+        self.once.add(said)
+        if len(self.twice) < _SEVERAL:
+            return False
+        self.twice.clear()
+        return True
+
+
 @dataclass
 class _Conversation:
     # The name its policy session and its parts go by, and the name it is recorded under.
@@ -377,8 +428,9 @@ class _Conversation:
     left_alone: bool = False
     # What was fetched back and still stands in the conversation, in order.
     inserts: list = field(default_factory=list)
-    # What was ever fetched back, and from where on.
+    # What was ever fetched back, and from where on. And what came back whichever way.
     fetched: set = field(default_factory=set)
+    wanted: _Wanted = field(default_factory=_Wanted)
     # How it stood before its latest turn and at its latest request, for one that branches off there.
     base: _Point | None = None
     here: _Point | None = None
@@ -656,19 +708,6 @@ def _link(chain: str, segment: _Segment) -> str:
 
 def _size(text: str) -> int:
     return len(text.encode("utf-8"))
-
-
-def _notice(placeholder: str) -> str:
-    """The session's notice in words a model acts on: the tool to call and what to give it.
-
-    It is exactly as long as the notice it stands for, so the sizes the policy counts on hold.
-    """
-    found = _HANDLE.search(placeholder)
-    if found is None:
-        return placeholder
-    return (
-        f'[Archived to save space. Call reopen("{found.group()}") to read this part.]'
-    )
 
 
 # What our tool returned for a notice, as the model reads it.
@@ -1046,7 +1085,7 @@ class Live:
         made = _Conversation(other.thread_id, chain, record, other.named)
         made.agentic, made.left_alone = other.agentic, other.left_alone
         made.inserts, made.reopens = list(point.inserts), point.reopens
-        made.fetched = set(other.fetched)
+        made.fetched, made.wanted = set(other.fetched), other.wanted.copy()
         made.lifetime, made.five_minutes = other.lifetime, other.five_minutes
         made.header_lifetime = other.header_lifetime
         made.default_lifetime = other.default_lifetime
@@ -1106,6 +1145,7 @@ class Live:
             session=other.session.copy(),
             inserts=list(other.inserts),
             fetched=set(other.fetched),
+            wanted=other.wanted.copy(),
             unbound=set(other.unbound),
             went=[],
             quotes=None,
@@ -1838,14 +1878,14 @@ class Live:
         conversation.session.follows(session)
         conversation.inserts = list(base.inserts)
         # Its results go by the same names, and may be others now.
-        conversation.fetched = set()
+        conversation.fetched, conversation.wanted = set(), _Wanted()
 
     def _walk(self, conversation, chains, turns, now, scan) -> None:
         """Walk the policy through a conversation that is met in the middle, up to its last question."""
         done = len(turns) - 1
         conversation.pending, conversation.turns, conversation.stale = None, 0, False
         conversation.inserts, conversation.went = [], []
-        conversation.fetched = set()
+        conversation.fetched, conversation.wanted = set(), _Wanted()
         conversation.base = conversation.here = conversation.quotes = None
         policy = self._start(conversation, conversation.thread_id, scan)
         if policy is not None:
@@ -1937,7 +1977,15 @@ class Live:
         """Take in what the tools of a turn have returned since its last request."""
         first = len(pending.seen) + 1
         pending.seen += _hashes(found)
-        if conversation.session is not None:
+        session = conversation.session
+        if session is not None:
+            for j, part in enumerate(found, first):
+                name = f"{conversation.thread_id}:{pending.index}:retrieval:{j}"
+                ours = _FETCHED.match(part.text)
+                if not ours and conversation.wanted.returned(
+                    name, part.text, session.gone
+                ):
+                    session.stay_longer()
             pending.turn = self._extended(conversation, pending.turn, found, now, scan)
         self._heard(conversation, pending.index, "", found, first)
 
@@ -1982,14 +2030,13 @@ class Live:
         pending, name = conversation.pending, conversation.thread_id
         turn, out = pending.turn, body
         if turn.archived_ids:
-            notice = {
-                p.part_id: _notice(p.text)
-                for p in turn.parts
-                if p.part_id in turn.archived_ids
+            shown = {
+                p.part_id: p.text for p in turn.parts if p.part_id in turn.archived_ids
             }
             # Where the host runs our tool, what it returned stands among the results of the others.
             hosted = _REOPEN in dialect.tool_names(body)
-            known = set(notice.values())
+            known = {m.group() for m in map(_HANDLE.search, shown.values()) if m}
+            first = conversation.agentic
             for k, segment in enumerate(turns, 1):
                 pieces = [
                     (f"{name}:{k}:input", segment.inputs),
@@ -1999,17 +2046,23 @@ class Live:
                     part_id = f"{name}:{k}:retrieval:{j}"
                     pieces.append((part_id, found.slots))
                     of = _FETCHED.match(found.text) if hosted else None
-                    if of and part_id in notice and _notice(of[1]) in known:
+                    if of and part_id in shown and of[1] in known:
                         # A copy is no text of its own: the notice names what it is a copy of,
                         # as long as that is there.
-                        notice[part_id] = _notice(of[1])
+                        shown[part_id] = notice(of[1])
+                    if first and part_id in shown and found.slots:
+                        # Results are archived from the oldest on, so this one stays the first, and
+                        # what is cached of it is never written again.
+                        at = _HANDLE.search(shown[part_id])
+                        shown[part_id] = explained(at.group()) if at else shown[part_id]
+                        first = False
                 for part_id, slots in pieces:
-                    if part_id in notice and slots and slots[0].whole is not None:
-                        out = wire.put(out, slots[0].whole, notice[part_id])
-                    elif part_id in notice:
+                    if part_id in shown and slots and slots[0].whole is not None:
+                        out = wire.put(out, slots[0].whole, shown[part_id])
+                    elif part_id in shown:
                         for i, slot in enumerate(slots):
-                            shown = _GONE if i else notice[part_id]
-                            out = wire.set_text(dialect, out, slot.path, shown)
+                            text = _GONE if i else shown[part_id]
+                            out = wire.set_text(dialect, out, slot.path, text)
             conversation.reopens = True
         said = dialect.said_so_far(body)
         places = self._places(conversation, turns, scan)
@@ -2529,6 +2582,7 @@ class Live:
                 if piece in before:
                     conversation.session.stay_longer()
                 conversation.fetched.add(piece)
+                conversation.wanted.fetched(part)
             if not part or in_view:
                 part = f"reopened:{uuid.uuid4().hex[:12]}"
             names.append((part, told))

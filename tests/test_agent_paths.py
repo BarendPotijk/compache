@@ -813,7 +813,7 @@ class ResultTests(unittest.TestCase):
                     for found in last:
                         if noticed(found):
                             self.assertIsInstance(found, str)
-                            self.assertLess(len(found), 200)
+                            self.assertLess(len(found), 260)
                     # What it was fetched back with holds the picture.
                     again = [
                         body
@@ -1311,7 +1311,7 @@ class FailTests(unittest.TestCase):
                         failed: list = []
 
                         def failing(body):
-                            if "archived" in json.dumps(body) and self.follows(body):
+                            if "reopen" in json.dumps(body) and self.follows(body):
                                 if status == 400 or not failed:
                                     failed.append(1)
                                     if isinstance(status, Exception):
