@@ -778,7 +778,7 @@ def _stats(args):
     if not folders:
         return (
             {},
-            f"Nothing on record in {home()} yet. Start with: compache wrap claude",
+            f"No session with compache on record in {home()} yet. Start with: compache wrap claude",
         )
     found, text = {}, []
     for folder in folders:

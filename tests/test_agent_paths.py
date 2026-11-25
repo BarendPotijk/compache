@@ -1311,7 +1311,7 @@ class FailTests(unittest.TestCase):
                         failed: list = []
 
                         def failing(body):
-                            if "archived" in json.dumps(body) and self.follows(body):
+                            if "reopen" in json.dumps(body) and self.follows(body):
                                 if status == 400 or not failed:
                                     failed.append(1)
                                     if isinstance(status, Exception):

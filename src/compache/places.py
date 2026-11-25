@@ -194,16 +194,39 @@ def over(under: dict, more: dict) -> dict:
 # -- agents --------------------------------------------------------------------------
 
 
+def _gemini_env(env: dict) -> Path | None:
+    """The first `.env` file Gemini CLI meets on its way up, or the user's where it meets none."""
+    here, names = Path.cwd(), (Path(".gemini") / ".env", ".env")
+    return _first((here, *here.parents, home(env)), names)
+
+
 def gemini(env: dict, words=()) -> list[Said]:
-    """The first `.env` file it meets on its way up, or the user's where it meets none."""
-    name, names = "GOOGLE_GEMINI_BASE_URL", (Path(".gemini") / ".env", ".env")
-    here = Path.cwd()
-    file = _first((here, *here.parents, home(env)), names)
+    name, file = "GOOGLE_GEMINI_BASE_URL", _gemini_env(env)
     if file is None:
         return []
     said = _in_env_file(file, name)
+    names = (Path(".gemini") / ".env", ".env")
     own = _real(file) in {_real(home(env) / n) for n in names}
     return [Said(file, "gemini", said, own, name)] if said else []
+
+
+def gemini_hint(env: dict) -> str | None:
+    """What to do where Gemini CLI takes no base URL: unattended, and its settings do not say how it signs in."""
+    file, folder = _gemini_env(env), home(env) / ".gemini"
+    for name in ("GOOGLE_GENAI_USE_GCA", "GOOGLE_GENAI_USE_VERTEXAI"):
+        if (env.get(name) or (_in_env_file(file, name) if file else "")) == "true":
+            return None
+    for settings in (folder / "settings.json", Path(".gemini") / "settings.json"):
+        try:
+            said = read(settings)
+        except Unclear:
+            return None
+        if at(said, "security", "auth", "selectedType") or said.get("selectedAuthType"):
+            return None
+    return (
+        "Gemini CLI refuses a base URL until its settings say how it signs in. Choose that in it once "
+        f'(/auth), or put {{"security": {{"auth": {{"selectedType": "gemini-api-key"}}}}}} into {folder / "settings.json"}'
+    )
 
 
 def qwen(env: dict, words=()) -> list[Said]:

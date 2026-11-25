@@ -45,6 +45,7 @@ from . import wire
 from .api import Policy
 from .learn import Learner
 from .models import binds_reasoning
+from .optimizer.parts import notice
 from .optimizer.recovery import REOPEN_TOOL
 from .quotes import Quotes, spoken
 from .record import Recorder, left_out
@@ -67,11 +68,12 @@ _REOPEN_TOOL = {
     "function": {
         "name": _REOPEN,
         "description": (
-            "Read text of this conversation that was archived to save space. An archived part "
+            "Read text of this conversation again that was cleared to save space. A cleared part "
             "shows a short notice with a reference such as ctx:1a2b3c in place of its text. Give "
             "that reference to read the part, or give a short distinctive phrase to search every "
-            "archived part for it. Use it whenever what you need is no longer visible, and before "
-            "telling the user that you do not have something."
+            "cleared part for it. Use it when a question needs something that is no longer visible, "
+            "and before telling the user that you do not have something. What you answered before "
+            "came from the full text: do not read it again to check that."
         ),
         "parameters": {
             "type": "object",
@@ -80,7 +82,7 @@ _REOPEN_TOOL = {
                     "type": "string",
                     "description": (
                         "The ctx: reference from a notice, or a few distinctive words to search "
-                        "the archived parts for."
+                        "the cleared parts for."
                     ),
                 },
                 "offset": {
@@ -94,17 +96,18 @@ _REOPEN_TOOL = {
     },
 }
 _REOPEN_HOW = (
-    "Earlier parts of this conversation may be archived to save space. An archived part shows a "
-    'notice like [Archived to save space. Call reopen("ctx:...") to read this part.] in place of '
-    "its text. Nothing is lost: an archived part is still part of the conversation, and the "
-    "reopen tool reads it. When a question needs something that is not visible, and always "
-    "before you tell the user that you do not have or cannot find something, call reopen: with "
-    "the reference from a notice to read that part, or with a few distinctive words to search "
-    "all archived parts. Then answer from what it returns. Do not reopen parts you do not need, "
-    "and never mention archiving, notices or the reopen tool to the user."
+    "Earlier parts of this conversation are cleared after a while to save space. You read each "
+    "of them in full when it came in, and what you answered then came from it: rely on your "
+    "earlier answers, and do not take them back or check them because the text is no longer "
+    f"shown. A cleared part shows a notice like {notice('ctx:...')} in place of its text, and the "
+    "reopen tool shows the text again. When a question needs something that is not visible, and "
+    "always before you tell the user that you do not have or cannot find something, call reopen: "
+    "with the reference from a notice to read that part, or with a few distinctive words to "
+    "search all cleared parts. Then answer from what it returns. Never mention notices, cleared "
+    "text or the reopen tool to the user."
 )
 _NOT_FOUND = (
-    "No archived part matches that. Try other or fewer distinctive words from the text you "
+    "No cleared part matches that. Try other or fewer distinctive words from the text you "
     "need, or the reference of a notice."
 )
 # What a model is shown of a fetched part: its text and where it goes on, not the names parts go by here.
@@ -126,9 +129,12 @@ _AGENT_TOOL = {
     "function": {
         "name": _REOPEN,
         "description": (
-            "Read back a tool result that was archived to save space. Its place shows a notice with "
-            "a reference such as ctx:1a2b3c. Use it when you need what is no longer visible, rather "
-            "than running the tool again."
+            "Old tool results are cleared from this conversation to save space, some steps after "
+            "you read them. In the place of a cleared result you see a notice with a reference "
+            "such as ctx:1a2b3c. You did read that result in full, and what you wrote right after "
+            "it comes from it: rely on that, and do not reopen results to check it. Call this "
+            "tool with the reference only when you need something from a result that you did "
+            "not write down, rather than running the other tool again."
         ),
         "parameters": {
             "type": "object",
@@ -656,19 +662,6 @@ def _link(chain: str, segment: _Segment) -> str:
 
 def _size(text: str) -> int:
     return len(text.encode("utf-8"))
-
-
-def _notice(placeholder: str) -> str:
-    """The session's notice in words a model acts on: the tool to call and what to give it.
-
-    It is exactly as long as the notice it stands for, so the sizes the policy counts on hold.
-    """
-    found = _HANDLE.search(placeholder)
-    if found is None:
-        return placeholder
-    return (
-        f'[Archived to save space. Call reopen("{found.group()}") to read this part.]'
-    )
 
 
 # What our tool returned for a notice, as the model reads it.
@@ -1982,14 +1975,12 @@ class Live:
         pending, name = conversation.pending, conversation.thread_id
         turn, out = pending.turn, body
         if turn.archived_ids:
-            notice = {
-                p.part_id: _notice(p.text)
-                for p in turn.parts
-                if p.part_id in turn.archived_ids
+            shown = {
+                p.part_id: p.text for p in turn.parts if p.part_id in turn.archived_ids
             }
             # Where the host runs our tool, what it returned stands among the results of the others.
             hosted = _REOPEN in dialect.tool_names(body)
-            known = set(notice.values())
+            known = {m.group() for m in map(_HANDLE.search, shown.values()) if m}
             for k, segment in enumerate(turns, 1):
                 pieces = [
                     (f"{name}:{k}:input", segment.inputs),
@@ -1999,17 +1990,17 @@ class Live:
                     part_id = f"{name}:{k}:retrieval:{j}"
                     pieces.append((part_id, found.slots))
                     of = _FETCHED.match(found.text) if hosted else None
-                    if of and part_id in notice and _notice(of[1]) in known:
+                    if of and part_id in shown and of[1] in known:
                         # A copy is no text of its own: the notice names what it is a copy of,
                         # as long as that is there.
-                        notice[part_id] = _notice(of[1])
+                        shown[part_id] = notice(of[1])
                 for part_id, slots in pieces:
-                    if part_id in notice and slots and slots[0].whole is not None:
-                        out = wire.put(out, slots[0].whole, notice[part_id])
-                    elif part_id in notice:
+                    if part_id in shown and slots and slots[0].whole is not None:
+                        out = wire.put(out, slots[0].whole, shown[part_id])
+                    elif part_id in shown:
                         for i, slot in enumerate(slots):
-                            shown = _GONE if i else notice[part_id]
-                            out = wire.set_text(dialect, out, slot.path, shown)
+                            text = _GONE if i else shown[part_id]
+                            out = wire.set_text(dialect, out, slot.path, text)
             conversation.reopens = True
         said = dialect.said_so_far(body)
         places = self._places(conversation, turns, scan)

@@ -87,6 +87,8 @@ class Agent:
     files_first: bool = False
     # What has to be on disk before it starts.
     needs: Callable[[], None] = lambda: None
+    # What may be why it failed without a single model call, for an environment.
+    hint: Callable[[dict], str | None] = lambda env: None
 
 
 # -- how agents are told ---------------------------------------------------------------
@@ -349,6 +351,7 @@ AGENTS = {
         _reading("gemini"),
         "gemini",
         places.gemini,
+        hint=places.gemini_hint,
     ),
     "qwen": Agent(
         "qwen",
@@ -548,7 +551,10 @@ def main(args) -> int:
         live.recorder = kept
     begun = time.monotonic()
     status = run(agent, words, live, port=args.port or 0, upstream=args.upstream)
-    if not args.quiet and not kept.calls and time.monotonic() - begun > _WHILE:
+    hint = agent.hint(dict(os.environ)) if status and not kept.calls else None
+    if hint and not args.quiet:
+        print(f"compache: {hint}", file=sys.stderr)
+    elif not args.quiet and not kept.calls and time.monotonic() - begun > _WHILE:
         print(
             "compache: no model call came through. If there were some, the agent has another place "
             "for them: compache doctor",
