@@ -145,6 +145,7 @@ class SkillTests(unittest.TestCase):
 
 class LinkTests(unittest.TestCase):
     LINK = re.compile(r"\]\((?!https?://|mailto:)([^)\s]+)\)")
+    IMAGE = re.compile(r'\b(?:src|srcset)="(?!https?://)([^"]+)"')
 
     @staticmethod
     def anchors(page):
@@ -164,7 +165,8 @@ class LinkTests(unittest.TestCase):
         ]
         self.assertGreater(len(pages), 10)
         for page in pages:
-            for target in self.LINK.findall(page.read_text("utf-8")):
+            text = page.read_text("utf-8")
+            for target in self.LINK.findall(text) + self.IMAGE.findall(text):
                 path, _, anchor = target.partition("#")
                 with self.subTest(page=str(page.relative_to(ROOT)), link=target):
                     found = (page.parent / path).resolve() if path else page
@@ -180,9 +182,25 @@ class LinkTests(unittest.TestCase):
             sys.path.pop(0)
         text = pypi_readme.absolute((ROOT / "README.md").read_text("utf-8"), "v1.2.3")
         self.assertEqual(self.LINK.findall(text), [])
+        self.assertEqual(self.IMAGE.findall(text), [])
         self.assertIn("/compache/v1.2.3/docs/assets/headline.svg)", text)
+        self.assertIn('/compache/v1.2.3/docs/assets/logo.svg"', text)
+        self.assertNotIn("logo-dark", text)
         self.assertIn("/compache/blob/v1.2.3/docs/guide.md)", text)
         self.assertNotIn("git+https", text)
+
+    def test_the_mark_is_the_same_wherever_it_is_drawn(self):
+        marks = set()
+        for path in (
+            "site/mark.svg",
+            "docs/assets/logo.svg",
+            "docs/assets/logo-dark.svg",
+            "docs/assets/icon.svg",
+            "docs/assets/preview.svg",
+        ):
+            drawing = (ROOT / path).read_text("utf-8")
+            marks.add(re.search(r'<path [^>]*d="([^"]+)"', drawing)[1])
+        self.assertEqual(len(marks), 1)
 
 
 if __name__ == "__main__":

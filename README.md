@@ -1,4 +1,9 @@
-# compache
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.svg">
+    <img src="docs/assets/logo.svg" alt="compache" width="260">
+  </picture>
+</h1>
 
 **Stop paying for your whole chat history on every message.**
 

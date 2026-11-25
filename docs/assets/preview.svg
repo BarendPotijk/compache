@@ -2,8 +2,8 @@
 <title id="t">compache cost calculator: Claude Sonnet 5.5, 8-turn threads, OpenClaw $208, compache $108 per 1,000 turns</title>
 <style>text{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;fill:#0b0b0b}.two{fill:#52514e}.c{fill:#2a78d6}.n{fill:#898781}</style>
 <rect width="1200" height="630" fill="#f9f9f7"/>
-<rect class="c" x="80" y="66" width="30" height="30" rx="8"/>
-<text x="126" y="94" font-size="36" font-weight="650">compache</text>
+<path class="c" transform="translate(77.5 59) scale(.65)" d="M60 20A17 17 0 0 0 43 3H21A17 17 0 0 0 4 20V44A17 17 0 0 0 21 61H43A17 17 0 0 0 60 44A2 2 0 0 0 58 42H50A2 2 0 0 0 48 44A5 5 0 0 1 43 49H21A5 5 0 0 1 16 44V20A5 5 0 0 1 21 15H43A5 5 0 0 1 48 20A2 2 0 0 0 50 22H58A2 2 0 0 0 60 20ZM24.2 32a4.3 4.3 0 1 0 8.6 0a4.3 4.3 0 1 0-8.6 0ZM36.95 32a4.3 4.3 0 1 0 8.6 0a4.3 4.3 0 1 0-8.6 0ZM49.7 32a4.3 4.3 0 1 0 8.6 0a4.3 4.3 0 1 0-8.6 0Z"/>
+<text x="130" y="94" font-size="36" font-weight="650">compache</text>
 <text x="80" y="186" font-size="58" font-weight="650">What would your long chats cost?</text>
 <text x="80" y="238" font-size="28" font-weight="400" class="two">Claude Sonnet 5.5 · 8-turn threads · 25k retrieved tokens per turn</text>
 <text x="80" y="296" font-size="24" font-weight="400" class="two">OpenClaw’s defaults</text>

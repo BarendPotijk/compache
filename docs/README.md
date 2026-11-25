@@ -11,3 +11,5 @@
 | [Benchmarks](../benchmarks/README.md) | DocChat, BEAM and LongDS: what the fit chose and what it saved. [Live runs](../benchmarks/live/README.md): what the provider billed through every way in. [Agents](../benchmarks/agents/README.md): Claude Code and Codex, live and modeled |
 
 Figures live in `assets/` and are drawn by `scripts/figures.py` from the data files in `assets/data/`.
+
+The logo is `assets/logo.svg`, on dark pages `assets/logo-dark.svg`, and as an icon `assets/icon.svg`. Its letters are [Onest](https://github.com/googlefonts/onest)'s (SIL Open Font License).

@@ -19,6 +19,8 @@ REPOSITORY = "BarendPotijk/compache"
 LINK = re.compile(
     r"(!?)\[((?:[^\[\]]|\[[^\[\]]*\])*)\]\((?!https?://|mailto:)([^)\s]+)\)"
 )
+# An image in HTML, `<img src="path">`.
+IMAGE = re.compile(r'(<img [^>]*?src=")(?!https?://)')
 
 
 def absolute(text: str, ref: str) -> str:
@@ -34,6 +36,9 @@ def absolute(text: str, ref: str) -> str:
         return f"{image}[{LINK.sub(spell, label)}]({base}{target})"
 
     text = LINK.sub(spell, text)
+    # PyPI's page is light whatever the reader's system is.
+    text = re.sub(r"\s*<source [^>]*>", "", text)
+    text = IMAGE.sub(rf"\1https://raw.githubusercontent.com/{REPOSITORY}/{ref}/", text)
     # On the package's own page, the package comes from there.
     return text.replace(
         f"pip install git+https://github.com/{REPOSITORY}", "pip install compache"
