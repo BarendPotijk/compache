@@ -97,9 +97,9 @@ compache wrap claude          # or codex, opencode, gemini, copilot, goose, or a
 
 An agent sends every tool result again with every call. compache keeps the newest ones in view, lets older ones go when that is cheap, keeps the cache through long tool runs and breaks, and fetches a result back when the model asks for it. It starts from what 174 public runs taught and goes on from your own sessions. There is nothing to set. [Agents](docs/agents.md)
 
-![Cost per 1,000 model calls on Claude Sonnet 5.5: one task at a stretch 5% less, a few steps with 4-minute breaks 29% less, three tasks with 4-minute breaks 23% less](docs/assets/agents-cost.svg)
+![What long sessions with Claude Code had cost after each prompt. One task in 13 prompts: alone $0.41, Headroom $0.40, Kompressor $0.28, compache $0.13. 17 issues in one conversation: alone $1.20 after 16 prompts, compache $0.22 after all 17](docs/assets/agents-live.svg)
 
-`compache stats` says what it saved. In your own agent it is one argument: `compache.wrap(client, learn="compache-record")`.
+As many tests passed and issues solved. Where the price does not jump with the size of a request, as on Claude Sonnet 5.5, it saves [5% to 43%](docs/agents.md#what-it-saves) by how an agent is worked with. `compache stats` says what it saved. In your own agent it is one argument: `compache.wrap(client, learn="compache-record")`.
 
 ## Works with
 
@@ -141,11 +141,13 @@ A fixed rule such as "keep the last 20 messages" or "summarize at 75% of the win
 | **GPT-6 Luna**, against the 30-minute cache | Live calls, billed, one integration | **2%&nbsp;to&nbsp;5%&nbsp;less** |
 | **Claude Sonnet 5.5**, against the 5-minute cache | DocChat, modeled cost | **43%&nbsp;to&nbsp;89%&nbsp;less** |
 | **Claude Sonnet 5.5**, against the 1-hour cache | DocChat, modeled cost | **30%&nbsp;to&nbsp;79%&nbsp;less** |
+| **Claude Code on Claude Haiku 5.5**, long sessions | Live sessions, billed | **67%&nbsp;to&nbsp;85%&nbsp;less** |
+| **Claude Code on Claude Haiku 5.5**, sessions of some 50 calls | Live sessions, billed | **16%&nbsp;less** |
 | **Coding agents on Claude Sonnet 5.5**, against the 5-minute cache | 174 public runs, modeled cost | **5%&nbsp;to&nbsp;43%&nbsp;less** |
 
 **It pays off most** in long chats with a lot of retrieved or tool text, where users pause longer than the cache lasts. **It pays off least** in short chats and where the cache outlasts the breaks: on GPT-6 Luna these users were always back in time, so there was little to save. If your app already uses Claude's 1-hour cache, the 1-hour row is yours: its writes cost more and its entries last longer, so there is less left to save, most of all in short chats. [The long cache](docs/comparisons.md#the-long-cache)
 
-**Answers hold up.** In every measurement, the number of right answers with and without compache differs by no more than chance. On GPT-6 Luna it was slightly lower, on too few messages to call. [Live runs](benchmarks/live/README.md) · [All benchmarks](benchmarks/README.md)
+**Answers hold up.** In every measurement, the number of right answers with and without compache differs by no more than chance, and as many issues and tasks are solved. On GPT-6 Luna it was slightly lower, on too few messages to call. [Live runs](benchmarks/live/README.md) · [All benchmarks](benchmarks/README.md)
 
 **What would you save?** Put your numbers in the [cost calculator](https://barendpotijk.github.io/compache/), or drop a chat log or a `policy.json` on it: it is read in your browser and sent nowhere. It compares with your own rules, other tools' defaults or what you pay now.
 
@@ -157,6 +159,6 @@ A fixed rule such as "keep the last 20 messages" or "summarize at 75% of the win
 | Keep the last N messages, or summarize at a threshold | N learned per kind of text, cuts timed to the cache, and trimmed text the model can fetch back |
 | OpenClaw or provider compaction at fixed thresholds | A setting fitted to your traffic. Modeled on Claude Sonnet 5.5, [48% to 54% cheaper than OpenClaw's defaults](docs/comparisons.md#openclaw) |
 | A cache tool such as caching.ai, or one-hour cache entries | Sending less. Modeled on document chats, [30% to 70% cheaper](docs/comparisons.md) than the cheapest cache setting alone |
-| Headroom or OptScale Kompressor | They shrink single tool results, compache decides which parts stay and when the cache is kept warm. Live on document chats, [36% and 26% cheaper](docs/comparisons.md#live) with the answers of the whole history |
+| Headroom or OptScale Kompressor | They shrink single tool results, compache decides which parts stay and when the cache is kept warm. Live, with as many answers right: on document chats [36% and 26% cheaper](docs/comparisons.md#live), on a long session with Claude Code [66% and 53%](docs/comparisons.md#coding-agents) |
 
 [Guide](docs/guide.md) · [Integrations](docs/integrations.md) · [How it works](docs/how-it-works.md) · [Other tools compared](docs/comparisons.md) · [Calculator](https://barendpotijk.github.io/compache/) · [Issues](https://github.com/BarendPotijk/compache/issues) · [Apache-2.0](LICENCE.md)

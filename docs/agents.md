@@ -77,7 +77,11 @@ session.complete(turn, answer, usage=response.usage)
 
 ## What it saves
 
-Modeled on the public runs, fitted on half of them and priced on the other half, against sending everything on the provider's default cache.
+![What long sessions with Claude Code on Claude Haiku 5.5 had cost after each prompt: alone $0.41 and $1.20, with compache $0.13 and $0.22](assets/agents-live.svg)
+
+Live, 67% and 85% less on long sessions and 16% less on sessions of some fifty calls, with as many solved. [Agent benchmarks](../benchmarks/agents/README.md): real sessions with Claude Code and Codex next to Headroom and Kompressor, and the numbers below.
+
+Modeled on the public runs, fitted on half of them and priced on the other half, against sending everything on the provider's default cache:
 
 | | Claude Sonnet 5.5 | Claude Haiku 5.5 | GPT-6 Luna |
 |:--|:-:|:-:|:-:|
@@ -92,5 +96,3 @@ Modeled on the public runs, fitted on half of them and priced on the other half,
 - **Long sessions on Haiku** pass 100,000 tokens, where its list price is five times higher. A cut keeps them below.
 - **Short sessions save nothing.** A task that is done in ten calls has nothing to trim, and compache's tool costs it 1%.
 - **About 1 call in 85** fetches something back.
-
-[Agent benchmarks](../benchmarks/agents/README.md): these numbers, and real sessions with Claude Code and Codex next to Headroom and Kompressor.

@@ -412,7 +412,7 @@ def sessions(data):
         "compache": "compache",
     }
     width, height = 880, 372
-    left, right, top, bottom, gap = 62, 126, 116, 56, 188
+    left, right, top, bottom, gap = 62, 134, 116, 56, 186
     panel = (width - left - right - gap) / 2
     plot, base = height - top - bottom, height - bottom
     body = [
