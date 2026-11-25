@@ -605,10 +605,17 @@ class OwnFilesTests(Told):
         (self.home / "work/.claude/settings.local.json").unlink()
         self.put("main/.git/worktrees/one/HEAD", "ref: refs/heads/one\n")
         self.put("main/.claude/settings.local.json", other)
-        link = f"gitdir: {self.home / 'main' / '.git' / 'worktrees' / 'one'}\n"
-        self.put("work/project/.git", link)
-        with self.assertRaisesRegex(ValueError, "main.\\.claude.settings.local"):
-            self.told("claude")
+        for link in (
+            self.home / "main" / ".git" / "worktrees" / "one",
+            Path("..", "..", "main", ".git", "worktrees", "one"),
+        ):
+            self.put("work/project/.git", f"gitdir: {link}\n")
+            with self.assertRaisesRegex(ValueError, "main.\\.claude.settings.local"):
+                self.told("claude")
+        # A submodule is a repository of its own.
+        self.put("work/project/.git", "gitdir: ../../main/.git/modules/one\n")
+        self.assertEqual(self.told("claude")[2], {})
+        self.put("work/project/.git", f"gitdir: {link}\n")
         (self.home / "main/.claude/settings.local.json").unlink()
         self.assertEqual(self.told("claude")[2], {})
 

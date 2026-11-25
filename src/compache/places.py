@@ -147,9 +147,10 @@ def _above(place: Path) -> tuple[list[Path], Path | None]:
         if os.path.isfile(git):
             # A worktree: its file names a folder of the main checkout's own.
             named = re.search(r"^gitdir:\s*(.+?)\s*$", text(git), re.M)
-            inside = re.split(r"[/\\]\.git[/\\]", named[1])[0] if named else ""
-            if inside and os.path.isdir(inside):
-                return found[: k + 1], Path(inside)
+            inside = os.path.normpath(folder / named[1]) if named else ""
+            main, worktree, _ = inside.replace("\\", "/").partition("/.git/worktrees/")
+            if worktree and os.path.isdir(main):
+                return found[: k + 1], Path(main)
         return found[: k + 1], None
     return found, None
 
