@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import json
 import threading
 import time
@@ -40,6 +41,7 @@ __all__ = ["Policy", "Session", "Turn", "fit", "replay"]
 
 _HORIZON_SECONDS = 86400
 _CHAT = "compache-workload-planner-v1"
+_SESSIONS = itertools.count(1)
 # Characters an agent reads back at once: the whole of most tool results.
 _AGENT_PAGE = 32_000
 
@@ -689,9 +691,11 @@ class Session:
         if policy.agentic:
             self._engine = agent.AgentEngine(policy.artifact, thread_id)
         else:
+            # Two sessions of one name know nothing of each other, as in a server that makes one a request.
+            mine = str(next(_SESSIONS))
             self._engine = WorkloadSession(
                 policy._compiled,
-                CacheScope("compache", "declared", self._model, thread_id),
+                CacheScope("compache", "declared", self._model, thread_id, mine),
                 policy._checker,
             )
         self._history: list[Source] = []

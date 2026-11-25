@@ -1229,6 +1229,36 @@ class BoundReasoningTests(unittest.TestCase):
         self.more(app, 3)
         self.assertEqual(app.live.stats["retried"], 0)
 
+    def test_cache_marks_that_move_change_nothing(self):
+        """Wherever an application puts them: on a result, or on the text within one."""
+
+        class Marking(Claude):
+            within = False
+
+            def body(self, stream):
+                body = json.loads(json.dumps(super().body(stream)))
+                for message in body["messages"]:
+                    content = message["content"]
+                    for block in content if isinstance(content, list) else ():
+                        if block["type"] == "tool_result":
+                            text = {"type": "text", "text": block["content"]}
+                            block["content"] = [text]
+                last = body["messages"][-1]["content"]
+                if isinstance(last, list):
+                    marked = last[-1]["content"][-1] if self.within else last[-1]
+                    marked["cache_control"] = {"type": "ephemeral"}
+                return body
+
+        for within in (False, True):
+            with self.subTest(within=within):
+                app, model, _, _ = self.working()
+                app.shape = Marking()
+                app.shape.within = within
+                app.shape.ask("Work")
+                app.live = compache.Live(policy(30, spec=self.SPEC), clock=app.clock)
+                self.read(app, 7)
+                self.assertEqual(self.held(model.bodies[-1]), list(range(6)))
+
     def test_older_models_keep_theirs(self):
         app, model = self.play(5, 4, shape=OldClaude(), model=FakeModel())
         self.assertEqual(len(self.held(model.bodies[-1])), 4)

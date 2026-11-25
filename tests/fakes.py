@@ -283,13 +283,9 @@ class FakeModel:
                 elif block.get("type") == "tool_result":
                     inner = block.get("content")
                     texts.append(inner if isinstance(inner, str) else json.dumps(inner))
-                blocks.append(
-                    [
-                        message["role"],
-                        {k: v for k, v in block.items() if k != "cache_control"},
-                    ]
-                )
-                if "cache_control" in block:
+                # A mark may stand on the block, or on one within a result.
+                blocks.append([message["role"], unmarked(block)])
+                if blocks[-1][1] != block:
                     marks.append(len(blocks) - 1)
         head = [body.get("tools"), body.get("system"), body.get("output_config")]
         head = unmarked(head)

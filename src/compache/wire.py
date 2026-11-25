@@ -115,13 +115,21 @@ def _unmarked(value: Any) -> Any:
     return {k: v for k, v in value.items() if k != "cache_control"}
 
 
+def _block(block: Any) -> Any:
+    if not isinstance(block, dict):
+        return block
+    block = _unmarked(block)
+    if isinstance(block.get("content"), list):
+        # A result's own blocks may have marks too.
+        block["content"] = [_block(b) for b in block["content"]]
+    return block
+
+
 def _blocks_of(content: Any) -> Any:
     """Content as the provider reads it: without cache marks, and a string as the one text it is."""
     if isinstance(content, str):
         return [{"type": "text", "text": content}]
-    if isinstance(content, list):
-        return [_unmarked(b) if isinstance(b, dict) else b for b in content]
-    return content
+    return [_block(b) for b in content] if isinstance(content, list) else content
 
 
 def _hashed(value: Any) -> str:
@@ -732,7 +740,17 @@ class OpenAIChat:
             for call in message.get("tool_calls") or ()
             if call.get("id") in results
         ]
-        reasoned = {k: message[k] for k in _REASONING if message.get(k)}
+        # What has a name or a signature is in the application's own message, and may be there once
+        # only, unless it belongs to one of these calls.
+        plain = ("reasoning_content", "reasoning")
+        reasoned = {k: message[k] for k in plain if message.get(k)}
+        named = [
+            part
+            for part in message.get("reasoning_details") or ()
+            if isinstance(part, dict) and part.get("id") in results
+        ]
+        if named:
+            reasoned["reasoning_details"] = named
         return [
             {"role": "assistant", "content": None, "tool_calls": calls, **reasoned},
             *(

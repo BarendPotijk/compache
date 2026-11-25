@@ -1067,6 +1067,93 @@ class LeftTests(unittest.TestCase):
         self.assertEqual(waits.pending.in_flight, 0)
 
 
+class ReasoningItemTests(unittest.TestCase):
+    """What a reply reasoned goes out once, however much of that reply the application sees."""
+
+    @staticmethod
+    def call(name, k, arguments="{}"):
+        function = {"name": name, "arguments": arguments}
+        return {"id": f"call_{k}{name:a<20}", "type": "function", "function": function}
+
+    def play(self, stream, beside, part):
+        """Six calls that reason. The fifth looks back. Returns what the last request holds."""
+        live, app, sent = compache.Live(policy(rounds=2)), Chat(), []
+        app.ask("Go")
+
+        def send(body):
+            sent.append(body)
+            k = len(sent)
+            calls = [self.call("read", k)]
+            if k == 5:
+                handle = NOTICE.search(json.dumps(body["messages"])).group()
+                looks = self.call(REOPEN, k, json.dumps({"reference": handle}))
+                calls = [looks, *calls] if beside else [looks]
+            message = {"role": "assistant", "content": None, "tool_calls": calls}
+            message["reasoning_details"] = [part(k, calls[0]["id"])]
+            usage = {
+                "prompt_tokens": len(json.dumps(body)) // 4,
+                "completion_tokens": 5,
+            }
+            if not body.get("stream"):
+                choice = {"index": 0, "message": message, "finish_reason": "tool_calls"}
+                return Result(200, json={"choices": [choice], "usage": usage})
+            deltas = [{"reasoning_details": message["reasoning_details"]}]
+            deltas += [
+                {"tool_calls": [{**call, "index": i}]} for i, call in enumerate(calls)
+            ]
+            data = [{"choices": [{"index": 0, "delta": d}]} for d in deltas]
+            last = {"index": 0, "delta": {}, "finish_reason": "tool_calls"}
+            data.append({"choices": [last], "usage": usage})
+            return Result(200, events=iter([*map(sse, data), b"data: [DONE]\n\n"]))
+
+        for k in range(6):
+            answered = live.exchange(Chat.path, app.body(stream), send, thread="t")
+            if answered.events is None:
+                message = answered.json["choices"][0]["message"]
+            else:
+                events = [d for _, _, d in wire.sse_events(answered.events) if d]
+                message = Chat.gathered(events)["choices"][0]["message"]
+                message["reasoning_details"] = [
+                    found
+                    for data in events
+                    for found in data["choices"][0]["delta"].get("reasoning_details")
+                    or ()
+                ]
+            app.said.append(message)
+            app.answer([(call["id"], result(k)) for call in message["tool_calls"]])
+        self.assertEqual(live.stats["reopened"], 1)
+        return len(sent), sent[-1]["messages"]
+
+    def test_each_item_once(self):
+        def item(k, call):
+            return {"type": "reasoning.encrypted", "id": f"rs_{k}", "data": "x" * 40}
+
+        for stream in (False, True):
+            for beside in (False, True):
+                with self.subTest(stream=stream, beside=beside):
+                    count, said = self.play(stream, beside, item)
+                    held = json.dumps(said)
+                    for k in range(1, count):
+                        self.assertEqual(held.count(f'"rs_{k}"'), 1, k)
+
+    def test_what_belongs_to_a_call_of_ours_stays_with_it(self):
+        """As the signature that Gemini wants back with every call."""
+
+        def signature(k, call):
+            return {"type": "reasoning.encrypted", "id": call, "data": "x" * 40}
+
+        for stream in (False, True):
+            _, said = self.play(stream, True, signature)
+            (ours,) = (
+                m
+                for m in said
+                if REOPEN in json.dumps(m.get("tool_calls") or "")
+                and m["role"] == "assistant"
+            )
+            names = {part["id"] for part in ours["reasoning_details"]}
+            self.assertEqual(names, {ours["tool_calls"][0]["id"]})
+
+
 class FailTests(unittest.TestCase):
     """What compache sends of its own may fail, and then the application has to hear what it needs to."""
 

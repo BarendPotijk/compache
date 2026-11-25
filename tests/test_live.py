@@ -1408,6 +1408,23 @@ class LifetimeTests(unittest.TestCase):
         self.assertEqual([self.marks(b) for b in model.bodies], [[], []])
 
 
+class SharedPolicyTests(unittest.TestCase):
+    def test_one_policy_in_a_live_of_its_own_for_every_request(self):
+        """As a server does that wraps a client in each request it handles."""
+        chosen, clock, said = fitted("gpt-6-luna"), Clock(1_800_000_000.0), []
+        model = FakeModel(clock=clock)
+        for k in range(5):
+            said.append({"role": "user", "content": f"Question {k}"})
+            live = Live(chosen, clock=clock)
+            body = {"model": "gpt-6-luna", "messages": said}
+            answered = live.exchange(
+                "/v1/chat/completions", body, model.send(), thread="t"
+            )
+            said.append(answered.json["choices"][0]["message"])
+            clock.at += 10
+            self.assertEqual(live.stats["stood_down"], 0)
+
+
 class ApartTests(unittest.TestCase):
     def test_a_note_asked_apart_leaves_the_reply_s_request_untouched(self):
         def script(request):
