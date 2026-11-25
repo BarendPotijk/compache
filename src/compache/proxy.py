@@ -29,7 +29,9 @@ import io
 import json
 import logging
 import os
+import re
 import ssl
+import sys
 import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -105,6 +107,23 @@ def _family(path: str, headers, other: str = "openai") -> str:
     ):
         return "gemini"
     return other
+
+
+# What the keys of a provider look like. Any other is for another server, such as a gateway.
+_KEYS = {
+    "openai": re.compile(r"T3BlbkFJ|^sk-(?:proj|svcacct|admin)-"),
+    "anthropic": re.compile(r"^sk-ant-"),
+    "gemini": re.compile(r"^(?:AIza|AQ\.|ya29\.)"),
+}
+
+
+def _elsewhere(api: str, headers, path: str) -> bool:
+    """Whether a request's key is none of the provider's whose API it speaks."""
+    query = urllib.parse.parse_qs(urllib.parse.urlsplit(path).query)
+    keys = [headers.get("authorization", "").removeprefix("Bearer ").strip()]
+    keys += [headers.get(name, "") for name in ("x-api-key", "x-goog-api-key")]
+    keys = [k for k in (*keys, *query.get("key", ())) if k]
+    return bool(keys) and not any(_KEYS[api].search(k) for k in keys)
 
 
 def _decoded(raw: bytes, encoding: str | None) -> bytes:
@@ -261,7 +280,8 @@ def serve(
     `openai`, `anthropic` or `gemini`. `server.live` is the `Live`.
     """
     targets = {**DEFAULTS, **(upstreams or {})}
-    forward = {"all": upstream, "other": "openai"}
+    forward: dict = {"all": upstream, "other": "openai", "known": set(DEFAULTS)}
+    forward["told"] = set()
 
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -334,6 +354,10 @@ def serve(
             headers = {k.lower(): v for k, v in self.headers.items()}
             speaks = _family(self.path, headers, forward["other"])
             base = forward["all"] or targets[speaks]
+            if speaks not in forward["known"] and _elsewhere(
+                speaks, headers, self.path
+            ):
+                return self._refuse(speaks, base)
             if base in DEFAULTS.values() and self.path.startswith(_UNVERSIONED):
                 # SDKs differ in whether a base URL holds the version. Their providers do not.
                 self.path = "/v1" + self.path
@@ -382,6 +406,19 @@ def serve(
             )
             self._answer(result.status, result.headers, content)
 
+        def _refuse(self, speaks: str, base: str):
+            """Where a key belongs is not known, so it goes nowhere."""
+            message = (
+                f"compache: this key does not look like one for {base}, so it was not sent there. Say "
+                "where it belongs: compache wrap --upstream URL ..."
+            )
+            if speaks not in forward["told"]:
+                forward["told"].add(speaks)
+                print(message, file=sys.stderr, flush=True)
+            said = {"type": "permission_error", "message": message}
+            body = json.dumps({"type": "error", "error": said}).encode()
+            self._answer(403, [("Content-Type", "application/json")], body)
+
         def _guarded(self):
             try:
                 self._handle()
@@ -414,13 +451,22 @@ def serve(
             pass
 
         @staticmethod
-        def forward(everything: str | None, named: dict, other: str = "openai") -> None:
+        def forward(
+            everything: str | None,
+            named: dict,
+            other: str = "openai",
+            careful: bool = False,
+        ) -> None:
             """Where requests go on to, once that is known: one base URL, or one by API.
 
-            `other` is the API of those that do not say which they speak.
+            `other` is the API of those that do not say which they speak. Where it
+            has to be `careful`, the providers' own addresses get only their own keys.
             """
             forward["all"], forward["other"] = everything, other
             targets.update(named)
+            forward["known"] = (
+                set(named) if careful and not everything else set(DEFAULTS)
+            )
 
     server = Server((host, port), Handler)
     server.live = live

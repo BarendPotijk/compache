@@ -10,11 +10,18 @@ permissions:
 
 jobs:
   package:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     strategy:
+      fail-fast: false
       matrix:
-        python-version: ['3.11', '3.13']
+        os: [ubuntu-latest]
+        python-version: ['3.11', '3.13', '3.14']
+        include:
+          - os: macos-latest
+            python-version: '3.13'
+          - os: windows-latest
+            python-version: '3.13'
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v5
@@ -36,7 +43,7 @@ jobs:
       - name: Install
         run: python -m pip install . pytest openai anthropic google-genai langchain langchain-openai langgraph litellm
       - name: Test
-        run: python -m pytest -q tests/test_wrap.py tests/test_litellm.py
+        run: python -m pytest -q tests/test_wrap.py tests/test_litellm.py tests/test_langchain.py
   calculator:
     runs-on: ubuntu-latest
     timeout-minutes: 10

@@ -45,15 +45,33 @@ sys.exit(7)
 """
 
 
-class SetupTests(unittest.TestCase):
-    """What each agent is told, and where its requests go on to."""
+class Told(unittest.TestCase):
+    """A home and a project of its own, so that no agent's files are there but those of the test."""
+
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.home = Path(folder.name).resolve()
+        self.project = self.home / "work" / "project"
+        self.project.mkdir(parents=True)
+        self.addCleanup(os.chdir, os.getcwd())
+        os.chdir(self.project)
+
+    def put(self, path, text):
+        file = self.home / path
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.write_text(text if isinstance(text, str) else json.dumps(text))
 
     def told(self, name, env=None):
         return launch.prepared(
             launch.AGENTS[name],
             "http://127.0.0.1:9999",
-            {"HOME": "/none", **(env or {})},
+            {"HOME": str(self.home), **(env or {})},
         )
+
+
+class SetupTests(Told):
+    """What each agent is told, and where its requests go on to."""
 
     def test_claude_code(self):
         changes, ahead, upstreams = self.told("claude")
@@ -195,14 +213,42 @@ class SetupTests(unittest.TestCase):
 
     def test_goose_s_own_hosts_are_where_its_requests_go_on_to(self):
         changes, _, upstreams = self.told(
-            "goose",
-            {
-                "OPENAI_HOST": "https://gateway.example",
-                "OPENAI_BASE_URL": "https://others.example/v1",
-            },
+            "goose", {"OPENAI_HOST": "https://gateway.example/openai"}
         )
-        self.assertEqual(changes["OPENAI_HOST"], "http://127.0.0.1:9999")
+        self.assertEqual(changes["OPENAI_HOST"], "http://127.0.0.1:9999/openai")
         self.assertEqual(upstreams, {"openai": "https://gateway.example"})
+        changes, _, upstreams = self.told(
+            "goose", {"OPENAI_BASE_URL": "https://gateway.example/v1"}
+        )
+        self.assertEqual(changes["OPENAI_BASE_URL"], "http://127.0.0.1:9999/v1")
+        self.assertEqual(upstreams, {"openai": "https://gateway.example"})
+        both = {"OPENAI_HOST": "https://one.example"}
+        with self.assertRaisesRegex(ValueError, "different things"):
+            self.told("goose", {**both, "OPENAI_BASE_URL": "https://two.example/v1"})
+
+    def test_what_an_agent_does_not_read_says_nothing_of_it(self):
+        """LiteLLM's variables are for what LiteLLM calls."""
+        for name in ("claude", "opencode", "qwen", "gemini", "pi"):
+            _, _, upstreams = self.told(
+                name,
+                {
+                    "ANTHROPIC_API_BASE": "https://others.example",
+                    "OPENAI_API_BASE": "https://others.example/v1",
+                },
+            )
+            self.assertEqual(upstreams, {}, name)
+        _, _, upstreams = self.told(
+            "aider", {"ANTHROPIC_API_BASE": "https://gateway.example"}
+        )
+        self.assertEqual(upstreams, {"anthropic": "https://gateway.example"})
+        _, found, _ = launch._given(["--", "my-agent"])
+        changes, _, upstreams = launch.prepared(
+            found, "http://127.0.0.1:9999", {"OPENAI_API_BASE": "https://one.example"}
+        )
+        self.assertEqual(upstreams, {})
+        self.assertNotIn("OPENAI_API_BASE", changes)
+        with self.assertRaisesRegex(ValueError, "OPENAI_API_ENDPOINT"):
+            self.told("crush", {"OPENAI_BASE_URL": "https://gateway.example/v1"})
 
     def test_behind_a_proxy_of_the_machine_s_this_one_is_reached_directly(self):
         self.assertNotIn("NO_PROXY", self.told("claude")[0])
@@ -306,6 +352,231 @@ class SetupTests(unittest.TestCase):
         self.assertEqual((name, found.command), ("codex", "/opt/bin/codex"))
         with self.assertRaises(ValueError):
             launch._given([])
+
+
+class OwnFilesTests(Told):
+    """Where an agent's own files name a server, its requests and its key go on to that."""
+
+    GATEWAY = "https://gateway.example"
+
+    def test_files_that_name_a_server(self):
+        cases = (
+            (
+                "qwen",
+                ".qwen/.env",
+                "OPENAI_API_KEY=k\nexport OPENAI_BASE_URL='{0}/mode/v1'\n",
+                {"openai": self.GATEWAY},
+                ("OPENAI_BASE_URL", "/mode/v1"),
+            ),
+            (
+                "qwen",
+                ".qwen/settings.json",
+                '{{"security": {{"auth": {{"baseUrl": "{0}/v1"}}}}}}',
+                {"openai": self.GATEWAY},
+                ("OPENAI_BASE_URL", "/v1"),
+            ),
+            (
+                "gemini",
+                ".gemini/.env",
+                "GOOGLE_GEMINI_BASE_URL={0}\n",
+                {"gemini": self.GATEWAY},
+                ("GOOGLE_GEMINI_BASE_URL", ""),
+            ),
+            (
+                "goose",
+                ".config/goose/config.yaml",
+                "GOOSE_PROVIDER: openai\nOPENAI_HOST: {0}/x\n",
+                {"openai": self.GATEWAY},
+                ("OPENAI_HOST", "/x"),
+            ),
+            (
+                "goose",
+                ".config/goose/config.yaml",
+                'OPENAI_BASE_URL: "{0}/v1"\n',
+                {"openai": self.GATEWAY},
+                ("OPENAI_BASE_URL", "/v1"),
+            ),
+            (
+                "openhands",
+                ".openhands/agent_settings.json",
+                '{{"llm": {{"model": "litellm_proxy/x", "base_url": "{0}/v1"}}}}',
+                {"openai": self.GATEWAY, "anthropic": self.GATEWAY},
+                ("LLM_BASE_URL", "/v1"),
+            ),
+        )
+        for name, path, text, goes, (variable, behind) in cases:
+            with self.subTest(agent=name, file=path):
+                self.put(path, text.format(self.GATEWAY))
+                changes, _, upstreams = self.told(name)
+                self.assertEqual(upstreams, goes)
+                self.assertEqual(changes[variable], "http://127.0.0.1:9999" + behind)
+                (self.home / path).unlink()
+
+    def test_what_is_in_the_environment_comes_first(self):
+        self.put(".config/goose/config.yaml", "OPENAI_HOST: https://others.example\n")
+        _, _, upstreams = self.told("goose", {"OPENAI_HOST": self.GATEWAY})
+        self.assertEqual(upstreams, {"openai": self.GATEWAY})
+
+    def test_opencode_s_configuration(self):
+        self.put(
+            ".config/opencode/opencode.jsonc",
+            """{
+              // which may hold comments, and "https://in.a.string" that is none
+              "provider": {
+                "openai": {"options": {"baseURL": "https://one.example/v1", "apiKey": "k"}},
+                "anthropic": {"options": {"baseURL": "{env:OURS}/v1"},},
+              }, /* and commas */
+            }""",
+        )
+        changes, _, upstreams = self.told("opencode", {"OURS": self.GATEWAY})
+        self.assertEqual(
+            upstreams, {"openai": "https://one.example", "anthropic": self.GATEWAY}
+        )
+        told = json.loads(changes["OPENCODE_CONFIG_CONTENT"])["provider"]
+        bases = {name: own["options"]["baseURL"] for name, own in told.items()}
+        self.assertEqual(
+            bases,
+            {
+                "openai": "http://127.0.0.1:9999/v1",
+                "anthropic": "http://127.0.0.1:9999/v1",
+                "google": "http://127.0.0.1:9999/v1beta",
+            },
+        )
+        # A project's comes after the user's.
+        options = {"options": {"baseURL": "https://two.example/v1"}}
+        self.put("work/opencode.json", {"provider": {"openai": options}})
+        self.assertEqual(self.told("opencode")[2]["openai"], "https://two.example")
+        self.put("work/opencode.json", "{ not json")
+        with self.assertRaisesRegex(ValueError, "could not be read"):
+            self.told("opencode")
+
+    def test_opencode_s_variables_hold_the_version(self):
+        changes, _, upstreams = self.told(
+            "opencode", {"ANTHROPIC_BASE_URL": self.GATEWAY + "/v1"}
+        )
+        self.assertEqual(upstreams, {"anthropic": self.GATEWAY})
+        told = json.loads(changes["OPENCODE_CONFIG_CONTENT"])["provider"]
+        self.assertEqual(
+            told["anthropic"]["options"]["baseURL"], "http://127.0.0.1:9999/v1"
+        )
+
+    def test_pi_s_models(self):
+        providers = {"anthropic": {"baseUrl": self.GATEWAY + "/a", "apiKey": "k"}}
+        self.put(".pi/agent/models.json", {"providers": providers})
+        before = os.environ.get("COMPACHE_HOME")
+        os.environ["COMPACHE_HOME"] = str(self.home / "kept")
+        try:
+            changes, _, upstreams = self.told("pi")
+        finally:
+            os.environ.pop("COMPACHE_HOME")
+            if before is not None:
+                os.environ["COMPACHE_HOME"] = before
+        self.assertEqual(upstreams, {"anthropic": self.GATEWAY})
+        bases = json.loads(changes["COMPACHE_BASES"])
+        self.assertEqual(bases["anthropic"], "http://127.0.0.1:9999/a")
+        self.assertEqual(bases["openai"], "http://127.0.0.1:9999/v1")
+
+    def test_claude_code_s_settings_come_before_its_environment(self):
+        settings = {"env": {"ANTHROPIC_BASE_URL": self.GATEWAY + "/api"}}
+        self.put(".claude/settings.json", settings)
+        _, ahead, upstreams = self.told("claude")
+        self.assertEqual(upstreams, {"anthropic": self.GATEWAY})
+        self.assertEqual(ahead[0], "--settings")
+        base = json.loads(ahead[1])["env"]["ANTHROPIC_BASE_URL"]
+        self.assertEqual(base, "http://127.0.0.1:9999/api")
+
+    def test_a_project_s_file_is_not_followed(self):
+        """It may come with somebody else's repository."""
+        self.put("work/project/.qwen/.env", f"OPENAI_BASE_URL={self.GATEWAY}/v1\n")
+        with self.assertRaisesRegex(ValueError, "OPENAI_BASE_URL"):
+            self.told("qwen")
+        _, _, upstreams = self.told("qwen", {"OPENAI_BASE_URL": "https://one.example"})
+        self.assertEqual(upstreams, {"openai": "https://one.example"})
+        # It is the only one that is read, so one that says nothing leaves nothing said.
+        self.put("work/project/.qwen/.env", "OTHER=1\n")
+        self.put(".qwen/.env", f"OPENAI_BASE_URL={self.GATEWAY}/v1\n")
+        self.assertEqual(self.told("qwen")[2], {})
+
+    def test_codex_on_a_provider_of_its_own(self):
+        self.put(".codex/config.toml", 'model_provider = "ollama"\n')
+        with self.assertRaisesRegex(ValueError, "ollama"):
+            self.told("codex", {"OPENAI_API_KEY": "sk-x"})
+
+    def test_openhands_on_openrouter(self):
+        changes, _, upstreams = self.told(
+            "openhands", {"LLM_MODEL": "openrouter/qwen/qwen3-coder"}
+        )
+        self.assertEqual(upstreams["openai"], "https://openrouter.ai")
+        self.assertEqual(changes["LLM_BASE_URL"], "http://127.0.0.1:9999/api/v1")
+
+
+class KeyTests(unittest.TestCase):
+    """A key that is none of a provider's does not go to that provider because nothing else is known."""
+
+    def setUp(self):
+        self.model = FakeModel(lambda request: {"text": "Hello."})
+        self.url, stop = serve(self.model)
+        self.addCleanup(stop)
+        before = dict(proxy.DEFAULTS)
+        self.addCleanup(proxy.DEFAULTS.update, before)
+        proxy.DEFAULTS.update({api: self.url for api in before})
+        self.server = proxied(compache.Live(), port=0, pings=False)
+        self.addCleanup(self.server.server_close)
+        self.addCleanup(self.server.shutdown)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.base = f"http://127.0.0.1:{self.server.server_address[1]}"
+
+    def ask(self, path, headers, body=None):
+        body = body or {"model": "m", "messages": [{"role": "user", "content": "Hi"}]}
+        request = urllib.request.Request(
+            self.base + path,
+            json.dumps({"max_tokens": 9, **body}).encode(),
+            {"Content-Type": "application/json", **headers},
+        )
+        try:
+            with urllib.request.urlopen(request) as reply:
+                return reply.status, json.load(reply)
+        except urllib.error.HTTPError as error:
+            return error.code, json.load(error)
+
+    def test_only_its_own_keys_go_to_a_provider(self):
+        self.server.forward(None, {}, "openai", careful=True)
+        chat, claude = "/v1/chat/completions", "/v1/messages"
+        gemini = "/v1beta/models/g:generateContent"
+        asks = {"contents": [{"role": "user", "parts": [{"text": "Hi"}]}]}
+        with contextlib.redirect_stderr(io.StringIO()) as said:
+            for path, headers, goes in (
+                (chat, {"Authorization": "Bearer sk-abcT3Blbk" + "FJdef"}, True),
+                (chat, {"Authorization": "Bearer sk-proj-abc"}, True),
+                (chat, {"Authorization": "Bearer sk-or-v1-abc"}, False),
+                (chat, {"Authorization": "Bearer sk-1234"}, False),
+                (chat, {}, True),
+                (claude, {"x-api-key": "sk-ant-api03-abc"}, True),
+                (claude, {"Authorization": "Bearer sk-ant-oat01-abc"}, True),
+                (claude, {"x-api-key": "sk-GATEWAY"}, False),
+                (claude, {"Authorization": "Bearer corp-token"}, False),
+                (gemini, {"x-goog-api-key": "AIzaabc"}, True),
+                (gemini, {"x-goog-api-key": "corp"}, False),
+                (gemini + "?key=corp", {}, False),
+            ):
+                before = len(self.model.bodies)
+                body = asks if path.startswith("/v1beta") else None
+                status, reply = self.ask(path, headers, body)
+                self.assertEqual(status, 200 if goes else 403, (path, headers))
+                self.assertEqual(len(self.model.bodies) - before, int(goes))
+                if not goes:
+                    self.assertIn("--upstream", reply["error"]["message"])
+        # Said once for each.
+        self.assertEqual(said.getvalue().count("does not look like one"), 3)
+
+    def test_where_it_is_known_where_they_go_any_key_goes(self):
+        key = {"Authorization": "Bearer sk-1234"}
+        for everything, named in ((None, {"openai": self.url}), (self.url, {})):
+            self.server.forward(everything, named, "openai", careful=True)
+            self.assertEqual(self.ask("/v1/chat/completions", key)[0], 200)
+        # And a proxy that somebody set up takes what it is sent.
+        self.server.forward(None, {})
+        self.assertEqual(self.ask("/v1/chat/completions", key)[0], 200)
 
 
 class Wrapped(unittest.TestCase):
