@@ -17,11 +17,11 @@ What an agent's calls cost with and without compache: live with Claude Code and 
 | After 16 prompts | $1.20, 11 right | | | **$0.19**, 11 right |
 | **Sessions of five or six issues**, Claude Code | $0.059 | $0.056 | $0.055 | **$0.050** |
 | Right, of 34 | 26 | 27 | 22 | 24 |
-| **The same**, Codex | $0.033 | $0.029 | $0.038 |  |
-| Right, of 34 | 20 | 20 | 19 |  |
+| **The same**, Codex | $0.033 | $0.029 | $0.038 | $0.029 |
+| Right, of 34 | 20 | 20 | 19 | 21 |
 
 - **Long sessions are where it pays.** 67% less on the task, and 85% less on the same sixteen prompts of the day. Requests stay near 100,000 tokens, above which Haiku costs five times as much. Alone they grew to 143,000 and 183,000.
-- **Short sessions: 16% less with Claude Code.** 19% once the policy had learned from sessions on other issues ($0.048, 24 right). With Codex no tool differs beyond chance: an agent makes 24 to 105 calls for the same session, and that moves the bill more than any tool does.
+- **Short sessions: 16% less with Claude Code.** 19% once the policy had learned from sessions on other issues ($0.048, 24 right). With Codex 10% less, as with Headroom, and within chance: an agent makes 24 to 105 calls for the same session, and that moves the bill more than any tool does.
 - **The same calls, priced.** What Claude Code did alone would have cost 26% less under compache, and what Codex did 13%: their own calls, one by one, with the policy that `wrap` starts with.
 - **Answers hold up.** No difference in right answers is beyond chance (p = 0.43 to 1).
 
