@@ -20,5 +20,5 @@ Install: `pip install compache` (Python 3.11 or later).
 - [How it works](https://github.com/BarendPotijk/compache/blob/main/docs/how-it-works.md): what is learned and what is decided when
 - [Other tools compared](https://github.com/BarendPotijk/compache/blob/main/docs/comparisons.md): measured next to compressors and cache tools
 - [Benchmarks](https://github.com/BarendPotijk/compache/blob/main/benchmarks/README.md): what the fit chose and what it saved
-- [Setup skill](https://github.com/BarendPotijk/compache/blob/main/skills/compache-setup/SKILL.md): instructions for a coding agent that puts compache into a codebase
+- [Setup skill](https://github.com/BarendPotijk/compache/blob/main/skills/compache-setup/SKILL.md): instructions for a coding agent that puts compache into a codebase. `/plugin install compache --marketplace BarendPotijk/compache` in Claude Code, `npx skills add BarendPotijk/compache` elsewhere
 - [Cost calculator](https://barendpotijk.github.io/compache/): the bill for a workload, in the browser

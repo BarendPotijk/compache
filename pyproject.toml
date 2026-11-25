@@ -59,4 +59,4 @@ requires = ["uv_build>=0.13.7,<0.14.0"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
-source-include = ["docs/**", "examples/**", "integrations/**", "scripts/**", "skills/**", "benchmarks/**", "tests/**", "site/**"]
+source-include = [".claude-plugin/**", "docs/**", "examples/**", "integrations/**", "scripts/**", "skills/**", "benchmarks/**", "tests/**", "site/**"]

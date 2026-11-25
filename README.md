@@ -54,7 +54,7 @@ compache fit compache-record --model claude-haiku-5-5
 client = compache.wrap(Anthropic(), "policy.json")
 ```
 
-That is all. There are no thresholds to tune.
+That is all. There are no thresholds to tune. Or have your coding agent put it in, with `/plugin install compache --marketplace BarendPotijk/compache` in Claude Code and `npx skills add BarendPotijk/compache` in any other.
 
 <details>
 <summary><b>Try it now</b>, on four sample chats in a few seconds, without an API key</summary>

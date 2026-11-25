@@ -17,6 +17,8 @@ compache goes in at two places: where your model calls leave, and where your tra
 | Your own HTTP client | `compache.Live(...).exchange(path, body, send)` |
 | Your own prompt assembly | `policy.session(thread_id)`, see the [guide](guide.md#5-apply) |
 
+A coding agent can put it in for you: `/plugin install compache --marketplace BarendPotijk/compache` in Claude Code, or `npx skills add BarendPotijk/compache` for any other, gives it the [skill](../skills/compache-setup/SKILL.md) for that.
+
 All of them run the same code on the JSON that goes over the wire, so a request leaves the same whichever way compache went in. Wherever a policy file can be given, `learn="compache-record"` (`--learn`) can be given instead: the policy then [follows from your traffic](agents.md#how-it-learns).
 
 | On every model call | |
