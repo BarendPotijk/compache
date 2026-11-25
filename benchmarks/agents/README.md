@@ -24,7 +24,7 @@ What an agent's calls cost with and without compache: live with Claude Code and 
 
 - **Long sessions are where it pays.** 67% and 51% less on the task, and 85% less on the same sixteen prompts of the day. Requests stay near 100,000 tokens, above which Haiku costs five times as much. Alone they grew to 118,000 to 183,000. How soon they get there is the agent's own choice, and makes a run alone cost $0.25 or $0.41.
 - **Short sessions: 16% less with Claude Code.** 19% once the policy had learned from sessions on other issues ($0.048, 24 right). With Codex 10% less, as with Headroom, and within chance: an agent makes 24 to 105 calls for the same session, and that moves the bill more than any tool does.
-- **With Codex there is less to gain.** GPT-6 Luna reads 97% of this input from its cache, at a tenth of the price, and charges no more for long requests. On the long task compache cut nothing, and the two runs differ by the calls the agent chose to make. The best cut in hindsight would have saved 14%.
+- **With Codex there is less to gain.** GPT-6 Luna reads 97% of this input from its cache, at a tenth of the price, keeps it for half an hour, and charges more for a request only from 272,000 tokens on. On the long task compache cut nothing, and the two runs differ by the calls the agent chose to make. The best cut in hindsight would have saved 14%.
 - **The same calls, priced.** What Claude Code did alone would have cost 26% less under compache, and what Codex did 13%: their own calls, one by one, with the policy that `wrap` starts with.
 - **Answers hold up.** No difference in right answers is beyond chance (p = 0.43 to 1).
 
