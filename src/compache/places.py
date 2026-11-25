@@ -44,6 +44,15 @@ class Said:
         return self.base.rstrip("/")
 
 
+def differ(one: Path, other: Path) -> Unclear:
+    which = (
+        f"{one} says different things"
+        if one == other
+        else f"{one} and {other} say different things"
+    )
+    return Unclear(f"{which} of where the model is. Let them say the same")
+
+
 def asked(file: Path, name: str) -> Unclear:
     """A project's file may come with somebody else's repository. Whether it is trusted is not known here."""
     return Unclear(
@@ -62,14 +71,13 @@ def settled(said: list[Said], given: dict, files_first: bool = False) -> dict:
         if one.own:
             first = found.setdefault(one.api, one)
             if first.same_as != one.same_as:
-                raise Unclear(
-                    f"{first.file} and {one.file} say different things of where the model is. Let "
-                    "them say the same"
-                )
+                raise differ(first.file, one.file)
     for one in said:
         if not one.own:
-            known = found[one.api].base if one.api in found else given.get(one.api)
-            if not known or known.rstrip("/") != one.same_as:
+            known = found.get(one.api)
+            if known is not None and known.same_as != one.same_as:
+                raise differ(known.file, one.file)
+            if known is None and given.get(one.api, "").rstrip("/") != one.same_as:
                 raise asked(one.file, one.name)
     return {api: one.base for api, one in found.items()}
 
@@ -371,6 +379,8 @@ def claude(env: dict, words=()) -> list[Said]:
             mine, theirs = _claude_goes(ours), _claude_goes({**ours, **said})
             if theirs != mine:
                 names = [n for n in {**theirs, **mine} if theirs.get(n) != mine.get(n)]
+                if own is not None and names[0] in own[1]:
+                    raise differ(own[0], file)
                 raise asked(file, names[0])
     base = url(own[1].get("ANTHROPIC_BASE_URL")) if own else None
     return [Said(own[0], "anthropic", base)] if base else []

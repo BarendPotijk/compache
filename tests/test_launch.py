@@ -456,7 +456,7 @@ class OwnFilesTests(Told):
                 upstreams = self.told("opencode", {"OURS": self.GATEWAY})[2]
                 self.assertEqual(upstreams["openai"], "https://one.example")
                 continue
-            with self.assertRaisesRegex(ValueError, "set OPENAI_BASE_URL"):
+            with self.assertRaisesRegex(ValueError, "say different things"):
                 self.told("opencode")
             off = {"OPENCODE_DISABLE_PROJECT_CONFIG": "1"}
             upstreams = self.told("opencode", off)[2]
@@ -566,8 +566,14 @@ class OwnFilesTests(Told):
                 {"CLAUDE_CODE_USE_VERTEX": "1"},
             ):
                 self.put(path, {"env": said})
+                # What would settle it: the user's own file comes before the environment.
+                both = (
+                    "say different things"
+                    if "ANTHROPIC_BASE_URL" in said
+                    else "set CLAUDE"
+                )
                 with self.subTest(file=file, said=said):
-                    with self.assertRaisesRegex(ValueError, file):
+                    with self.assertRaisesRegex(ValueError, f"{file}.*{both}"):
                         self.told("claude")
             self.put(path, {"env": {"ANTHROPIC_BASE_URL": self.GATEWAY, "OTHER": 1}})
             self.assertEqual(self.told("claude")[2], {"anthropic": self.GATEWAY})
@@ -642,7 +648,7 @@ class OwnFilesTests(Told):
         ):
             self.put(path, said)
             with self.subTest(path):
-                with self.assertRaisesRegex(ValueError, "say different things"):
+                with self.assertRaisesRegex(ValueError, "says? different things"):
                     self.told("qwen")
                 self.told("qwen", decided=True)
             (self.home / path).unlink()
