@@ -30,7 +30,7 @@ An agent makes dozens of model calls per message, and every call sends every too
 | Older results outweigh what follows them, or the request has reached a size that is billed dearer | They become a notice. Rewriting what follows pays for itself in the next calls |
 | The cache has expired | They become a notice at once: everything has to be paid for again anyway |
 | What the model reasoned before | Goes with the results of its time. It is sent again with every call and takes as much room as they do. Claude only takes it back behind what it was made behind, so a cut takes all that stands behind it |
-| The model needs one after all | It calls `reopen`. The agent never sees the call, and what it fetched stays in view until it is old |
+| The model needs one after all | It calls `reopen`. The agent never sees the call, and what it fetched stays in view until it is old. Once it fetches the same again, results stay twice as long in this conversation |
 | A tool takes longer than the cache lives | The same request goes out once more with next to no output, which keeps the cache |
 | Somebody is back after a break | The instructions and tools that open every request are read from an entry that lives an hour |
 

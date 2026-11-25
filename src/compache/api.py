@@ -893,6 +893,11 @@ class Session:
         if self.policy.agentic:
             self._engine.reopened(name, self.policy.spec.part_tokens(text))
 
+    def stay_longer(self) -> None:
+        """Say that the model fetches back what it had fetched back before."""
+        if self.policy.agentic:
+            self._engine.flow.stay_longer()
+
     def lost(self) -> None:
         """Say that the provider has nothing of the conversation in its cache any more."""
         if self.policy.agentic:

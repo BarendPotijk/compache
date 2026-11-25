@@ -1402,6 +1402,58 @@ class ParallelTests(unittest.TestCase):
         self.assertEqual(live.stats["turns"], 1)
 
 
+class AgainTests(unittest.TestCase):
+    """A model that works with more than stays in view."""
+
+    def test_what_is_fetched_twice_makes_results_stay_longer(self):
+        for shape in SHAPES:
+            with self.subTest(shape.__name__):
+                live, fetches = compache.Live(policy(2)), []
+                app = Agent(live, shape(), FakeModel(None))
+
+                def script(request, app=app, fetches=fetches):
+                    body = json.dumps(request["body"])
+                    for k in range(1, min(3, app.made) + 1):
+                        if f"line of file number {k} that" not in body:
+                            fetches.append(k)
+                            looks = (REOPEN, {"reference": f"file number {k} that"})
+                            return {"text": "", "tool": looks}
+                    return {"text": "Reading on.", "tool": ("read", {})}
+
+                app.model.script = script
+                app.shape.ask("Compare the first three with all others")
+                for _ in range(60):
+                    _, calls = app.call()
+                    app.made += 1
+                    app.shape.answer([(call, result(app.made)) for call, _ in calls])
+                # Each time they stay for twice as long. Otherwise it would be one call in two.
+                self.assertGreaterEqual(len(fetches), 6)
+                self.assertLess(len(fetches), 20)
+                (conversation,) = live.conversations()
+                self.assertGreaterEqual(conversation.session._engine.flow.longer, 14)
+                self.assertEqual(live.stats["stood_down"], 0)
+
+    def test_pages_of_one_result_are_no_repetition(self):
+        live, asked = compache.Live(policy(2)), []
+
+        def script(request):
+            handles = NOTICE.findall(json.dumps(request["body"]))
+            if handles and len(asked) < 3:
+                asked.append(handles[0])
+                where = {"reference": handles[0], "offset": 400 * len(asked)}
+                return {"text": "", "tool": (REOPEN, where)}
+            return {"text": "Reading on.", "tool": ("read", {})}
+
+        app = Agent(live, Claude(), FakeModel(script))
+        app.shape.ask("Read on")
+        for k in range(1, 12):
+            _, calls = app.call()
+            app.shape.answer([(call, result(k)) for call, _ in calls])
+        self.assertEqual(live.stats["reopened"], 3)
+        (conversation,) = live.conversations()
+        self.assertEqual(conversation.session._engine.flow.longer, 0)
+
+
 class BesideTests(unittest.TestCase):
     def test_another_model_beside_is_one_conversation_more(self):
         for thread in (None, "t"):

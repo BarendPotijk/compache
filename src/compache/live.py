@@ -375,6 +375,8 @@ class _Conversation:
     left_alone: bool = False
     # What was fetched back and still stands in the conversation, in order.
     inserts: list = field(default_factory=list)
+    # What was ever fetched back, and from where on.
+    fetched: set = field(default_factory=set)
     # How it stood before its latest turn and at its latest request, for one that branches off there.
     base: _Point | None = None
     here: _Point | None = None
@@ -659,6 +661,12 @@ def _notice(placeholder: str) -> str:
     return (
         f'[Archived to save space. Call reopen("{found.group()}") to read this part.]'
     )
+
+
+# What our tool returned for a notice, as the model reads it.
+_FETCHED = re.compile(
+    r'\{"status": "ok", .{0,300}?"handle": "(ctx:[0-9a-f]{24})"', re.S
+)
 
 
 def _for_model(found: dict) -> dict:
@@ -1025,6 +1033,7 @@ class Live:
         made = _Conversation(other.thread_id, chain, record, other.named)
         made.agentic, made.left_alone = other.agentic, other.left_alone
         made.inserts, made.reopens = list(point.inserts), point.reopens
+        made.fetched = set(other.fetched)
         made.lifetime, made.five_minutes = other.lifetime, other.five_minutes
         made.header_lifetime = other.header_lifetime
         made.default_lifetime = other.default_lifetime
@@ -1885,15 +1894,20 @@ class Live:
                 for p in turn.parts
                 if p.part_id in turn.archived_ids
             }
+            # Where the host runs our tool, what it returned stands among the results of the others.
+            hosted = _REOPEN in dialect.tool_names(body)
             for k, segment in enumerate(turns, 1):
                 pieces = [
                     (f"{name}:{k}:input", segment.inputs),
                     (f"{name}:{k}:output", segment.outputs),
                 ]
-                pieces += [
-                    (f"{name}:{k}:retrieval:{j}", found.slots)
-                    for j, found in enumerate(segment.retrievals, 1)
-                ]
+                for j, found in enumerate(segment.retrievals, 1):
+                    part_id = f"{name}:{k}:retrieval:{j}"
+                    pieces.append((part_id, found.slots))
+                    of = _FETCHED.match(found.text) if hosted else None
+                    if of and part_id in notice:
+                        # A copy is no text of its own: the notice names what it is a copy of.
+                        notice[part_id] = _notice(of[1])
                 for part_id, slots in pieces:
                     if part_id in notice and slots and slots[0].whole is not None:
                         out = wire.put(out, slots[0].whole, notice[part_id])
@@ -2410,7 +2424,14 @@ class Live:
                     pending.reopened.append(part)
             told = json.dumps(_for_model(found), ensure_ascii=False)
             answers[call["id"]] = self._with_pictures(asked, part, told)
-            if not part or conversation.session.shows_again(part):
+            in_view = bool(part) and conversation.session.shows_again(part)
+            if part and not in_view:
+                # A model that works with more than stays in view would fetch for ever.
+                piece = part, found.get("offset")
+                if piece in conversation.fetched:
+                    conversation.session.stay_longer()
+                conversation.fetched.add(piece)
+            if not part or in_view:
                 part = f"reopened:{uuid.uuid4().hex[:12]}"
             names.append((part, told))
         if asked is not None and conversation.pending is not None:

@@ -605,6 +605,52 @@ class NobodyElsesTests(unittest.TestCase):
             self.assertIn(f"the secret plan of {name}", found["text"])
 
 
+class HostTests(unittest.TestCase):
+    """A host that runs our tool itself, as LangChain's agents do: what it returns is a result like others."""
+
+    def test_a_copy_is_no_text_of_its_own(self):
+        live, said = compache.Live(policy(2)), [{"role": "user", "content": "Go"}]
+        tools = [
+            {"type": "function", "function": {"name": n, "parameters": {}}}
+            for n in ("read", REOPEN)
+        ]
+
+        def call(name, k):
+            body = {"model": "m", "messages": list(said), "tools": tools}
+            shown = live.show(Chat.path, body, thread="t")
+            made = {"id": f"call_{k}0f{name}a1b2c3d4e5f6", "arguments": {"k": k}}
+            usage = {"prompt_tokens": 900, "completion_tokens": 9}
+            shown.heard(usage, model="m", said="", calls=[made])
+            function = {"name": name, "arguments": "{}"}
+            made = {"id": made["id"], "type": "function", "function": function}
+            message = {"role": "assistant", "content": None, "tool_calls": [made]}
+            said.append(message)
+            return shown.body["messages"], made["id"]
+
+        def answer(made, text):
+            said.append({"role": "tool", "tool_call_id": made, "content": text})
+
+        for k in range(1, 5):
+            answer(call("read", k)[1], result(k))
+        out, made = call(REOPEN, 5)
+        first = NOTICE.search(json.dumps(out)).group()
+        found = live.reopen("t", first, call=made)
+        self.assertIn("file number 1 ", found["text"])
+        answer(made, json.dumps(found))
+        for k in range(6, 12):
+            out, made = call("read", k)
+            answer(made, result(k))
+        # It went out of view as well, and what stands in its place names what it was a copy of.
+        handles = NOTICE.findall(json.dumps(out))
+        self.assertEqual(handles.count(first), 2)
+        out, made = call(REOPEN, 12)
+        again = live.reopen("t", first, call=made)
+        self.assertEqual(again["text"], found["text"])
+        # For the second time: from here on results stay longer.
+        (conversation,) = live.conversations()
+        self.assertEqual(conversation.session._engine.flow.longer, 2)
+
+
 class ResultTests(unittest.TestCase):
     """Results that hold something else than text, or nothing at all."""
 

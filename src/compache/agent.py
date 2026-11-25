@@ -63,6 +63,8 @@ FLOOR = 0.85
 MOST_MISSED = 0.01
 # So many relying calls make the share speak, and so many calls the count of misses.
 _LEAST_RELYING, _LEAST_KNOWN = 40, 200
+# The most rounds of results that stay because the model keeps fetching back.
+_LONGEST = 100
 # How far the provider's count of a text is taken to be from four bytes a token, at most.
 _MOST_OFF = 4.0
 _ROUNDS = (3, 5, 8, 12, 20, 30)
@@ -140,6 +142,7 @@ class Flow:
         "freed",
         "held",
         "live",
+        "longer",
         "names",
         "notice",
         "reasons",
@@ -174,6 +177,8 @@ class Flow:
         self.binds = binds_reasoning(spec.model_id)
         # The last block that went with the latest cut.
         self.ended: int | None = None
+        # How many rounds results stay beyond what the recipe says.
+        self.longer = 0
         # Up to which block the tokens ahead of it were counted last, and how many there are.
         self.ahead = (0, 0)
         self.sizes: dict = {}
@@ -246,6 +251,12 @@ class Flow:
                 insort(self.live, i)
         self.ripe, self.freed, self.ahead = 0, 0, (0, 0)
 
+    def stay_longer(self) -> None:
+        """What went is wanted again, and not for the first time: results stay for twice as long."""
+        if self.recipe.rounds is not None:
+            self.longer = min(2 * self.longer + self.recipe.rounds, _LONGEST)
+            self.ripe, self.freed, self.ahead = 0, 0, (0, 0)
+
     def gone(self, name) -> bool:
         """Whether a result is out of view."""
         return name in self.archived and name not in self.back
@@ -303,7 +314,7 @@ class Flow:
         """
         if self.recipe.rounds is None:
             return []
-        limit, live = self.rounds - self.recipe.rounds, self.live
+        limit, live = self.rounds - self.recipe.rounds - self.longer, self.live
         # They arrived in order, so the first that stays ends the search.
         while self.ripe < len(live) and self.round[live[self.ripe]] <= limit:
             i = live[self.ripe]
