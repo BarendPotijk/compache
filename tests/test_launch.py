@@ -595,13 +595,18 @@ class Wrapped(unittest.TestCase):
         self.model = FakeModel(worker(40))
         self.url, stop = serve(self.model)
         self.addCleanup(stop)
+        # Nothing of the machine's own, such as the settings of an agent that is there.
         self.env = {
             "PATH": f"{self.home}{os.pathsep}{os.environ['PATH']}",
+            "HOME": str(self.home),
             "COMPACHE_HOME": str(self.home / "kept"),
+            "CLAUDE_CONFIG_DIR": str(self.home / ".claude"),
         }
         before = {k: os.environ.get(k) for k in (*self.env, "ANTHROPIC_BASE_URL")}
         os.environ.update(self.env)
         os.environ.pop("ANTHROPIC_BASE_URL", None)
+        self.addCleanup(os.chdir, os.getcwd())
+        os.chdir(self.home)
 
         def restore():
             for key, value in before.items():
@@ -684,6 +689,8 @@ class LineTests(Wrapped):
             sys.stdin = before
 
     def test_a_session_s_savings_in_a_few_words(self):
+        # A file of an agent's name in the working directory is not its record.
+        self.assertTrue((Path.cwd() / "claude").exists() or os.name == "nt")
         self.assertEqual(self.line(""), (0, "compache\n"))
         self.wrap("--upstream", self.url, "claude", "--", "files")
         status, out = self.line("{}")
@@ -710,6 +717,14 @@ class DoctorTests(Wrapped):
         self.assertNotIn("problem", out)
         os.environ["ANTHROPIC_API_KEY"] = "sk-secret"
         self.addCleanup(os.environ.pop, "ANTHROPIC_API_KEY", None)
+        settings = {"env": {"ANTHROPIC_BASE_URL": "https://gateway.example"}}
+        (self.home / ".claude").mkdir()
+        (self.home / ".claude" / "settings.json").write_text(json.dumps(settings))
+        _, out = self.ask("doctor", "--port", "1")
+        self.assertIn("which goes on to https://gateway.example", out)
+        (self.home / ".claude" / "settings.json").write_text("not json")
+        _, out = self.ask("doctor", "--port", "1")
+        self.assertIn("could not be read", out)
         status, out = self.ask("doctor", "--json", "--port", "1")
         self.assertNotIn("sk-secret", out)
         self.assertIn("ANTHROPIC_API_KEY", out)

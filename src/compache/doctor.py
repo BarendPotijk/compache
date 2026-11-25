@@ -20,7 +20,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import metadata
 
 from . import record
-from .launch import AGENTS, home
+from .launch import AGENTS, home, prepared
 from .learn import Learner
 from .live import Live
 from .proxy import serve
@@ -34,12 +34,6 @@ _KEYS = (
     "GEMINI_API_KEY",
     "GOOGLE_API_KEY",
     "OPENROUTER_API_KEY",
-)
-_BASES = (
-    "ANTHROPIC_BASE_URL",
-    "OPENAI_BASE_URL",
-    "OPENAI_API_BASE",
-    "GOOGLE_GEMINI_BASE_URL",
 )
 # What can carry compache in a Python program, and how.
 _PACKAGES = {
@@ -141,7 +135,14 @@ def checked(env: dict | None = None, port: int = 8787) -> list[dict]:
         )
     here = [(n, a) for n, a in AGENTS.items() if shutil.which(a.command)]
     for name, agent in here:
-        say("ok", f"{agent.title}: compache wrap {name}")
+        try:
+            _, _, upstreams = prepared(agent, "http://127.0.0.1:1", env)
+        except ValueError as error:
+            say("note", f"{agent.title}: {error}")
+            continue
+        goes = ", ".join(sorted(set(upstreams.values())))
+        more = f", which goes on to {goes}" if goes else ""
+        say("ok", f"{agent.title}: compache wrap {name}{more}")
     if not here:
         say(
             "note",
@@ -152,9 +153,6 @@ def checked(env: dict | None = None, port: int = 8787) -> list[dict]:
             say("ok", f"{package} {_installed(package)}: {how}")
     keys = [name for name in _KEYS if env.get(name)]
     say("note", f"keys set: {', '.join(keys)}" if keys else "no API key is set here")
-    for name in _BASES:
-        if env.get(name):
-            say("note", f"{name} is set: agents that read it are forwarded there")
     running = _running(port)
     if running is not None:
         say("ok", f"a proxy on port {port} has carried {running['calls']:,} calls")

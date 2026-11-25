@@ -20,7 +20,7 @@ An agent makes dozens of model calls per message, and every call sends every too
 | `compache stats` | What was saved, per agent and model. For Claude Code's status line: `"statusLine": {"type": "command", "command": "compache stats claude --line"}` in its settings |
 | `compache doctor` | Whether it works here, and what it can be used with |
 
-`wrap` starts a proxy on a free local port, starts the agent with its base URL set to it, and says at the end what the session cost and what it would have cost. No file of the agent's is changed. Where the agent's own settings name a base URL, such as a gateway's, requests go on to that. Credentials pass through, and go nowhere else. On a subscription nothing is billed by the token: what is saved there is room in the window and in the plan's limits.
+`wrap` starts a proxy on a free local port, starts the agent with its base URL set to it, and says at the end what the session cost and what it would have cost. No file of the agent's is changed. Where the agent's own settings name a server, such as a gateway, requests go on to that. A key goes where the agent itself would send it: one that is none of the provider's own goes nowhere until `--upstream URL` says where. On a subscription nothing is billed by the token: what is saved there is room in the window and in the plan's limits.
 
 ## What it does
 
@@ -29,7 +29,7 @@ An agent makes dozens of model calls per message, and every call sends every too
 | A tool returns | Its result goes out in full, and stays for as long as it is one of the newest |
 | Older results outweigh what follows them, or the request has reached a size that is billed dearer | They become a notice. Rewriting what follows pays for itself in the next calls |
 | The cache has expired | They become a notice at once: everything has to be paid for again anyway |
-| What the model reasoned in turns that are over | Goes with the results of its time. It is sent again with every call and takes as much room as they do |
+| What the model reasoned before | Goes with the results of its time. It is sent again with every call and takes as much room as they do. Claude only takes it back behind what it was made behind, so a cut takes all that stands behind it |
 | The model needs one after all | It calls `reopen`. The agent never sees the call, and what it fetched stays in view until it is old |
 | A tool takes longer than the cache lives | The same request goes out once more with next to no output, which keeps the cache |
 | Somebody is back after a break | The instructions and tools that open every request are read from an entry that lives an hour |

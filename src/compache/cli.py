@@ -736,7 +736,10 @@ def _default(args):
 
 def _of_agent(folder: Path) -> Path:
     """A record folder, where the name of an agent stands for the one that `wrap` makes."""
-    named = len(folder.parts) == 1 and not folder.exists()
+    if len(folder.parts) != 1 or (folder / "calls.jsonl").is_file():
+        return folder
+    # Something else may go by an agent's name here.
+    named = folder.name in AGENTS or not folder.exists()
     return home() / folder if named else folder
 
 
