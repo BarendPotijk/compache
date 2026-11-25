@@ -1022,6 +1022,12 @@ class AgentEngine:
         self._fresh.append((len(self.flow.shown), ruled))
         self.flow.add(round(ruled * self._off), name)
 
+    def elsewhere(self, plan, answer) -> None:
+        """A turn went to another model: it joins the conversation, and nothing of it is cached for this one."""
+        at, cached = self.flow.at, self.flow.cached
+        self.complete(plan, answer, ended_at=self._sent_at)
+        self.flow.at, self.flow.cached, self._due = at, cached, ()
+
     @property
     def holds(self):
         """What goes first with the next cut."""

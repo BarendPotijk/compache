@@ -1564,6 +1564,124 @@ class AgainTests(unittest.TestCase):
         self.assertEqual(conversation.session._engine.flow.longer, 0)
 
 
+class SwitchTests(unittest.TestCase):
+    """One model plans, another works, and the first is asked again while its cache lives."""
+
+    def play(self, stream=False, rounds=3, ratio=None, record=None):
+        class PerModel(FakeModel):
+            def messages(self, body, *more):
+                self.asked = body["model"]
+                return super().messages(body, *more)
+
+            def _meter(self, head, *more):
+                return super()._meter([self.asked, head], *more)
+
+        clock = Clock()
+        model = PerModel(clock=lambda: clock.at, binds="error")
+        live = compache.Live(policy(rounds, ratio), clock=clock, record=record)
+        app = Agent(live, Claude(), model, thread="s", clock=clock, stream=stream)
+
+        def turn(name, count):
+            """What the turn read of the cache with its first request, and how many notices that held."""
+            app.shape.model = name
+            script, first = reasoning(app.made + count), []
+            before = live.tokens["cache_read"]
+
+            def watched(request):
+                if len(first) == 1:
+                    first.append(live.tokens["cache_read"] - before)
+                if not first:
+                    first.append(len(NOTICE.findall(json.dumps(request["body"]))))
+                return script(request)
+
+            model.script = watched
+            self.assertEqual(app.run(f"Work through {count} files"), "All done.")
+            clock.at += 20
+            return first[1], first[0]
+
+        return app, model, turn
+
+    def test_the_first_goes_on_where_it_left_off(self):
+        for stream in (False, True):
+            with self.subTest(stream=stream):
+                app, model, turn = self.play(stream, rounds=12)
+                turn("claude-opus-5-5", 20)
+                app.clock.at += 400
+                turn("claude-opus-5-5", 2)
+                whole, notices = turn("claude-opus-5-5", 2)
+                self.assertGreater(notices, 6)
+                turn("claude-sonnet-5-5", 2)
+                read, shown = turn("claude-opus-5-5", 2)
+                # What it had in its cache it reads, and what is out of view is so as before.
+                self.assertGreater(read, 0.9 * whole)
+                self.assertEqual(shown, notices)
+                self.assertEqual(app.live.stats["retried"], 0)
+                self.assertEqual(app.live.stats["stood_down"], 0)
+                # And so it does after several turns of the other.
+                for _ in range(3):
+                    turn("claude-sonnet-5-5", 1)
+                read, shown = turn("claude-opus-5-5", 1)
+                self.assertGreater(read, 0.9 * whole)
+                self.assertEqual(shown, notices)
+                self.assertEqual(app.live.stats["retried"], 0)
+
+    def test_it_cuts_as_the_policy_says(self):
+        app, model, turn = self.play(ratio=0.0)
+        for name in ("opus", "sonnet", "opus", "opus", "sonnet", "opus"):
+            turn(f"claude-{name}-5-5", 4)
+            held = Claude.results(model.bodies[-1])
+            self.assertEqual(sum(not NOTICE.search(text) for text in held), 3)
+        self.assertEqual(app.live.stats["retried"], 0)
+
+    def test_what_went_to_the_other_can_be_fetched_back(self):
+        app, model, turn = self.play(ratio=0.0)
+        turn("claude-opus-5-5", 8)
+        turn("claude-sonnet-5-5", 4)
+        turn("claude-opus-5-5", 6)
+        for k in (2, 10):
+            fetched = []
+
+            def script(request, k=k, fetched=fetched):
+                if not fetched:
+                    fetched.append(k)
+                    words = f"a line of file number {k} that"
+                    return {"tool": (REOPEN, {"reference": words})}
+                return {"text": "Found."}
+
+            model.script = script
+            app.shape.ask(f"What was in file {k}?")
+            self.assertEqual(app.call()[0], "Found.")
+            sent = json.dumps(model.bodies[-1]["messages"])
+            self.assertIn(f"result {k}: a line of file number {k}", sent)
+
+    def test_every_turn_is_on_record_once(self):
+        with tempfile.TemporaryDirectory() as folder:
+            app, model, turn = self.play(record=folder)
+            for name in ("opus", "sonnet", "opus", "sonnet", "opus"):
+                turn(f"claude-{name}-5-5", 3)
+            threads, _ = load(folder)
+            runs = [run for thread in threads for run in thread["runs"]]
+            self.assertEqual([len(threads), len(runs)], [1, 5])
+            self.assertEqual([run["calls"] for run in runs], [4] * 5)
+
+    def test_another_agent_that_goes_on_from_the_same_start_is_left_alone(self):
+        """The one that a copy was made of goes on as it was."""
+        app, model, turn = self.play()
+        turn("claude-opus-5-5", 8)
+        other = Agent(app.live, Claude(), model, thread="s", clock=app.clock)
+        other.shape.said = [*app.shape.said]
+        other.shape.ask("Said elsewhere")
+        other.shape.said.append(
+            {"role": "assistant", "content": [{"type": "text", "text": "Answered."}]}
+        )
+        other.shape.model, other.made = "claude-opus-5-5", app.made
+        model.script = reasoning(app.made + 3)
+        self.assertEqual(other.run("Work through three files"), "All done.")
+        read, _ = turn("claude-opus-5-5", 2)
+        self.assertGreater(read, 1000)
+        self.assertEqual(app.live.stats["retried"], 0)
+
+
 class BesideTests(unittest.TestCase):
     def test_another_model_beside_is_one_conversation_more(self):
         for thread in (None, "t"):

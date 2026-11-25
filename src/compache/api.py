@@ -893,6 +893,15 @@ class Session:
         if self.policy.agentic:
             self._engine.reopened(name, self.policy.spec.part_tokens(text))
 
+    def elsewhere(self, turn: Turn, answer: str) -> None:
+        """Record the answer to a turn that another model gave. Only an agent's session takes it."""
+        request, parts = self._pending
+        named, run = f"{request.run_id}:output", request.run_index
+        source = Source(named, "output", run, answer)
+        self._engine.elsewhere(turn.plan, source)
+        self._history.extend((*parts, source))
+        self._run, self._pending = run, None
+
     def stay_longer(self) -> None:
         """Say that the model fetches back what it had fetched back before."""
         if self.policy.agentic:

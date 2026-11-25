@@ -165,6 +165,8 @@ _ONE_OF_A_KIND = re.compile(
 _MOVED = 4
 # How many conversations that stand at the same point, or share a call's ID, are told apart.
 _MOST_AT_ONE_POINT = 16
+# How many turns back a conversation is looked for that another model went on from.
+_BACK = 8
 # A note is one line. The room is for a model that reasons before it writes: on Claude Haiku
 # 5.5 that took a median of some 500 tokens, and more than 1,000 for one note in twelve.
 _NOTE_TOKENS = 2048
@@ -870,6 +872,8 @@ class Live:
                 # It goes on from where another request, such as a host's own, branched off.
                 other = self._by_base[chains[-1]]
                 found = self._branch(other, chains[-1], turns, scan, thread)
+            if found is None and thread:
+                found = self._resumed(chains, scan)
             if found is None:
                 name = record = thread or "c-" + uuid.uuid4().hex[:16]
                 if thread:
@@ -992,6 +996,9 @@ class Live:
             )
         if conversation.chain == chains[-1]:
             return self._own(conversation, turns, scan, closing)
+        if pending is None and 0 < conversation.turns < done:
+            # One that is resumed.
+            return conversation.chain == chains[conversation.turns]
         # One that is met for the first time, perhaps in the middle.
         return pending is None and not conversation.turns
 
@@ -1067,6 +1074,47 @@ class Live:
             self._heard(made, len(turns), point.pending.question, found)
         if thread or done:
             self._index(made, chain)
+        return made
+
+    def _resumed(self, chains: list[str], scan) -> _Conversation | None:
+        """An agent's conversation as a model left it, for a request that comes back to that model.
+
+        Another went on from there, and what it made of it is not in this one's cache.
+        """
+        for done in range(len(chains) - 2, max(0, len(chains) - 2 - _BACK), -1):
+            for other in reversed(self._by_chain.get(chains[done], ())):
+                if (
+                    not (other.agentic and scan.model)
+                    or other.requested != scan.model
+                    or not other.lock.acquire(blocking=False)
+                ):
+                    continue
+                try:
+                    here = other.chain == chains[done] and other.turns == done
+                    if here and other.pending is None and other.session is not None:
+                        return self._left_off(other)
+                finally:
+                    other.lock.release()
+        return None
+
+    @staticmethod
+    def _left_off(other: _Conversation) -> _Conversation:
+        """A conversation like another, between its turns. Its lock is held."""
+        made = replace(
+            other,
+            lock=threading.RLock(),
+            session=other.session.copy(),
+            inserts=list(other.inserts),
+            fetched=set(other.fetched),
+            unbound=set(other.unbound),
+            went=[],
+            quotes=None,
+            last=None,
+            base=None,
+            here=None,
+            when=None,
+        )
+        made.superseded, other.superseded = False, True
         return made
 
     def conversations(self) -> list[_Conversation]:
@@ -1762,7 +1810,23 @@ class Live:
                 counted = not conversation.agentic
                 self._finish(conversation, chains[done], last, now, counted)
                 return
+        k = conversation.turns
+        if pending is None and 0 < k < done and not renew and conversation.agentic:
+            if conversation.session is not None and conversation.chain == chains[k]:
+                return self._go_on(conversation, chains, turns, now, scan)
         self._walk(conversation, chains, turns, now, scan)
+
+    def _go_on(self, conversation, chains, turns, now, scan) -> None:
+        """Take in turns that went to another model, behind those that went to this one."""
+        k, done = conversation.turns, len(turns) - 1
+        for number, segment in enumerate(turns[k:done], k + 1):
+            turn = self._shown(conversation, segment, now, scan)
+            conversation.session.elsewhere(turn, segment.answer)
+            if self.recorder is not None:
+                self._heard(conversation, number, segment.question, segment.retrievals)
+                self._quotes(conversation).said(segment.answer)
+        conversation.turns = done
+        self._index(conversation, chains[done])
 
     def _anew(self, conversation, chains, turns, now, scan) -> None:
         """Take a conversation back to where its latest turn began."""
