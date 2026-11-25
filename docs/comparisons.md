@@ -21,13 +21,13 @@ Five short held-out chats, 10 to 12 turns each, played by the same application o
 
 ## Coding agents
 
-![What long sessions had cost after each prompt. One task in 13 prompts: Claude Code alone $0.41 and $0.25 in two runs, Headroom $0.40, Kompressor $0.28, compache $0.13 and $0.12. 17 issues in one conversation: alone $1.20 after 16 prompts, Kompressor $0.95 after 12, Headroom $0.14 after 8, compache $0.22 after all 17](assets/agents-live.svg)
+![What long sessions had cost after each prompt. One task in 13 prompts: Claude Code alone $0.41 and $0.25 in two runs, Headroom $0.40, Kompressor $0.28, compache $0.13 and $0.12. 17 issues in one conversation: alone $1.20 after 16 prompts and, in a second run, $0.80 after all 17, Kompressor $0.95 after 12, Headroom $0.14 after 8, compache $0.22 and $0.13](assets/agents-live.svg)
 
 - **In long sessions compache has the lowest bill, with as many answers right.** On one task in thirteen prompts 66% less than Headroom and 53% less than Kompressor, run once each, and all tests passed. On the day's first eight issues 40% and 79% less.
 - **In short sessions little separates them.** Sessions of five or six issues with Claude Code cost 11% and 10% less than with Headroom and Kompressor, and with Codex the three are within what the agent's own choices move. On GPT-6 Luna most of the input is read from the cache at a tenth of the price, so there is less to save.
 - **Where it comes from.** A compressor makes each new result smaller, and all of them are sent with every call. compache lets old ones go, at the calls where that is cheap.
 
-Claude Haiku 5.5 in Claude Code and GPT-6 Luna in Codex, billed through OpenRouter on 2026-11-24 and 2026-11-25. The other tools' runs of the day end where their money did. [Every number, and how they were run](../benchmarks/agents/README.md)
+Claude Haiku 5.5 in Claude Code and GPT-6 Luna in Codex, billed through OpenRouter on 2026-11-24 and 2026-11-25. Runs of the day that end early had spent their money. [Every number, and how they were run](../benchmarks/agents/README.md)
 
 ## What each does
 

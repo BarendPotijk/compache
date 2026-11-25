@@ -97,7 +97,7 @@ compache wrap claude          # or codex, opencode, gemini, copilot, goose, or a
 
 An agent sends every tool result again with every call. compache keeps the newest ones in view, lets older ones go when that is cheap, keeps the cache through long tool runs and breaks, and fetches a result back when the model asks for it. It starts from what 174 public runs taught and goes on from your own sessions. There is nothing to set. [Agents](docs/agents.md)
 
-![What long sessions with Claude Code had cost after each prompt. One task in 13 prompts: alone $0.41 and $0.25 in two runs, Headroom $0.40, Kompressor $0.28, compache $0.13 and $0.12. 17 issues in one conversation: alone $1.20 after 16 prompts, compache $0.22 after all 17](docs/assets/agents-live.svg)
+![What long sessions with Claude Code had cost after each prompt. One task in 13 prompts: alone $0.41 and $0.25 in two runs, Headroom $0.40, Kompressor $0.28, compache $0.13 and $0.12. 17 issues in one conversation: alone $1.20 after 16 prompts and, in a second run, $0.80 after all 17, compache $0.22 and $0.13](docs/assets/agents-live.svg)
 
 As many tests passed and issues solved. Where the price does not jump with the size of a request, as on Claude Sonnet 5.5, it saves [5% to 43%, modeled](docs/agents.md#what-it-saves), by how an agent is worked with. `compache stats` says what it saved. In your own agent it is one argument: `compache.wrap(client, learn="compache-record")`.
 

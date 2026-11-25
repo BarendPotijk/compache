@@ -2,7 +2,7 @@
 
 What an agent's calls cost with and without compache: live with Claude Code and Codex next to Headroom and OptScale Kompressor, and modeled on public runs.
 
-![What long sessions had cost after each prompt. One task in 13 prompts: Claude Code alone $0.41 and $0.25 in two runs, Headroom $0.40, Kompressor $0.28, compache $0.13 and $0.12. 17 issues in one conversation: alone $1.20 after 16 prompts, Kompressor $0.95 after 12, Headroom $0.14 after 8, compache $0.22 after all 17](../../docs/assets/agents-live.svg)
+![What long sessions had cost after each prompt. One task in 13 prompts: Claude Code alone $0.41 and $0.25 in two runs, Headroom $0.40, Kompressor $0.28, compache $0.13 and $0.12. 17 issues in one conversation: alone $1.20 after 16 prompts and, in a second run, $0.80 after all 17, Kompressor $0.95 after 12, Headroom $0.14 after 8, compache $0.22 and $0.13](../../docs/assets/agents-live.svg)
 
 ## Live
 
@@ -12,9 +12,12 @@ What an agent's calls cost with and without compache: live with Claude Code and 
 | Hidden tests passed | 14 of 14 | 14 of 14 | 14 of 14 | 14 of 14 |
 | Largest request | 143k, 118k | 142k | 138k | 100k, 88k |
 | **17 issues in one conversation**, Claude Code | | | | |
-| After 8 prompts | $0.35, 7 right | $0.14, 7 right | $0.40, 8 right | **$0.08**, 8 right |
-| After 12 prompts | $0.76, 9 right | | $0.95, 10 right | **$0.12**, 9 right |
-| After 16 prompts | $1.20, 11 right | | | **$0.19**, 11 right |
+| After 8 prompts | $0.35, $0.08 | $0.14 | $0.40 | **$0.08, $0.05** |
+| Right, of 8 | 7, 5 | 7 | 8 | 8, 6 |
+| After 12 prompts | $0.76, $0.47 | | $0.95 | **$0.12, $0.09** |
+| Right, of 12 | 9, 6 | | 10 | 9, 7 |
+| After 16 prompts | $1.20, $0.76 | | | **$0.19, $0.12** |
+| Right, of 16 | 11, 7 | | | 11, 8 |
 | **Sessions of five or six issues**, Claude Code | $0.059 | $0.056 | $0.055 | **$0.050** |
 | Right, of 34 | 26 | 27 | 22 | 24 |
 | **The same**, Codex | $0.033 | $0.029 | $0.038 | $0.029 |
@@ -22,7 +25,7 @@ What an agent's calls cost with and without compache: live with Claude Code and 
 | **One task in 13 prompts**, Codex | $0.058 | | | $0.063 |
 | Calls, hidden tests passed | 56, 14 of 14 | | | 66, 14 of 14 |
 
-- **Long sessions are where it pays.** 67% and 51% less on the task, and 85% less on the same sixteen prompts of the day. Requests stay near 100,000 tokens, above which Haiku costs five times as much. Alone they grew to 118,000 to 183,000. How soon they get there is the agent's own choice, and makes a run alone cost $0.25 or $0.41.
+- **Long sessions are where it pays.** 67% and 51% less on the task, and 85% and 84% less on sixteen prompts of the day. Requests stay near 100,000 tokens, above which Haiku costs five times as much. Alone they grew to between 118,000 and 184,000. How soon they get there is the agent's own choice, so the same work alone costs $0.25 or $0.41, $0.76 or $1.20.
 - **Short sessions: 16% less with Claude Code.** 19% once the policy had learned from sessions on other issues ($0.048, 24 right). With Codex 10% less, as with Headroom, and within chance: an agent makes 24 to 105 calls for the same session, and that moves the bill more than any tool does.
 - **With Codex there is less to gain.** GPT-6 Luna reads 97% of this input from its cache, at a tenth of the price, keeps it for half an hour, and charges more for a request only from 272,000 tokens on. On the long task compache cut nothing, and the two runs differ by the calls the agent chose to make. The best cut in hindsight would have saved 14%.
 - **The same calls, priced.** What Claude Code did alone would have cost 26% less under compache, and what Codex did 13%: their own calls, one by one, with the policy that `wrap` starts with.
@@ -53,9 +56,9 @@ What an agent's calls cost with and without compache: live with Claude Code and 
 | Issues | [SWE-bench Lite](https://www.swebench.com)'s sympy issues that run without a container: kept where the fix's tests fail before and pass after on this machine, graded by those tests |
 | A session | Five or six issues in one checkout, one prompt each, and between them the user is away for 60, 20, 420, 120 and 780 seconds |
 | A long session | A generated package (`tasks.py`): fourteen modules to correct, then to test, review, document and check against random inputs, in thirteen prompts. Graded by hidden tests |
-| A day | All seventeen issues in one conversation, with breaks of 20 to 420 seconds. The others' runs end where their money did: after 16 prompts alone, 12 with Kompressor and 8 with Headroom |
+| A day | All seventeen issues in one conversation, with breaks of 20 to 420 seconds. Runs that end early had spent their money: the first alone after 16 prompts, Kompressor's after 12 and Headroom's after 8 |
 | Models | Claude Haiku 5.5 in Claude Code 2.1.331, GPT-6 Luna in Codex 0.172.0, through OpenRouter, billed on 2026-11-24 and 2026-11-25 |
-| Runs | Two of each session, and of the task alone and with compache in Claude Code. One of the others. A prompt may take 15 minutes |
+| Runs | Two of each session, and of the task and the day alone and with compache in Claude Code. One of the others. A prompt may take 15 minutes |
 | compache | What `compache wrap` starts, learning from nothing. Once learned: after `compache learn`, on the sessions of the first column on other tasks |
 | Headroom 0.45.0, Kompressor 1.6.1 | Their proxies, with their defaults and with the settings the package ships |
 

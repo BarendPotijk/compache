@@ -416,7 +416,7 @@ def sessions(data):
     panel = (width - left - right - gap) / 2
     plot, base = height - top - bottom, height - bottom
     body = [
-        "<style>.n2s{stroke:#b5b3a9}.n2{fill:#b5b3a9}"
+        "<style>.n2s{stroke:#b5b3a9}.n2{fill:#b5b3a9}.over{paint-order:stroke;stroke-width:6;stroke-linejoin:round}"
         "@media (prefers-color-scheme:dark){.n2s{stroke:#66655f}.n2{fill:#66655f}}</style>",
         text(24, 32, data["title"], "big"),
         text(24, 51, data["subtitle"], "t2"),
@@ -479,6 +479,8 @@ def sessions(data):
                     for other in runs
                     if len(other["curve"]) >= last
                 )
+                # What it stands over shows no line.
+                style += " ring over"
                 body.append(
                     text(a - 10, b, words, style, "end")
                     if top_one
