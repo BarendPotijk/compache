@@ -749,6 +749,7 @@ class Session:
                     fields.get("document_id", part_id),
                     fields.get("version", "1"),
                     fields.get("chunk_id", part_id),
+                    stays=bool(fields.get("stays")),
                 )
             )
         return parts

@@ -149,7 +149,9 @@ class MiddlewareTests(unittest.TestCase):
             def _generate(self, messages, stop=None, run_manager=None, **kwargs):
                 held = 0
                 for k, message in enumerate(messages):
-                    blocks = message.content if isinstance(message.content, list) else ()
+                    blocks = (
+                        message.content if isinstance(message.content, list) else ()
+                    )
                     for block in blocks:
                         if block["type"] == "thinking":
                             held += 1
@@ -161,7 +163,11 @@ class MiddlewareTests(unittest.TestCase):
                 usage = {"input_tokens": 100, "output_tokens": 5, "total_tokens": 105}
                 said = {"content": [sign, {"type": "text", "text": "Step."}]}
                 if read < 9:
-                    call = {"name": "read", "args": {"file": read + 1}, "id": f"c{read}"}
+                    call = {
+                        "name": "read",
+                        "args": {"file": read + 1},
+                        "id": f"c{read}",
+                    }
                     said["tool_calls"] = [call]
                 message = AIMessage(**said, usage_metadata=usage)
                 return ChatResult(generations=[ChatGeneration(message=message)])

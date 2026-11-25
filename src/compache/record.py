@@ -155,6 +155,7 @@ class Recorder:
         cost: float | None = None,
         archived=None,
         left=None,
+        media=False,
         lifetime=None,
         header_lifetime=None,
         long_write: int = 0,
@@ -188,6 +189,8 @@ class Recorder:
             row["archived"] = list(archived)
         if left is not None:
             row["left_bytes"], row["sent_bytes"] = left
+        if media:
+            row["media"] = True
         if lifetime is not None:
             row["ttl"] = lifetime
         if header_lifetime is not None:
@@ -197,6 +200,16 @@ class Recorder:
         if left_alone:
             row["left_alone"] = True
         self._append(_CALLS, row)
+
+
+# The most tokens a byte of text is taken to be, where a request holds more than text.
+_MOST_PER_BYTE = 0.3
+
+
+def left_out(left: int, held: int, size: int, media: bool = False) -> int:
+    """Tokens of `left` bytes that were left out of a request of `held` bytes and `size` tokens."""
+    per_byte = size / held
+    return round(left * (min(per_byte, _MOST_PER_BYTE) if media else per_byte))
 
 
 def is_record(source: Any) -> bool:

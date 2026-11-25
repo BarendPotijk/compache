@@ -157,7 +157,12 @@ def _proxy(url: urllib.parse.SplitResult) -> urllib.parse.SplitResult | None:
     if not given or urllib.request.proxy_bypass(host):
         return None
     found = urllib.parse.urlsplit(given if "://" in given else f"http://{given}")
-    return found if found.scheme in ("http", "https") and found.hostname else None
+    if found.scheme == "https":
+        # Its name and password would go out in plain sight.
+        raise ValueError(
+            f"{host} is reached through a proxy over TLS, which is not spoken"
+        )
+    return found if found.scheme == "http" and found.hostname else None
 
 
 def _credentials(proxy: urllib.parse.SplitResult) -> dict:

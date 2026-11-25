@@ -935,6 +935,8 @@ class AgentEngine:
         self._out: set = set()
         self._counts_thoughts: bool | None = None
         self._keeps_thoughts: bool | None = None
+        # A result of the request under way that holds more than text.
+        self._more: int | None = None
         # Where the cut ended that the request under way was made with.
         self._just_cut: int | None = None
         # The turn that is being answered, and how everything stood before it.
@@ -979,7 +981,12 @@ class AgentEngine:
         for part in fresh:
             self._known.add(part.part_id)
             named = part.part_id if part.kind == "retrieval" else None
-            self._joins(self.spec.part_tokens(part.text), named)
+            ruled = self.spec.part_tokens(part.text)
+            if part.stays:
+                # What it holds besides has tokens that no ruler tells.
+                self._more = len(self.flow.shown)
+                named = None
+            self._joins(ruled, named)
 
     def _joins(self, ruled: int, name=None) -> None:
         self._fresh.append((len(self.flow.shown), ruled))
@@ -1113,10 +1120,15 @@ class AgentEngine:
         self._fresh = []
         if self._just_cut is not None:
             # What went was larger, or smaller, than it was counted as.
+            self._more = None
             flow.settle(self._just_cut, reported - flow.size)
             return
         self._counted_thoughts(reported)
         hidden = reported - flow.size
+        more, self._more = self._more, None
+        if more is not None and hidden > 0:
+            flow.resize(more, flow.shown[more] + hidden)
+            return
         held = sum(flow.shown[i] for i, _ in fresh)
         if not held or held + hidden <= 0:
             if hidden > 0:

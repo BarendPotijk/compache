@@ -199,7 +199,9 @@ def _qwen_keeps(env: dict) -> dict:
 
 
 def _claude_settings(env: dict) -> Path:
-    return Path(env.get("CLAUDE_CONFIG_DIR") or _home(env) / ".claude") / "settings.json"
+    return (
+        Path(env.get("CLAUDE_CONFIG_DIR") or _home(env) / ".claude") / "settings.json"
+    )
 
 
 # -- how agents are told ---------------------------------------------------------------
@@ -213,7 +215,11 @@ def _plain(variables: dict):
     """An agent that reads variables such as the SDKs' own."""
 
     def setup(bases: dict, env: dict, given: dict) -> tuple[dict, list, dict]:
-        return {n: bases[api] for api, names in variables.items() for n in names}, [], {}
+        return (
+            {n: bases[api] for api, names in variables.items() for n in names},
+            [],
+            {},
+        )
 
     return setup
 

@@ -255,6 +255,57 @@ class OpenAITests(SdkCase):
                 self.clock.at += 3600
         self.check(items)
 
+    def test_an_async_stream_that_is_left_does_not_hold_up_the_loop(self):
+        """Broken off, given up before it begins, or dropped: the loop that has to close it must not wait for it."""
+        import gc
+        import threading
+        import time
+
+        from openai import AsyncOpenAI
+
+        def slow(request):
+            time.sleep(0.2)
+            return {"text": "words of an answer " * 200}
+
+        live = self.start(slow, sample=0.0)
+        client = wrap(
+            AsyncOpenAI(api_key="key", base_url=self.url + "/v1", max_retries=0),
+            live=live,
+        )
+
+        async def ask(k):
+            return await client.chat.completions.create(
+                model="gpt-6-luna",
+                messages=[{"role": "user", "content": f"Hello {k}"}],
+                stream=True,
+            )
+
+        async def broken_off(k):
+            async for _ in await ask(k):
+                break
+
+        async def given_up(k):
+            try:
+                await asyncio.wait_for(ask(k), 0.05)
+            except asyncio.TimeoutError:
+                pass
+
+        async def dropped(k):
+            await ask(k)
+
+        async def work():
+            for leave in (broken_off, given_up, dropped):
+                await asyncio.gather(*(leave(k) for k in range(4)))
+                gc.collect()
+                await asyncio.sleep(0.3)
+            gc.collect()
+            await asyncio.sleep(0.2)
+
+        worker = threading.Thread(target=lambda: asyncio.run(work()), daemon=True)
+        worker.start()
+        worker.join(30)
+        self.assertFalse(worker.is_alive(), "the event loop stands still")
+
     def test_an_async_client_streams_through_it(self):
         import openai
 

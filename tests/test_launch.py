@@ -852,6 +852,13 @@ class ProxyTests(unittest.TestCase):
         path = "http://provider.example/v1/chat/completions"
         self.assertEqual(asked[0], (path, "Basic bWU6aXRAcw==", self.body))
         self.assertEqual(asked[1], "provider.example:443")
+        # One that is itself spoken to over TLS gets no name and password in plain sight.
+        os.environ["https_proxy"] = name.replace("http://", "https://")
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            ask()
+        self.assertIn("over TLS", caught.exception.read().decode())
+        caught.exception.close()
+        self.assertEqual(len(asked), 2)
 
     def test_a_base_url_without_the_version_works_too(self):
         heard = []

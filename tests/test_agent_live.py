@@ -856,7 +856,9 @@ class BoundReasoningTests(unittest.TestCase):
         model = options.get("model") or FakeModel(clock=lambda: clock.at, binds="error")
         live = live or compache.Live(policy(rounds, ratio, spec=self.SPEC), clock=clock)
         shape = options.get("shape") or Claude()
-        app = Agent(live, shape, model, stream=options.get("stream", False), clock=clock)
+        app = Agent(
+            live, shape, model, stream=options.get("stream", False), clock=clock
+        )
         for count in runs:
             self.more(app, count)
             clock.at += away
@@ -934,9 +936,7 @@ class BoundReasoningTests(unittest.TestCase):
     def test_a_conversation_met_in_the_middle(self):
         clock = Clock()
         model = FakeModel(clock=lambda: clock.at, binds="error")
-        app, _ = self.play(
-            5, live=compache.Live(clock=clock), clock=clock, model=model
-        )
+        app, _ = self.play(5, live=compache.Live(clock=clock), clock=clock, model=model)
         self.assertEqual(self.held(model.bodies[-1]), list(range(5)))
         # Its reasoning was made without our tool. It is left out, and what comes after it stays.
         app.live = compache.Live(policy(30, spec=self.SPEC), clock=clock)

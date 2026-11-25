@@ -50,7 +50,9 @@ class Slot:
     so one part: a tool that answers in several text blocks still retrieved once.
     `closes` marks an answer that says nothing and calls no tool: it has no
     text to decide on, and still ends its turn. `answers` marks what a tool
-    returned to the model that called it: the turn goes on from there.
+    returned to the model that called it: the turn goes on from there. `stays`
+    marks a result that holds something else too, such as an image, which a
+    notice does not stand for.
     """
 
     kind: str
@@ -60,6 +62,7 @@ class Slot:
     group: Any = None
     closes: bool = False
     answers: bool = False
+    stays: bool = False
 
 
 @dataclass
@@ -174,6 +177,14 @@ def put(body: Any, path: tuple, value: Any) -> Any:
     if isinstance(body, list):
         return [*body[:head], changed, *body[head + 1 :]]
     return {**(body or {}), head: changed}
+
+
+def _more_than_text(content: Any, types=("text",)) -> bool:
+    """Whether a result's content holds something else, such as an image."""
+    return isinstance(content, list) and any(
+        isinstance(part, dict) and part.get("type", "text") not in types
+        for part in content
+    )
 
 
 def _text_parts(content: Any, base: tuple, types=("text",)) -> list[tuple[tuple, str]]:
@@ -487,6 +498,37 @@ _REASONING = (
 )
 
 
+def _joined(held: Any, more: Any) -> Any:
+    """Reasoning that arrives piece by piece: text, or a list of blocks of it."""
+    if isinstance(more, str):
+        return (held or "") + more
+    if not isinstance(more, list):
+        return more
+    blocks = list(held or ())
+    for piece in more:
+        if not isinstance(piece, dict):
+            blocks.append(piece)
+            continue
+        last = blocks[-1] if blocks and isinstance(blocks[-1], dict) else None
+        same = (
+            last is not None
+            and last.get("type") == piece.get("type")
+            and last.get("index") == piece.get("index")
+            and ("index" in piece or not last.get("signature"))
+        )
+        if not same:
+            blocks.append(dict(piece))
+            continue
+        merged = dict(last)
+        for key, value in piece.items():
+            if key in ("text", "summary", "thinking") and isinstance(value, str):
+                merged[key] = (merged.get(key) or "") + value
+            elif value is not None:
+                merged[key] = value
+        blocks[-1] = merged
+    return blocks
+
+
 class OpenAIChat:
     """`POST /chat/completions`, as OpenAI and every compatible gateway serve it."""
 
@@ -508,11 +550,14 @@ class OpenAIChat:
                 continue
             kind = {"user": "input", "assistant": "output"}.get(role, "retrieval")
             answers = role == "function" or bool(message.get("tool_call_id"))
+            stays = False
             if answers:
                 scan.results.append(message.get("tool_call_id"))
                 found = found or [(base, "")]
+                stays = _more_than_text(message.get("content"))
             scan.slots += [
-                Slot(kind, path, text, i, i, answers=answers) for path, text in found
+                Slot(kind, path, text, i, i, answers=answers, stays=stays)
+                for path, text in found
             ]
             calls = message.get("tool_calls") or message.get("function_call")
             if role == "assistant" and any(message.get(k) for k in _REASONING):
@@ -656,13 +701,15 @@ class OpenAIChat:
     @staticmethod
     def fetched(said: dict, results: dict) -> list:
         """Our own tool's calls in the reply `said` and their results, as messages of the conversation."""
+        message = said["choices"][0]["message"]
         calls = [
             call
-            for call in said["choices"][0]["message"].get("tool_calls") or ()
+            for call in message.get("tool_calls") or ()
             if call.get("id") in results
         ]
+        reasoned = {k: message[k] for k in _REASONING if message.get(k)}
         return [
-            {"role": "assistant", "content": None, "tool_calls": calls},
+            {"role": "assistant", "content": None, "tool_calls": calls, **reasoned},
             *(
                 {
                     "role": "tool",
@@ -731,6 +778,8 @@ class OpenAIChat:
             "role": "assistant",
             "content": message.get("content"),
             "tool_calls": message["tool_calls"],
+            # Some models only go on from their reasoning.
+            **{k: message[k] for k in _REASONING if message.get(k)},
         }
         answers = [
             {"role": "tool", "tool_call_id": call_id, "content": text}
@@ -826,6 +875,7 @@ class OpenAIChat:
             # Calls by the number the application sees: they count from nought.
             self._out: dict[int, int] = {}
             self._round = ""
+            self._thought: dict = {}
             self._last: dict | None = None
 
         def feed(self, raw, name, data):
@@ -846,13 +896,18 @@ class OpenAIChat:
             choice = choices[0]
             delta = dict(choice.get("delta") or {})
             changed = False
-            self.reasons = self.reasons or any(delta.get(k) for k in _REASONING)
+            for key in _REASONING:
+                if delta.get(key):
+                    self.reasons = True
+                    self._thought[key] = _joined(self._thought.get(key), delta[key])
             fragments = delta.get("tool_calls") or ()
             for call in fragments:
                 index, function = call.get("index", 0), call.get("function") or {}
                 seen = self._calls.setdefault(
-                    index, {"id": None, "name": None, "arguments": ""}
+                    index, {"id": None, "name": None, "arguments": "", "more": {}}
                 )
+                named = ("index", "id", "type", "function")
+                seen["more"].update({k: v for k, v in call.items() if k not in named})
                 seen["id"] = call.get("id") or seen["id"]
                 seen["name"] = function.get("name") or seen["name"]
                 seen["arguments"] += function.get("arguments") or ""
@@ -908,7 +963,7 @@ class OpenAIChat:
         def next_round(self):
             super().next_round()
             self._calls, self._mine, self._round = {}, set(), ""
-            self._out = {}
+            self._out, self._thought = {}, {}
 
         @property
         def said(self) -> dict:
@@ -917,10 +972,12 @@ class OpenAIChat:
                     "id": c["id"],
                     "type": "function",
                     "function": {"name": c["name"], "arguments": c["arguments"]},
+                    **c["more"],
                 }
                 for _, c in sorted(self._calls.items())
             ]
             message: dict = {"role": "assistant", "content": self._round or None}
+            message |= self._thought
             if calls:
                 message["tool_calls"] = calls
             return {"choices": [{"message": message}]}
@@ -968,12 +1025,19 @@ class Anthropic:
                     said = said or bool(block["text"])
                 elif kind == "tool_result":
                     scan.results.append(block.get("tool_use_id"))
-                    at = (*base, j, "content")
-                    for path, text in _text_parts(block.get("content"), at) or [
-                        (at, "")
-                    ]:
+                    at, held = (*base, j, "content"), block.get("content")
+                    stays = _more_than_text(held)
+                    for path, text in _text_parts(held, at) or [(at, "")]:
                         scan.slots.append(
-                            Slot("retrieval", path, text, i, (i, j), answers=True)
+                            Slot(
+                                "retrieval",
+                                path,
+                                text,
+                                i,
+                                (i, j),
+                                answers=True,
+                                stays=stays,
+                            )
                         )
             if mine == "output" and not said and not called:
                 scan.slots.append(Slot("output", base, "", i, closes=True))
@@ -1424,7 +1488,8 @@ class Anthropic:
                     if not entry.get("shown"):
                         continue
                     block["text"] = entry["shown"]
-                elif entry["type"] == "tool_use":
+                elif str(entry["type"]).endswith("tool_use") and entry["json"]:
+                    # The provider's own tools too, such as its web search.
                     block["input"] = _arguments(entry["json"])
                 content.append(block)
             return {"content": content}
@@ -1502,8 +1567,11 @@ class OpenAIResponses:
                         if isinstance(part, dict)
                         and isinstance(part.get("stdout"), str)
                     ]
+                stays = kind != "shell_call_output" and _more_than_text(
+                    item.get("output"), ("input_text", "output_text", "text")
+                )
                 scan.slots += [
-                    Slot("retrieval", path, text, i, i, answers=True)
+                    Slot("retrieval", path, text, i, i, answers=True, stays=stays)
                     for path, text in found or [(base, "")]
                 ]
                 last = "tool"
@@ -1918,6 +1986,7 @@ class Gemini:
                             text,
                             i,
                             answers=True,
+                            stays=bool(part["functionResponse"].get("parts")),
                         )
                     )
         scan.awaiting = bool(contents) and contents[-1].get("role") != "model"
@@ -2313,6 +2382,36 @@ def volume(value: Any) -> int:
     if isinstance(value, (list, tuple)):
         return sum(map(volume, value))
     return 0
+
+
+# Where a request holds what is no text, in any of the APIs.
+_MEDIA = {
+    "data",
+    "file",
+    "fileData",
+    "file_data",
+    "file_id",
+    "file_url",
+    "image_url",
+    "inlineData",
+    "inline_data",
+    "input_audio",
+}
+_MEDIA_TYPES = {"image", "document", "input_image", "input_file", "computer_screenshot"}
+
+
+def holds_media(value: Any) -> bool:
+    """Whether a request holds images, documents or sound, whose tokens have no text."""
+    if isinstance(value, dict):
+        kind = str(value.get("type"))
+        if kind in _MEDIA_TYPES:
+            return True
+        if kind.endswith(("tool_use", "thinking")):
+            return False
+        # What a tool is called with, and what it returns as an object, may have keys of any name.
+        own = {k: v for k, v in value.items() if k not in ("functionCall", "response")}
+        return not _MEDIA.isdisjoint(own) or any(map(holds_media, own.values()))
+    return isinstance(value, (list, tuple)) and any(map(holds_media, value))
 
 
 def model_of(path: str) -> str | None:

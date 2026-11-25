@@ -56,6 +56,24 @@ class SavingTests(unittest.TestCase):
         self.assertAlmostEqual(found["spent"], paid * price)
         self.assertEqual(found["models"][MODEL]["left_out_tokens"], 5_000)
 
+    def test_what_is_billed_beside_the_tokens_would_have_been_billed_anyway(self):
+        """A web search, for one."""
+        price = 0.1 / 1e6
+        sizes = {"left_bytes": 0, "sent_bytes": 40_000}
+        listed = (10_000 * 1.25 + 100 * 5) * price
+        for billed in (listed, 0.5 * listed, listed + 0.01):
+            rows = [row("a", 0, 10_000, 0, 10_000, cost=billed, **sizes)]
+            found = stats.savings(rows)
+            self.assertAlmostEqual(found["spent"], billed)
+            fee = 0.01 if billed > 2 * listed else 0
+            self.assertAlmostEqual(found["without"], listed + fee)
+
+    def test_an_image_s_tokens_are_none_of_the_text_s(self):
+        sizes = {"left_bytes": 20_000, "sent_bytes": 24_000}
+        rows = [row("a", 0, 60_000, 0, 60_000, media=True, **sizes)]
+        found = stats.savings(rows)
+        self.assertEqual(found["models"][MODEL]["left_out_tokens"], 6_000)
+
     def test_what_another_conversation_had_cached_would_have_been_read_too(self):
         rows = [row("a", 0, 20_000, 18_000, 2_000, left_bytes=-400, sent_bytes=80_000)]
         found = stats.savings(rows)

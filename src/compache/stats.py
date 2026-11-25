@@ -25,6 +25,8 @@ __all__ = ["line", "lines", "savings"]
 _COUNTED = ("answer", "reopen", "retry", "ping", "note")
 # The lifetime of the entries that a provider counts apart.
 _HOUR = 3600
+# How much more than its tokens a call may be billed before something else must have been.
+_MOST_OVER = 1.5
 # What an unknown model is taken to charge for reading its cache, in input tokens.
 _UNKNOWN = ModelSpec("unknown", read_multiplier=0.1, write_multiplier=1.0)
 
@@ -120,9 +122,13 @@ def savings(source) -> dict:
             if not row.get("header_ttl"):
                 # The application asks for that itself, so it would have paid it anyway.
                 plain = long or spec
+        listed, fee = spent, 0.0
         if row.get("cost") is not None and price:
             # What the provider says it billed, where it says so.
             spent = row["cost"] / dollars
+            if spent > _MOST_OVER * listed:
+                # More than its tokens, such as a web search: that would have been billed anyway.
+                fee = spent - listed
         entry["spent"] += spent * dollars
         entry["input_tokens"] += size
         entry["cache_read_tokens"] += read
@@ -137,7 +143,9 @@ def savings(source) -> dict:
             left = 0
             if row.get("sent_bytes"):
                 # Its tokens by what the provider counted for the text that did go out.
-                left = round(row["left_bytes"] * size / row["sent_bytes"])
+                left = record.left_out(
+                    row["left_bytes"], row["sent_bytes"], size, bool(row.get("media"))
+                )
             whole = max(0, size + left)
             first = before.first if before is not None else whole
             # What another conversation had cached, such as the same instructions, it would have read
@@ -148,7 +156,7 @@ def savings(source) -> dict:
                 shared = max(shared, before.whole)
             shared = min(shared, whole)
             if row.get("sent_bytes"):
-                without = _charge(plain, whole, shared, output)
+                without = _charge(plain, whole, shared, output) + fee
             else:
                 # Left as the application wrote it: it cost what it cost.
                 without = spent

@@ -10,8 +10,8 @@ import unittest
 import compache
 from compache import wire
 from compache.live import Result
-from compache.record import load
-from fakes import NOTICE, FakeModel, noticed
+from compache.record import load, load_calls
+from fakes import NOTICE, FakeModel, noticed, tokens
 from test_agent_live import (
     REOPEN,
     SHAPES,
@@ -225,6 +225,46 @@ class NameTests(unittest.TestCase):
             later = model.bodies[before:]
             self.assertFalse(any(noticed(b["messages"]) for b in later))
 
+    def test_a_side_request_on_another_model_leaves_the_main_line_s_pings(self):
+        clock = Clock()
+        model = FakeModel(worker(8), clock=lambda: clock.at)
+        live = compache.Live(policy(rounds=2, ratio=5.0, user_pings=3), clock=clock)
+        app = Agent(live, Claude(), model, clock=clock, thread="s")
+        app.run("Read eight files")
+        before = list(app.shape.said)
+        app.shape.ask("Suggest what the user may say next")
+        app.shape.model = "claude-small"
+        app.call()
+        app.shape.said, app.shape.model = before, "claude-agent"
+        sent = len(model.bodies)
+        for _ in range(170):
+            clock.at += 5
+            live.tick()
+        pinged = [b["model"] for b in model.bodies[sent:]]
+        self.assertEqual(pinged.count("claude-agent"), 3)
+
+    def test_an_application_s_own_tool_of_that_name_is_its_own(self):
+        for stream in (False, True):
+            with self.subTest(stream=stream):
+                model = FakeModel(lambda request: {"tool": (REOPEN, {"ticket": 7})})
+                live = compache.Live(policy(rounds=1))
+                shape = Chat()
+                plain = shape.body
+                own = {
+                    "type": "function",
+                    "function": {"name": REOPEN, "parameters": {}},
+                }
+                shape.body = lambda stream, plain=plain: {
+                    **plain(stream),
+                    "tools": [own],
+                }
+                app = Agent(live, shape, model, stream=stream)
+                shape.ask("Open ticket seven again")
+                _, calls = app.call()
+                self.assertEqual([name for _, name in calls], [REOPEN])
+                self.assertEqual(model.bodies[-1]["tools"], [own])
+                self.assertEqual(live.stats["reopened"], 0)
+
     def test_a_request_without_tools_does_not_keep_the_agent_from_its_policy(self):
         """A host asks for a title under the same name, with the user's own words, before the agent begins."""
         with tempfile.TemporaryDirectory() as folder:
@@ -316,6 +356,474 @@ class NameTests(unittest.TestCase):
             for events in left:
                 events.close()
             self.assertEqual(len(live.conversations()), 1)
+
+
+class NobodyElsesTests(unittest.TestCase):
+    """Unnamed conversations that open alike, or whose tool calls go by the same IDs."""
+
+    SECRET = "My name is Carol and my account is 4711-CAROL: look at my contract."
+
+    def setUp(self):
+        self.clock, self.down = Clock(), 0
+        self.model = FakeModel(self.script, clock=self.clock)
+        self.live = self.made()
+
+    def made(self):
+        from test_live import fitted
+
+        chat = fitted("gpt-6-luna") if self.chat else policy(rounds=1, ratio=0.0)
+        return compache.Live(chat, clock=self.clock)
+
+    chat = False
+    counted = False
+
+    @staticmethod
+    def script(request):
+        said = str(request["body"]["messages"][-1]["content"])
+        if said == "Hi":
+            return {"text": "Hello! How can I help?"}
+        if request["body"]["messages"][-1]["role"] == "user":
+            return {"text": "", "tool": ("search_docs", {"query": "clause"})}
+        return {"text": f"Answer {request['n']}."}
+
+    def send(self, body):
+        if self.down:
+            self.down -= 1
+            return Result(529, json={"error": {"message": "overloaded"}})
+        answered = self.model.send()(body)
+        if self.counted:
+            before = sum(len(m.get("tool_calls") or ()) for m in body["messages"])
+            message = answered.json["choices"][0]["message"]
+            for k, call in enumerate(message.get("tool_calls") or ()):
+                call["id"] = f"functions.search_docs:{before + k}"
+        return answered
+
+    def call(self, said):
+        from test_live import SEARCH
+
+        body = {"model": "gpt-6-luna", "messages": list(said), "tools": [SEARCH]}
+        answered = self.live.exchange("/v1/chat/completions", body, self.send)
+        if answered.status >= 400:
+            return None
+        message = answered.json["choices"][0]["message"]
+        said.append(message)
+        return message
+
+    def results(self, said, message, found):
+        said += [
+            {"role": "tool", "tool_call_id": c["id"], "content": found}
+            for c in message["tool_calls"]
+        ]
+
+    def turn(self, said, question, found="nothing"):
+        said.append({"role": "user", "content": question})
+        while True:
+            message = self.call(said)
+            if message is None or not message.get("tool_calls"):
+                return message
+            self.results(said, message, found)
+
+    def holds(self):
+        """The texts each conversation's session holds."""
+        for conversation in self.live.conversations():
+            session = conversation.session
+            parts = [*session._history, *((session._pending or ((), ()))[1])]
+            yield " ".join(p.text for p in parts)
+
+    def check(self):
+        for held in self.holds():
+            self.assertFalse("4711-CAROL" in held and "clause" in held.lower(), held)
+
+    def test_after_a_request_that_failed(self):
+        from test_live import passage
+
+        for self.chat in (False, True):
+            with self.subTest(chat=self.chat):
+                self.live = self.made()
+                carol, bob, erin = [], [], []
+                self.turn(carol, "Hi")
+                self.turn(bob, "Hi")
+                self.down = 1
+                self.assertIsNone(self.turn(carol, self.SECRET))
+                # Another says hello, and Carol's application asks again.
+                self.turn(erin, "Hi")
+                self.call(carol)
+                for k in range(1, 5):
+                    self.turn(bob, f"What does clause {k} say?", passage(k))
+                    self.turn(erin, f"And what of clause {k}?", passage(k))
+                    self.clock.at += 4000
+                self.check()
+
+    def test_ids_that_count(self):
+        from test_live import passage
+
+        self.counted = True
+        for self.chat in (False, True):
+            for restart in (False, True):
+                with self.subTest(chat=self.chat, restart=restart):
+                    self.live = self.made()
+                    carol, bob = [], []
+                    bob.append({"role": "user", "content": "What does clause 1 say?"})
+                    waits = self.call(bob)
+                    if restart:
+                        # A process that knows nothing of Bob, whose tool still runs.
+                        self.live = self.made()
+                    carol.append({"role": "user", "content": self.SECRET})
+                    self.call(carol)
+                    self.results(bob, waits, passage(1))
+                    self.call(bob)
+                    for k in range(2, 5):
+                        self.turn(bob, f"And clause {k}?", passage(k))
+                        self.clock.at += 4000
+                    self.check()
+
+    def test_while_another_s_turn_is_under_way(self):
+        from test_live import passage
+
+        self.chat = True
+        self.live = self.made()
+        carol, bob = [], []
+        self.turn(carol, "Hi")
+        self.turn(bob, "Hi")
+        self.turn(bob, "What does clause 1 say?", passage(1))
+        carol.append({"role": "user", "content": self.SECRET})
+        self.call(carol)
+        # Bob's application shows his answer otherwise, so it is not found by what was said.
+        bob[-1] = {"role": "assistant", "content": "Shown otherwise."}
+        for k in range(2, 5):
+            self.turn(bob, f"And clause {k}?", passage(k))
+            self.clock.at += 4000
+        self.check()
+
+    def test_a_question_that_was_refused_and_another_in_its_place(self):
+        from test_live import SEARCH, passage
+
+        self.chat = True
+        self.live = self.made()
+        said: list = []
+
+        def named(said):
+            body = {"model": "gpt-6-luna", "messages": list(said), "tools": [SEARCH]}
+            path = "/v1/chat/completions"
+            answered = self.live.exchange(path, body, self.send, thread="t")
+            if answered.status >= 400:
+                return None
+            said.append(answered.json["choices"][0]["message"])
+            return said[-1]
+
+        self.call = named
+        self.down = 1
+        self.assertIsNone(self.turn(said, "THE FIRST QUESTION, refused"))
+        said.pop()
+        self.turn(said, "THE SECOND QUESTION", passage(1))
+        self.turn(said, "And clause 2?", passage(2))
+        for held in self.holds():
+            if "clause 2" in held:
+                self.assertIn("THE SECOND QUESTION", held)
+                self.assertNotIn("THE FIRST QUESTION", held)
+
+    def test_a_tool_s_answer_comes_from_its_own_thread(self):
+        """As the LangChain middleware asks for it, by the ID of the model's call."""
+        live = compache.Live(policy(rounds=1, ratio=0.0), clock=self.clock)
+        tools = [
+            {"type": "function", "function": {"name": n, "parameters": {}}}
+            for n in ("search", "reopen")
+        ]
+        for name in ("alice", "bob"):
+            said = [{"role": "user", "content": "Check my ledger"}]
+            for k in range(6):
+                body = {"model": "m", "messages": list(said), "tools": tools}
+                shown = live.show("/v1/chat/completions", body, thread=name)
+                call = {"id": f"functions.search:{k}", "arguments": {"q": k}}
+                usage = {"prompt_tokens": 900, "completion_tokens": 9}
+                shown.heard(usage, model="m", said="", calls=[call])
+                function = {"name": "search", "arguments": "{}"}
+                made = {"id": call["id"], "type": "function", "function": function}
+                said += [
+                    {"role": "assistant", "content": None, "tool_calls": [made]},
+                    {
+                        "role": "tool",
+                        "tool_call_id": call["id"],
+                        "content": f"{name}'s private ledger, page {k} " * 60,
+                    },
+                ]
+                self.clock.at += 1
+        for name, other in (("alice", "bob"), ("bob", "alice")):
+            found = live.reopen(
+                name, "private ledger page", 0, call="functions.search:5"
+            )
+            self.assertIn(f"{name}'s private", json.dumps(found))
+            self.assertNotIn(f"{other}'s private", json.dumps(found))
+
+
+class ResultTests(unittest.TestCase):
+    """Results that hold something else than text, or nothing at all."""
+
+    IMAGE = {
+        "type": "image",
+        "source": {"type": "base64", "media_type": "image/png", "data": "x" * 6000},
+    }
+
+    def play(self, content, steps=24, rounds=4):
+        clock = Clock()
+
+        def script(request):
+            if len(model.bodies) <= steps:
+                return {"text": "", "tool": ("look", {"at": len(model.bodies)})}
+            return {"text": "All done."}
+
+        model = FakeModel(script, clock=lambda: clock.at)
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        live = compache.Live(
+            policy(rounds=rounds, ratio=0.0, tool_pings=2),
+            record=folder.name,
+            clock=clock,
+        )
+        shape = Claude()
+        shape.ask("Click through the site.")
+        for k in range(1, steps + 2):
+            path = shape.path
+            answered = live.exchange(path, shape.body(False), model.send(path))
+            _, calls = shape.take(answered.json)
+            if not calls:
+                break
+            clock.at += 5
+            shape.answer([(c, content(k)) for c, _ in calls])
+        return live, model, folder.name
+
+    def test_one_without_text_goes_on_with_the_same_conversation(self):
+        for content in (
+            "",
+            [self.IMAGE],
+            [{"type": "tool_reference", "tool_name": "x"}],
+        ):
+            live, model, folder = self.play(
+                lambda k, content=content: content if k % 3 == 0 else result(k)
+            )
+            self.assertEqual(len(live.conversations()), 1)
+            self.assertEqual(live.stats["turns"], 1)
+            threads, _ = load(folder)
+            self.assertEqual([r["calls"] for t in threads for r in t["runs"]], [25])
+            self.assertTrue(noticed(model.bodies[-1]))
+
+    def test_one_with_an_image_stays(self):
+        def content(k):
+            text = {"type": "text", "text": result(k)}
+            return [text, self.IMAGE] if k % 4 == 0 else result(k)
+
+        live, model, folder = self.play(content)
+        for body in model.bodies:
+            for found in Claude.results(body):
+                if isinstance(found, list):
+                    self.assertFalse(noticed(found))
+        self.assertTrue(noticed(model.bodies[-1]))
+        (conversation,) = live.conversations()
+        flow = conversation.session._engine.flow
+        self.assertEqual(flow.size, sum(flow.shown))
+        counted = tokens([model.bodies[-1]["messages"]])
+        self.assertLess(abs(flow.size - counted) / counted, 0.25)
+        # An image's tokens have no text, so they do not count for what text was left out.
+        rows = load_calls(folder)
+        self.assertTrue(all(r["media"] for r in rows[4:] if r["kind"] == "answer"))
+
+    def test_what_counts_as_an_image(self):
+        for held, body in (
+            (True, [{"content": [self.IMAGE]}]),
+            (True, [{"content": [{"type": "image_url", "image_url": {"url": "x"}}]}]),
+            (True, [{"output": [{"type": "input_image", "image_url": "data:x"}]}]),
+            (True, [{"parts": [{"inlineData": {"data": "x"}}]}]),
+            (False, [{"content": [{"type": "redacted_thinking", "data": "x"}]}]),
+            (False, [{"content": [{"type": "tool_use", "input": {"file": "a"}}]}]),
+            (False, [{"parts": [{"functionCall": {"args": {"data": 1}}}]}]),
+            (False, [{"parts": [{"functionResponse": {"response": {"file": "a"}}}]}]),
+        ):
+            self.assertEqual(wire.holds_media(body), held, body)
+
+
+class FollowUpTests(unittest.TestCase):
+    """What follows a fetch carries all that the model said when it fetched."""
+
+    SIGNED = {"google": {"thought_signature": "SIGNED"}}
+
+    def asked(self, stream):
+        """The second request of a conversation whose model fetches at once."""
+        call = {
+            "id": "c1",
+            "type": "function",
+            "function": {"name": REOPEN, "arguments": '{"reference": "words"}'},
+            "extra_content": self.SIGNED,
+        }
+        done = {"role": "assistant", "content": "Done."}
+        bodies: list = []
+
+        def chunk(delta, reason=None):
+            choice = {"index": 0, "delta": delta, "finish_reason": reason}
+            return b"data: " + json.dumps({"choices": [choice]}).encode() + b"\n\n"
+
+        def send(body):
+            bodies.append(body)
+            if stream and len(bodies) == 1:
+                pieces = [
+                    chunk({"role": "assistant", "reasoning_content": "Let me "}),
+                    chunk({"reasoning_content": "think."}),
+                    chunk({"tool_calls": [{"index": 0, **call}]}),
+                    chunk({}, "tool_calls"),
+                ]
+                return Result(200, events=iter([*pieces, b"data: [DONE]\n\n"]))
+            if stream:
+                pieces = [chunk({"content": "Done."}), chunk({}, "stop")]
+                return Result(200, events=iter([*pieces, b"data: [DONE]\n\n"]))
+            message = done
+            if len(bodies) == 1:
+                message = {
+                    "role": "assistant",
+                    "content": None,
+                    "reasoning_content": "Let me think.",
+                    "tool_calls": [call],
+                }
+            choice = {"message": message, "finish_reason": "stop"}
+            return Result(200, json={"choices": [choice]})
+
+        live = compache.Live(policy(rounds=2))
+        body = {**Chat().body(stream), "messages": [{"role": "user", "content": "hi"}]}
+        answered = live.exchange("/v1/chat/completions", body, send)
+        if answered.events is not None:
+            list(answered.events)
+        return bodies[1]["messages"][1]
+
+    def test_a_chat_completion_s_reasoning_and_what_stands_beside_a_call(self):
+        for stream in (False, True):
+            with self.subTest(stream=stream):
+                said = self.asked(stream)
+                self.assertEqual(said["reasoning_content"], "Let me think.")
+                (call,) = said["tool_calls"]
+                self.assertEqual(call["extra_content"], self.SIGNED)
+                self.assertEqual(call["function"]["name"], REOPEN)
+
+    def test_reasoning_in_pieces(self):
+        pieces = [
+            {"type": "reasoning.text", "index": 0, "text": "One "},
+            {"type": "reasoning.text", "index": 0, "text": "two."},
+            {"type": "reasoning.text", "index": 0, "signature": "S"},
+            {"type": "reasoning.encrypted", "index": 1, "data": "E"},
+        ]
+        held = None
+        for piece in pieces:
+            held = wire._joined(held, [piece])
+        self.assertEqual(
+            held,
+            [
+                {
+                    "type": "reasoning.text",
+                    "index": 0,
+                    "text": "One two.",
+                    "signature": "S",
+                },
+                {"type": "reasoning.encrypted", "index": 1, "data": "E"},
+            ],
+        )
+
+    def test_a_tool_of_the_provider_s_own_keeps_its_input(self):
+        def event(kind, data):
+            return f"event: {kind}\ndata: {json.dumps({'type': kind, **data})}\n\n".encode()
+
+        def block(index, shell, *pieces):
+            yield event("content_block_start", {"index": index, "content_block": shell})
+            for piece in pieces:
+                delta = {"type": "input_json_delta", "partial_json": piece}
+                yield event("content_block_delta", {"index": index, "delta": delta})
+            yield event("content_block_stop", {"index": index})
+
+        search = {
+            "type": "server_tool_use",
+            "id": "s1",
+            "name": "web_search",
+            "input": {},
+        }
+        ours = {"type": "tool_use", "id": "t1", "name": REOPEN, "input": {}}
+        ending = {"delta": {"stop_reason": "tool_use"}, "usage": {"output_tokens": 5}}
+        bodies: list = []
+
+        def send(body):
+            bodies.append(body)
+            opening = {"message": {"model": "m", "usage": {"input_tokens": 5}}}
+            first = [event("message_start", opening)]
+            if len(bodies) == 1:
+                first += block(0, search, '{"query": ', '"news"}')
+                first += block(1, ours, '{"reference": "words"}')
+            else:
+                text = {"index": 0, "content_block": {"type": "text", "text": "Done."}}
+                first += [event("content_block_start", text)]
+                first += [event("content_block_stop", {"index": 0})]
+            first += [event("message_delta", ending), event("message_stop", {})]
+            return Result(200, events=iter(first))
+
+        live = compache.Live(policy(rounds=2))
+        shape = Claude()
+        shape.ask("What is new?")
+        list(live.exchange(shape.path, shape.body(True), send).events)
+        said = bodies[1]["messages"][-2]["content"]
+        self.assertEqual(said[0]["input"], {"query": "news"})
+
+
+class LeftTests(unittest.TestCase):
+    """Streams that nobody reads to their end."""
+
+    def test_one_that_is_dropped_is_let_go_of_elsewhere(self):
+        """It may be collected by a thread that holds a lock, or by the loop that would have to close it."""
+        import gc
+        import time
+
+        for reads in (0, 3):
+            with self.subTest(reads=reads):
+                closed: list = []
+                model = FakeModel(lambda request: {"text": "words " * 50})
+                live = compache.Live(policy(rounds=2))
+                send = model.send(Claude.path)
+
+                def keeping(body, send=send, closed=closed):
+                    answered = send(body)
+                    answered.close = lambda: closed.append(threading.current_thread())
+                    return answered
+
+                shape = Claude()
+                shape.ask("Hi")
+                answered = live.exchange(
+                    shape.path, shape.body(True), keeping, thread="t"
+                )
+                for _ in range(reads):
+                    next(answered.events)
+                (conversation,) = live.conversations()
+                pending = conversation.pending
+                # What collects it here holds what it would need.
+                with live._lock, conversation.lock:
+                    del answered
+                    gc.collect()
+                until = time.time() + 5
+                while (pending.in_flight or not closed) and time.time() < until:
+                    time.sleep(0.01)
+                self.assertEqual(pending.in_flight, 0)
+                self.assertIsNot(closed[0], threading.current_thread())
+
+    def test_one_that_is_closed_is_let_go_of_at_once(self):
+        closed: list = []
+        model = FakeModel(lambda request: {"text": "words " * 50})
+        live = compache.Live(policy(rounds=2))
+        send = model.send(Claude.path)
+
+        def keeping(body):
+            answered = send(body)
+            answered.close = lambda: closed.append(True)
+            return answered
+
+        shape = Claude()
+        shape.ask("Hi")
+        answered = live.exchange(shape.path, shape.body(True), keeping, thread="t")
+        next(answered.events)
+        answered.events.close()
+        (conversation,) = live.conversations()
+        self.assertEqual((conversation.pending.in_flight, closed), (0, [True]))
 
 
 class FailTests(unittest.TestCase):
