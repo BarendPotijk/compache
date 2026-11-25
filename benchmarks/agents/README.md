@@ -19,9 +19,12 @@ What an agent's calls cost with and without compache: live with Claude Code and 
 | Right, of 34 | 26 | 27 | 22 | 24 |
 | **The same**, Codex | $0.033 | $0.029 | $0.038 | $0.029 |
 | Right, of 34 | 20 | 20 | 19 | 21 |
+| **One task in 13 prompts**, Codex | $0.058 | | | $0.063 |
+| Calls, hidden tests passed | 56, 14 of 14 | | | 66, 14 of 14 |
 
 - **Long sessions are where it pays.** 67% and 51% less on the task, and 85% less on the same sixteen prompts of the day. Requests stay near 100,000 tokens, above which Haiku costs five times as much. Alone they grew to 118,000 to 183,000. How soon they get there is the agent's own choice, and makes a run alone cost $0.25 or $0.41.
 - **Short sessions: 16% less with Claude Code.** 19% once the policy had learned from sessions on other issues ($0.048, 24 right). With Codex 10% less, as with Headroom, and within chance: an agent makes 24 to 105 calls for the same session, and that moves the bill more than any tool does.
+- **With Codex there is less to gain.** GPT-6 Luna reads 97% of this input from its cache, at a tenth of the price, and charges no more for long requests. On the long task compache cut nothing, and the two runs differ by the calls the agent chose to make. The best cut in hindsight would have saved 14%.
 - **The same calls, priced.** What Claude Code did alone would have cost 26% less under compache, and what Codex did 13%: their own calls, one by one, with the policy that `wrap` starts with.
 - **Answers hold up.** No difference in right answers is beyond chance (p = 0.43 to 1).
 
@@ -52,7 +55,7 @@ What an agent's calls cost with and without compache: live with Claude Code and 
 | A long session | A generated package (`tasks.py`): fourteen modules to correct, then to test, review, document and check against random inputs, in thirteen prompts. Graded by hidden tests |
 | A day | All seventeen issues in one conversation, with breaks of 20 to 420 seconds. The others' runs end where their money did: after 16 prompts alone, 12 with Kompressor and 8 with Headroom |
 | Models | Claude Haiku 5.5 in Claude Code 2.1.331, GPT-6 Luna in Codex 0.172.0, through OpenRouter, billed on 2026-11-24 and 2026-11-25 |
-| Runs | Two of each session, and of the task alone and with compache. One of the others. A prompt may take 15 minutes |
+| Runs | Two of each session, and of the task alone and with compache in Claude Code. One of the others. A prompt may take 15 minutes |
 | compache | What `compache wrap` starts, learning from nothing. Once learned: after `compache learn`, on the sessions of the first column on other tasks |
 | Headroom 0.45.0, Kompressor 1.6.1 | Their proxies, with their defaults and with the settings the package ships |
 
