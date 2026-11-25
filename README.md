@@ -2,28 +2,22 @@
 
 **Stop paying for your whole chat history on every message.**
 
-[![Tests](https://github.com/BarendPotijk/compache/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/BarendPotijk/compache/actions/workflows/tests.yml) ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-2a78d6) ![No dependencies](https://img.shields.io/badge/dependencies-none-2a78d6) [![Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-2a78d6)](LICENCE.md)
+[![PyPI](https://img.shields.io/pypi/v/compache?color=2a78d6)](https://pypi.org/project/compache/) [![Tests](https://github.com/BarendPotijk/compache/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/BarendPotijk/compache/actions/workflows/tests.yml) ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-2a78d6) ![No dependencies](https://img.shields.io/badge/dependencies-none-2a78d6) [![Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-2a78d6)](LICENCE.md)
 
-compache sits between your chatbot or agent and the model API. It learns from your own conversations which parts of the history still matter and when your users come back, then sends less and caches better. The rest of your application stays as it is.
+compache makes long chats and coding-agent sessions cheaper, with as many answers right. It sits between your app and the model API, sends the part of the history that still matters and makes the most of the prompt cache. You add one line.
 
-![Billed per 1,000 user messages on Claude Haiku 5.5: $2.68 without compache, $1.45 with. Right answers out of 208: 125 without, 135 with](docs/assets/headline.svg)
+![Billed on Claude Haiku 5.5. Chatbot, 1,000 messages to a document chat: $2.68 without compache, $1.45 with, 125 and 135 of 208 answers right. Coding agent, a 13-prompt task in Claude Code: $0.33 without, $0.13 with, all 14 tests passed in both](docs/assets/headline.svg)
 
-[Get started](#get-started) · [Coding agents](#coding-agents) · [Works with](#works-with) · [Results](#results) · [Cost calculator](https://barendpotijk.github.io/compache/) · [Docs](docs/README.md)
+<p align="center"><i>Live on Claude Haiku 5.5, as billed. The chatbot already used the 5-minute prompt cache, Claude Code ran as it comes. <a href="#results">All results</a></i></p>
 
-## Why long chats get expensive
+## Highlights
 
-Models have no memory, so your app sends the whole conversation with every message: each question, each answer, each document it ever retrieved. There are two ways to pay less, and **they work against each other**:
-
-- **Prompt caching** makes repeated text cheap, until the user takes a break and the cache expires. On Claude that takes five minutes.
-- **Trimming** (compaction) sends less text, but rewriting the history throws the cache away, and the model can lose something it needs.
-
-compache is **compaction + cache**, decided together:
-
-![A 26-message chat: the whole history grows to 89k tokens, compache sends at most 25k. It trims on every message where the cache had expired, and pings keep the cache warm through other breaks](docs/assets/requests.svg)
-
-- **Trims at the right moment.** When the cache has expired, the history has to be paid for in full anyway. That is when compache trims it.
-- **Keeps the cache warm.** While a user is away for a short break, a tiny request (a ping) keeps the cache alive, if that costs less than losing it. Where your users stay away longer, it asks Claude for its one-hour cache instead.
-- **Keeps the rest in reach.** Trimmed text leaves a short notice. When the model needs it, it can fetch it back before your app sees the reply.
+- **A lower bill for the same work.** 42% to 49% less in live chats, 51% to 85% less in long coding sessions.
+- **One line.** Wrap the client you have, or type `compache wrap claude`.
+- **Nothing to tune.** It learns from your own traffic what later messages need and when users come back.
+- **Works with the prompt cache.** It trims when the cache has expired anyway, and keeps it warm when that pays.
+- **Nothing is gone for good.** The model can fetch trimmed text back before your app sees the reply.
+- **Private.** Runs in your process, has no dependencies and talks only to your model provider.
 
 ## Get started
 
@@ -31,36 +25,35 @@ compache is **compaction + cache**, decided together:
 pip install compache
 ```
 
-**1. Record.** One line around the client you already have. Your requests and replies do not change.
+**A coding agent.** One command, nothing to set. Also `codex`, `opencode`, `gemini` and [others](docs/agents.md).
+
+```sh
+compache wrap claude
+```
+
+**Your own chatbot.** Record for a while, fit, then apply:
 
 ```python
 import compache
 from anthropic import Anthropic
 
-client = compache.wrap(Anthropic(), record="compache-record", sample=0.1)
+client = compache.wrap(Anthropic(), record="compache-record", sample=0.1)   # changes nothing yet
 ```
-
-The record holds sizes, times and token usage, **never text**. For one message in ten, the model is asked afterwards which earlier parts its reply needed, which adds about 5% to the bill while you record. In our runs some 600 messages were enough.
-
-**2. Fit.** compache prices every candidate setting on your own traffic and prints what you would save, before anything in your app changes.
 
 ```sh
-compache fit compache-record --model claude-haiku-5-5
+compache fit compache-record --model claude-haiku-5-5    # prints what you would save
 ```
-
-**3. Apply.** Same line, with the result.
 
 ```python
-client = compache.wrap(Anthropic(), "policy.json")
+client = compache.wrap(Anthropic(), "policy.json")       # saves it
 ```
 
-That is all. There are no thresholds to tune. Or have your coding agent put it in, with `/plugin install compache --marketplace BarendPotijk/compache` in Claude Code and `npx skills add BarendPotijk/compache` in any other.
+The record holds sizes, times and token usage, never text. Recording adds about 5% to the bill, and some 600 messages were enough in our runs. [Already have chat logs?](docs/guide.md)
 
-<details>
-<summary><b>Try it now</b>, on four sample chats in a few seconds, without an API key</summary>
+**Or try it first**, on four sample chats, without an API key:
 
 ```sh
-compache demo -o policy.json
+compache demo
 ```
 
 ```text
@@ -71,94 +64,65 @@ Send up to 1 keep-warm ping while a user is away.
 82% of what the labelled turns need from earlier turns stays in view. The rest is fetched back, and that call is in the cost.
 $16.10 per 1,000 turns against $50.25 keeping everything: 68% less.
 Caching alone, at its best, would cost $18.66.
-
-Wrote policy.json
 ```
 
-In a clone of this repository, `python examples/quickstart/apply.py` then plays one of those chats, the one in the figure above, message by message.
-</details>
+## How it works
 
-<details>
-<summary><b>Already have chat logs?</b> Skip the recording</summary>
+Models have no memory, so your app sends the whole conversation again with every message. Prompt caching makes that cheap until the user takes a break and the cache expires. Trimming sends less, but rewrites the history and throws the cache away. compache decides the two together.
 
-```sh
-compache pull langfuse -o threads.jsonl.gz      # or: mlflow, otel. Your own chat log works as it is
-compache fit threads.jsonl.gz --labels labels.jsonl --model claude-haiku-5-5
-```
+![One chat of 26 messages. The whole history grows to 89k tokens with the last message, compache sends 25k there](docs/assets/requests.svg)
 
-Labels say, for a sample of messages, which earlier parts were needed. A [coding-agent skill](skills/compache-label-dependencies/SKILL.md) writes them. Without labels compache keeps the whole history and tunes the pings. [Guide](docs/guide.md)
-</details>
+1. **It trims when the cache is already gone,** so rewriting the history costs nothing extra.
+2. **It keeps the cache warm** with a tiny request while a user is away, if that costs less than losing it, or asks Claude for its 1-hour cache.
+3. **It leaves a short notice** where text was trimmed, and the model fetches the text back when it needs it.
 
-## Coding agents
+Every request is priced by the provider's cache rules on your own conversations, and the cheapest setting wins. [Read more](docs/how-it-works.md)
 
-```sh
-compache wrap claude          # or codex, opencode, gemini, copilot, goose, or any command after --
-```
+## Results
 
-An agent sends every tool result again with every call. compache keeps the newest ones in view, lets older ones go when that is cheap, keeps the cache through long tool runs and breaks, and fetches a result back when the model asks for it. It starts from what 174 public runs taught and goes on from your own sessions. There is nothing to set. [Agents](docs/agents.md)
+Less to pay than without compache, on conversations it had not seen:
 
-![What long sessions with Claude Code had cost after each prompt. One task in 13 prompts: alone $0.41 and $0.25 in two runs, Headroom $0.40, Kompressor $0.28, compache $0.13 and $0.12. 17 issues in one conversation: alone $1.20 after 16 prompts and, in a second run, $0.80 after all 17, compache $0.22 and $0.13](docs/assets/agents-live.svg)
+| | Live, billed | Modeled |
+|:--|:-:|:-:|
+| Document chats | 42% to 49% | 43% to 89% |
+| Document chats already on the 1-hour cache | 18% | 30% to 79% |
+| Coding agents, long sessions | 51% to 85% | – |
+| Coding agents, sessions of some 50 calls | 16% | – |
+| Coding agents, 174 public runs | – | 5% to 43% |
 
-As many tests passed and issues solved. Where the price does not jump with the size of a request, as on Claude Sonnet 5.5, it saves [5% to 43%, modeled](docs/agents.md#what-it-saves), by how an agent is worked with. `compache stats` says what it saved. In your own agent it is one argument: `compache.wrap(client, learn="compache-record")`.
+Live is on Claude Haiku 5.5, modeled on Claude Sonnet 5.5. As many answers were right and as many tasks solved, within chance. The modeled range comes from how long users are away:
+
+![Cost per 1,000 messages for users who are back after 30 seconds, 4 minutes and 30 minutes. Sending everything on the 5-minute cache: $34, $143, $286. On the 1-hour cache: $28, $39, $155. compache: $19, $24, $32](docs/assets/breaks-cost.svg)
+
+It saves least in short chats and where the cache outlasts the breaks: 2% to 5% on GPT-6 Luna, whose cache lasts 30 minutes, with slightly fewer answers right, on too few messages to call. [All benchmarks](benchmarks/README.md)
+
+**What would you save?** Try the [cost calculator](https://barendpotijk.github.io/compache/). Drop a chat log on it: it is read in your browser and sent nowhere.
 
 ## Works with
 
 | Your stack | What you add |
-|---|---|
-| Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code, Copilot CLI, Aider, Goose, Crush, Kilo, pi, OpenHands and other agents on the command line | `compache wrap <agent>` |
-| OpenAI, Anthropic and Google GenAI SDKs, sync, async and streaming | `compache.wrap(client, "policy.json")` |
-| LangChain and LangGraph, any chat model | `compache.langchain.middleware(...)` |
-| OpenAI Agents SDK, Claude Agent SDK, Google ADK, Pydantic AI, LlamaIndex, Microsoft Agent Framework, Semantic Kernel, Agno, AutoGen, Strands, Haystack, Langfuse's OpenAI drop-in | [One line each](docs/integrations.md#python-frameworks) |
-| LiteLLM | `compache.litellm.install(...)`, or a callback in your LiteLLM proxy |
-| Hermes | `context.engine: compache` |
-| Anything with a base URL: the Vercel AI SDK, OpenClaw and other agent harnesses | `compache proxy --policy policy.json` |
-| Your own prompt assembly | `policy.session(thread_id)` |
+|:--|:--|
+| Claude Code, Codex, OpenCode, Gemini CLI, Copilot CLI, Aider, Goose and other agents | `compache wrap <agent>` |
+| OpenAI, Anthropic and Google GenAI SDKs, sync, async and streaming | `compache.wrap(client, ...)` |
+| LangChain and LangGraph | `compache.langchain.middleware(...)` |
+| LiteLLM | `compache.litellm.install(...)` |
+| OpenAI Agents SDK, Pydantic AI, LlamaIndex, Google ADK, Hermes and [more](docs/integrations.md) | One line each |
+| Anything with a base URL | `compache proxy` |
 
-Everything runs in your own process and talks only to your model provider. No state is kept outside the process, so trimming works in serverless functions and across deploys. Keep-warm pings need a process that stays up; without one, fit with `ping_counts=(0,)`. A request the provider refuses after compache changed it is sent again as your app wrote it. [All integrations](docs/integrations.md)
+## FAQ
 
-## Why learn it from your data?
+**I already use prompt caching. What does this add?** Sending less, and knowing when. Modeled on document chats it costs [30% to 70% less](docs/comparisons.md) than the cheapest cache setting alone.
 
-Because every chatbot needs a different answer. Three workloads, three settings, each priced by the provider's cache rules on conversations compache had not seen, against sending everything:
+**How does it compare with Headroom or Kompressor?** They make each tool result smaller. compache decides which parts are sent at all. Live on the same document chats it was [36% and 26% cheaper](docs/comparisons.md#live), with at least as many answers right. Those chats are prose, and Headroom is made for structured tool output.
 
-| Chatbot | What compache learned | Cost |
-|:--|:--|:-:|
-| **Chat with documents** ([DocChat](benchmarks/docchat/README.md)) | Questions and answers matter for long. Retrieved text is rarely needed after one message, so it goes | **43%&nbsp;to&nbsp;89%&nbsp;less** |
-| **Long personal chats** ([BEAM](benchmarks/beam/README.md)) | What the user said matters. Earlier replies of the assistant can go | **57%&nbsp;to&nbsp;91%&nbsp;less** |
-| **Data analysis** ([LongDS](benchmarks/README.md)) | Almost every step builds on earlier ones. Keep nearly everything, and time the pings | **0%&nbsp;to&nbsp;32%&nbsp;less** |
+**Does it work in serverless functions?** Trimming does: no state is kept outside the process. Keep-warm pings need a process that stays up, so fit with `ping_counts=(0,)`.
 
-How long users stay away matters as much. The same document chats, with three kinds of users, and what compache picked for each:
+**What if something goes wrong?** A request the provider refuses after compache changed it is sent again as your app wrote it.
 
-![Cost per 1,000 messages for users who are back after 30 seconds, 4 minutes and 30 minutes. Sending everything on the 5-minute cache: $34, $143, $286. On the 1-hour cache: $28, $39, $155. compache: $19, $24, $32](docs/assets/breaks-cost.svg)
+## Documentation
 
-A fixed rule such as "keep the last 20 messages" or "summarize at 75% of the window" is one setting for all of these. DocChat's 43% to 89% is against the 5-minute cache. On the 1-hour cache it is 30% to 79%.
+[Guide](docs/guide.md) · [Agents](docs/agents.md) · [Integrations](docs/integrations.md) · [How it works](docs/how-it-works.md) · [Other tools compared](docs/comparisons.md) · [Benchmarks](benchmarks/README.md) · [Calculator](https://barendpotijk.github.io/compache/) · [Issues](https://github.com/BarendPotijk/compache/issues)
 
-## Results
+## License
 
-| | Measured on | Cost |
-|:--|:--|:-:|
-| **Claude Haiku 5.5**, against the 5-minute cache | Live calls, billed, four integrations | **42%&nbsp;to&nbsp;49%&nbsp;less** |
-| **Claude Haiku 5.5**, against the 1-hour cache | Live calls, billed, short chats | **18%&nbsp;less** |
-| **GPT-6 Luna**, against the 30-minute cache | Live calls, billed, one integration | **2%&nbsp;to&nbsp;5%&nbsp;less** |
-| **Claude Sonnet 5.5**, against the 5-minute cache | DocChat, modeled cost | **43%&nbsp;to&nbsp;89%&nbsp;less** |
-| **Claude Sonnet 5.5**, against the 1-hour cache | DocChat, modeled cost | **30%&nbsp;to&nbsp;79%&nbsp;less** |
-| **Claude Code on Claude Haiku 5.5**, long sessions | Live sessions, billed | **51%&nbsp;to&nbsp;85%&nbsp;less** |
-| **Claude Code on Claude Haiku 5.5**, sessions of some 50 calls | Live sessions, billed | **16%&nbsp;less** |
-| **Coding agents on Claude Sonnet 5.5**, against the 5-minute cache | 174 public runs, modeled cost | **5%&nbsp;to&nbsp;43%&nbsp;less** |
-
-**It pays off most** in long chats with a lot of retrieved or tool text, where users pause longer than the cache lasts. **It pays off least** in short chats and where the cache outlasts the breaks: on GPT-6 Luna these users were always back in time, so there was little to save. If your app already uses Claude's 1-hour cache, the 1-hour row is yours: its writes cost more and its entries last longer, so there is less left to save, most of all in short chats. [The long cache](docs/comparisons.md#the-long-cache)
-
-**Answers hold up.** In every measurement, the number of right answers with and without compache differs by no more than chance, and as many issues and tasks are solved. On GPT-6 Luna it was slightly lower, on too few messages to call. [Live runs](benchmarks/live/README.md) · [All benchmarks](benchmarks/README.md)
-
-**What would you save?** Put your numbers in the [cost calculator](https://barendpotijk.github.io/compache/), or drop a chat log or a `policy.json` on it: it is read in your browser and sent nowhere. It compares with your own rules, other tools' defaults or what you pay now.
-
-## Next to what you already use
-
-| You use | compache adds |
-|---|---|
-| Prompt caching, the 1-hour cache included | What to do when the cache is about to expire, and what to drop once it has |
-| Keep the last N messages, or summarize at a threshold | N learned per kind of text, cuts timed to the cache, and trimmed text the model can fetch back |
-| OpenClaw or provider compaction at fixed thresholds | A setting fitted to your traffic. Modeled on Claude Sonnet 5.5, [48% to 54% cheaper than OpenClaw's defaults](docs/comparisons.md#openclaw) |
-| A cache tool such as caching.ai, or one-hour cache entries | Sending less. Modeled on document chats, [30% to 70% cheaper](docs/comparisons.md) than the cheapest cache setting alone |
-| Headroom or OptScale Kompressor | They shrink single tool results, compache decides which parts stay and when the cache is kept warm. Live, with as many answers right: on document chats [36% and 26% cheaper](docs/comparisons.md#live), on a long session with Claude Code, run once each, [66% and 53%](docs/comparisons.md#coding-agents) |
-
-[Guide](docs/guide.md) · [Integrations](docs/integrations.md) · [How it works](docs/how-it-works.md) · [Other tools compared](docs/comparisons.md) · [Calculator](https://barendpotijk.github.io/compache/) · [Issues](https://github.com/BarendPotijk/compache/issues) · [Apache-2.0](LICENCE.md)
+[Apache-2.0](LICENCE.md)

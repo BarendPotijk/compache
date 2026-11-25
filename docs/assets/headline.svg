@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="880" height="182" viewBox="0 0 880 182" role="img" aria-labelledby="t d">
-<title id="t">46% off the bill, with as many answers right</title>
-<desc id="d">Live calls to Claude Haiku 5.5. Billed per 1,000 user messages: $2.68 without compache, $1.45 with. Answers graded right of 208: 125 without, 135 with.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="226" viewBox="0 0 880 226" role="img" aria-labelledby="t d">
+<title id="t">The same work for a lower bill</title>
+<desc id="d">Billed by the provider on Claude Haiku 5.5. Chatbot, 1,000 messages to a document chat: $2.68 without, $1.45 with, 125 answers right without, 135 with, of 208. Coding agent, a 13-prompt task in Claude Code: $0.33 without, $0.13 with, 14 of 14 tests passed without, 14 of 14 with.</desc>
 <style>
 text{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;font-size:12px;fill:#0b0b0b}
 .surface{fill:#fcfcfb;stroke:rgba(11,11,11,.1)}
@@ -16,21 +16,27 @@ text{fill:#f0efec}.surface{fill:#1a1a19;stroke:rgba(255,255,255,.1)}.t2{fill:#c3
 .cell{fill:#383835}.ring{stroke:#1a1a19}
 }
 </style>
-<rect class="surface" x=".5" y=".5" width="879" height="181" rx="10"/>
-<text x="24.0" y="32.0" class="big">46% off the bill, with as many answers right</text>
-<text x="24.0" y="51.0" class="t2">Live calls to Claude Haiku 5.5, billed by the provider: 52 messages compache had not seen, each through 4 integrations.</text>
-<text x="124.0" y="130.0" class="t2" text-anchor="end">Without</text>
-<text x="124.0" y="162.0" class="b" text-anchor="end">With compache</text>
-<text x="138.0" y="97.0" class="h">Bill per 1,000 user messages</text>
-<line class="axis" x1="138" x2="138" y1="110" y2="172"/>
-<path class="n" d="M138,114 h256.0 a4,4 0 0 1 4,4 v14 a4,4 0 0 1 -4,4 h-256.0 z"/>
-<text x="406.0" y="129.5" class="t2">$2.68</text>
-<path class="c" d="M138,146 h136.4 a4,4 0 0 1 4,4 v14 a4,4 0 0 1 -4,4 h-136.4 z"/>
-<text x="286.4" y="161.5" class="h">$1.45</text>
-<text x="538.0" y="97.0" class="h">Right answers, out of 208</text>
-<line class="axis" x1="538" x2="538" y1="110" y2="172"/>
-<path class="n" d="M538,114 h236.7 a4,4 0 0 1 4,4 v14 a4,4 0 0 1 -4,4 h-236.7 z"/>
-<text x="786.7" y="129.5" class="t2">125</text>
-<path class="c" d="M538,146 h256.0 a4,4 0 0 1 4,4 v14 a4,4 0 0 1 -4,4 h-256.0 z"/>
-<text x="806.0" y="161.5" class="h">135</text>
+<rect class="surface" x=".5" y=".5" width="879" height="225" rx="10"/>
+<style>.huge{font-size:34px;font-weight:650;letter-spacing:-1px}</style>
+<text x="24.0" y="36.0" class="big">Chatbot</text>
+<text x="95.0" y="36.0" class="t2">1,000 messages to a document chat</text>
+<text x="24.0" y="86.0" class="huge">46% less</text>
+<text x="24.0" y="126.0" class="t2">Without</text>
+<path class="n" d="M124.0,110 h232.0 a4,4 0 0 1 4,4 v16 a4,4 0 0 1 -4,4 h-232.0 z"/>
+<text x="369.0" y="126.5" class="t2">$2.68</text>
+<text x="24.0" y="162.0" class="b">With compache</text>
+<path class="c" d="M124.0,146 h123.4 a4,4 0 0 1 4,4 v16 a4,4 0 0 1 -4,4 h-123.4 z"/>
+<text x="260.4" y="162.5" class="h">$1.45</text>
+<text x="24.0" y="204.0" class="t2">125 answers right without, 135 with, of 208</text>
+<text x="460.0" y="36.0" class="big">Coding agent</text>
+<text x="576.0" y="36.0" class="t2">a 13-prompt task in Claude Code</text>
+<text x="460.0" y="86.0" class="huge">61% less</text>
+<line class="grid" x1="440.0" x2="440.0" y1="24" y2="202"/>
+<text x="460.0" y="126.0" class="t2">Without</text>
+<path class="n" d="M560.0,110 h232.0 a4,4 0 0 1 4,4 v16 a4,4 0 0 1 -4,4 h-232.0 z"/>
+<text x="805.0" y="126.5" class="t2">$0.33</text>
+<text x="460.0" y="162.0" class="b">With compache</text>
+<path class="c" d="M560.0,146 h87.7 a4,4 0 0 1 4,4 v16 a4,4 0 0 1 -4,4 h-87.7 z"/>
+<text x="660.7" y="162.5" class="h">$0.13</text>
+<text x="460.0" y="204.0" class="t2">14 of 14 tests passed without, 14 of 14 with</text>
 </svg>

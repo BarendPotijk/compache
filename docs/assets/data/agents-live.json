@@ -1,9 +1,9 @@
 {
- "title": "What long sessions had cost after each prompt",
- "subtitle": "Claude Haiku 5.5 in Claude Code, billed by the provider. Its price is five times higher for requests above 100k tokens.",
+ "title": "Long Claude Code sessions cost far less with compache",
+ "subtitle": "The bill so far, after each prompt, on Claude Haiku 5.5. A line averages two runs, its band shows both. Headroom and Kompressor: one run.",
  "panels": [
   {
-   "heading": "One task in 13 prompts",
+   "heading": "One task, 13 prompts",
    "runs": [
     {
      "arm": "none",
@@ -140,7 +140,7 @@
    ]
   },
   {
-   "heading": "17 issues in one conversation",
+   "heading": "16 issues in one conversation",
    "runs": [
     {
      "arm": "none",
