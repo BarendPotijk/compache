@@ -2,7 +2,7 @@
 
 What an agent's calls cost with and without compache: live with Claude Code and Codex next to Headroom and OptScale Kompressor, and modeled on public runs.
 
-![What long sessions had cost after each prompt. One task in 13 prompts: Claude Code alone $0.41 and $0.25 in two runs, Headroom $0.40, Kompressor $0.28, compache $0.13 and $0.12. 17 issues in one conversation: alone $1.20 after 16 prompts and, in a second run, $0.80 after all 17, Kompressor $0.95 after 12, Headroom $0.14 after 8, compache $0.22 and $0.13](../../docs/assets/agents-live.svg)
+![Long Claude Code sessions on Claude Haiku 5.5, the bill after the last prompt. One task in 13 prompts: alone $0.33, Headroom $0.40, Kompressor $0.28, compache $0.13. 16 issues in one conversation: alone $0.98, compache $0.15. Alone and compache are averages of two runs](../../docs/assets/agents-live.svg)
 
 ## Live
 
