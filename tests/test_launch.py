@@ -16,6 +16,7 @@ import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from unittest import mock
 
 import compache
 from compache import doctor, launch, proxy
@@ -62,11 +63,13 @@ class Told(unittest.TestCase):
         file.parent.mkdir(parents=True, exist_ok=True)
         file.write_text(text if isinstance(text, str) else json.dumps(text))
 
-    def told(self, name, env=None):
+    def told(self, name, env=None, *words, **options):
         return launch.prepared(
             launch.AGENTS[name],
             "http://127.0.0.1:9999",
             {"HOME": str(self.home), **(env or {})},
+            words,
+            **options,
         )
 
 
@@ -296,6 +299,9 @@ class SetupTests(Told):
             os.environ["COMPACHE_HOME"] = folder
             try:
                 changes, ahead, _ = self.told("pi")
+                # It is only there once it is needed.
+                self.assertFalse(Path(ahead[1]).exists())
+                launch.AGENTS["pi"].needs()
             finally:
                 os.environ.pop("COMPACHE_HOME")
                 if before is not None:
@@ -488,14 +494,182 @@ class OwnFilesTests(Told):
     def test_a_project_s_file_is_not_followed(self):
         """It may come with somebody else's repository."""
         self.put("work/project/.qwen/.env", f"OPENAI_BASE_URL={self.GATEWAY}/v1\n")
-        with self.assertRaisesRegex(ValueError, "OPENAI_BASE_URL"):
+        with self.assertRaisesRegex(ValueError, "set OPENAI_BASE_URL.*--upstream"):
             self.told("qwen")
         _, _, upstreams = self.told("qwen", {"OPENAI_BASE_URL": "https://one.example"})
         self.assertEqual(upstreams, {"openai": "https://one.example"})
+        # Whoever says where everything goes need not say it again.
+        changes, _, _ = self.told("qwen", decided=True)
+        self.assertEqual(changes["OPENAI_BASE_URL"], "http://127.0.0.1:9999/v1")
         # It is the only one that is read, so one that says nothing leaves nothing said.
         self.put("work/project/.qwen/.env", "OTHER=1\n")
         self.put(".qwen/.env", f"OPENAI_BASE_URL={self.GATEWAY}/v1\n")
         self.assertEqual(self.told("qwen")[2], {})
+
+    def test_claude_code_s_project_settings(self):
+        """They come before the user's, and are not followed unless the environment says the same."""
+        other = "https://other.example"
+        self.put(".claude/settings.json", {"env": {"ANTHROPIC_BASE_URL": self.GATEWAY}})
+        for file in ("settings.local.json", "settings.json"):
+            path = f"work/project/.claude/{file}"
+            for said in (
+                {"ANTHROPIC_BASE_URL": other, "ANTHROPIC_AUTH_TOKEN": "token"},
+                {"CLAUDE_CODE_USE_VERTEX": "1"},
+            ):
+                self.put(path, {"env": said})
+                with self.subTest(file=file, said=said):
+                    with self.assertRaisesRegex(ValueError, file):
+                        self.told("claude")
+            self.put(path, {"env": {"ANTHROPIC_BASE_URL": self.GATEWAY, "OTHER": 1}})
+            self.assertEqual(self.told("claude")[2], {"anthropic": self.GATEWAY})
+            # Somebody has said where everything goes: what is on the command line comes before the files.
+            self.put(path, {"env": {"ANTHROPIC_BASE_URL": other}})
+            _, ahead, _ = self.told("claude", decided=True)
+            told = json.loads(ahead[1])["env"]
+            self.assertEqual(told["ANTHROPIC_BASE_URL"], "http://127.0.0.1:9999")
+            (self.home / path).unlink()
+
+    def test_what_claude_code_s_settings_say_about_where_it_runs(self):
+        self.put(".claude/settings.json", {"env": {"CLAUDE_CODE_USE_BEDROCK": "1"}})
+        with self.assertRaisesRegex(ValueError, "AWS"):
+            self.told("claude")
+        vertex = {"CLAUDE_CODE_USE_VERTEX": True, "CLOUD_ML_REGION": "us-east5"}
+        self.put(".claude/settings.json", {"env": vertex})
+        changes, ahead, upstreams = self.told("claude")
+        goes = {"anthropic": "https://us-east5-aiplatform.googleapis.com"}
+        self.assertEqual(upstreams, goes)
+        base = changes["ANTHROPIC_VERTEX_BASE_URL"]
+        self.assertEqual((base, ahead), ("http://127.0.0.1:9999/v1", []))
+
+    def test_qwen_code_s_project_settings(self):
+        def says(base):
+            return {"security": {"auth": {"baseUrl": base, "apiKey": "key"}}}
+
+        self.put(".qwen/settings.json", says(self.GATEWAY + "/v1"))
+        self.put("work/project/.qwen/settings.json", says("https://other.example/v1"))
+        with self.assertRaisesRegex(ValueError, "project/.qwen/settings.json"):
+            self.told("qwen")
+        # A variable comes before both.
+        env = {"OPENAI_BASE_URL": "https://one.example/v1"}
+        self.assertEqual(self.told("qwen", env)[2], {"openai": "https://one.example"})
+        self.put("work/project/.qwen/settings.json", says(self.GATEWAY + "/v1"))
+        self.assertEqual(self.told("qwen")[2], {"openai": self.GATEWAY})
+
+    def test_variables_in_a_file(self):
+        """As agents read them: the last one counts, and one that is left empty says nothing."""
+        for text, goes in (
+            (f"OPENAI_BASE_URL=https://a.example\nOPENAI_BASE_URL={self.GATEWAY}", 1),
+            (f"OPENAI_BASE_URL=`{self.GATEWAY}`\n", 1),
+            (f"  export OPENAI_BASE_URL = {self.GATEWAY} # ours\n", 1),
+            (f"OPENAI_BASE_URL={self.GATEWAY}\nOPENAI_BASE_URL=\n", 0),
+            ("OPENAI_BASE_URL=\nOPENAI_API_KEY=sk-secret\n", 0),
+            (f"#OPENAI_BASE_URL={self.GATEWAY}\n", 0),
+        ):
+            self.put(".qwen/.env", text)
+            with self.subTest(text):
+                changes, _, upstreams = self.told("qwen")
+                self.assertEqual(upstreams, {"openai": self.GATEWAY} if goes else {})
+                self.assertNotIn("sk-secret", str(changes))
+        self.put("work/project/.env", "GOOGLE_GEMINI_BASE_URL=\nDATABASE=x://h/db\n")
+        self.assertEqual(self.told("gemini")[2], {})
+
+    @unittest.skipIf(os.name == "nt" or not os.getuid or os.getuid() == 0, "modes")
+    def test_a_file_that_cannot_be_read_says_nothing(self):
+        """The agent cannot read it either."""
+        (self.home / ".qwen").mkdir()
+        (self.home / ".qwen").chmod(0)
+        self.addCleanup((self.home / ".qwen").chmod, 0o755)
+        self.assertEqual(self.told("qwen")[2], {})
+
+    def test_opencode_s_own_files_come_before_its_variables(self):
+        def says(base):
+            return {"provider": {"openai": {"options": {"baseURL": base + "/v1"}}}}
+
+        env = {"OPENAI_BASE_URL": "https://other.example/v1"}
+        goes = {"openai": self.GATEWAY}
+        for path in (
+            ".config/opencode/opencode.json",
+            ".opencode/opencode.json",
+            "work/project/opencode.json",
+            "work/project/.opencode/opencode.jsonc",
+        ):
+            self.put(path, says(self.GATEWAY))
+            with self.subTest(path):
+                self.assertEqual(self.told("opencode", env)[2], goes)
+            (self.home / path).unlink()
+        # It looks no further up than its repository.
+        self.put("opencode.json", says(self.GATEWAY))
+        self.assertEqual(self.told("opencode")[2], goes)
+        (self.home / "work" / ".git").mkdir()
+        self.assertEqual(self.told("opencode")[2], {})
+        self.put("work/opencode.json", says(self.GATEWAY))
+        self.assertEqual(self.told("opencode")[2], goes)
+
+    def test_what_is_not_what_it_should_be_says_nothing(self):
+        for name, path, said in (
+            ("opencode", ".config/opencode/opencode.json", {"provider": ["anthropic"]}),
+            ("opencode", "opencode.json", {"provider": {"openai": {"options": "x"}}}),
+            ("pi", ".pi/agent/models.json", {"providers": [{"name": "x"}]}),
+            ("pi", ".pi/agent/models.json", {"providers": {"openai": {"baseUrl": 1}}}),
+            ("qwen", ".qwen/settings.json", {"security": "none"}),
+            ("claude", ".claude/settings.json", {"env": ["ANTHROPIC_BASE_URL"]}),
+            ("openhands", ".openhands/agent_settings.json", {"llm": "x"}),
+            ("codex", ".codex/config.toml", "model_provider = []\nmodel_providers = 1"),
+        ):
+            self.put(path, said)
+            with self.subTest(agent=name, said=said):
+                upstreams = self.told(name)[2]
+                self.assertIn(upstreams, ({}, {"openai": "https://api.openai.com"}))
+            (self.home / path).unlink()
+
+    def test_codex_s_command_line(self):
+        """Where it says that requests go, they go on to."""
+        key = {"auth_mode": "apikey", "OPENAI_API_KEY": "key"}
+        self.put(".codex/auth.json", key)
+        ours = '[model_providers.ours]\nname = "x"\nbase_url = "%s/v1"\n'
+        self.put(
+            ".codex/gateway.config.toml",
+            'model_provider = "ours"\n' + ours % self.GATEWAY,
+        )
+        self.put(".codex/config.toml", ours % "https://in.the.file")
+        base = f'openai_base_url="{self.GATEWAY}/v1"'
+        goes = {"openai": self.GATEWAY}
+        for words in (
+            ("exec", "-c", base, "say hi"),
+            ("-c", f"openai_base_url={self.GATEWAY}/v1", "exec", "say hi"),
+            (f"--config={base}",),
+            ("-c" + base,),
+            ("--profile", "gateway", "exec", "say hi"),
+            ("-p", "gateway"),
+            ("--profile=gateway",),
+            ("-c", 'profile="gateway"'),
+            (
+                "-c",
+                "model_provider=ours",
+                "-c",
+                f'model_providers.ours.base_url="{self.GATEWAY}/v1"',
+            ),
+        ):
+            with self.subTest(words=words):
+                _, ahead, upstreams = self.told("codex", None, *words)
+                self.assertEqual(upstreams, goes)
+                self.assertIn("127.0.0.1:9999/v1", " ".join(ahead))
+        for words, goes in (
+            (("exec", "--", "-c", base), "https://api.openai.com"),
+            (("-c", "model_provider=ours"), "https://in.the.file"),
+            (("exec", "say -c hi", "-m", "gpt"), "https://api.openai.com"),
+        ):
+            with self.subTest(words=words):
+                upstreams = self.told("codex", None, *words)[2]
+                self.assertEqual(upstreams, {"openai": goes})
+        self.put(
+            ".codex/config.toml", 'model_provider = "ours"\n' + ours % self.GATEWAY
+        )
+        self.assertEqual(self.told("codex")[2], {"openai": self.GATEWAY})
+        upstreams = self.told("codex", None, "exec", "--ignore-user-config", "hi")[2]
+        self.assertEqual(upstreams, {"openai": "https://api.openai.com"})
+        with self.assertRaisesRegex(ValueError, "'oss'"):
+            self.told("codex", None, "--oss")
 
     def test_codex_on_a_provider_of_its_own(self):
         self.put(".codex/config.toml", 'model_provider = "ollama"\n')
@@ -675,7 +849,11 @@ class RunTests(Wrapped):
         status, out, _ = self.wrap("--print", "claude")
         self.assertEqual(status, 0)
         self.assertIn("compache proxy --port 8787 --learn", out)
+        # As careful with keys as `wrap` itself.
+        self.assertIn(" --careful\n", out)
         self.assertIn("export ANTHROPIC_BASE_URL='http://127.0.0.1:8787'", out)
+        _, out, _ = self.wrap("--print", "--upstream", "https://one.example", "claude")
+        self.assertIn(" --upstream https://one.example\n", out)
 
 
 class LineTests(Wrapped):
@@ -729,6 +907,26 @@ class DoctorTests(Wrapped):
         self.assertNotIn("sk-secret", out)
         self.assertIn("ANTHROPIC_API_KEY", out)
         self.assertEqual(json.loads(out)["problems"], 0)
+
+    def test_files_of_agents_that_are_odd_end_nothing(self):
+        for name in ("pi", "opencode", "qwen"):
+            script = self.home / (f"{name}.cmd" if os.name == "nt" else name)
+            script.write_text("")
+            script.chmod(0o755)
+        for path, said in (
+            (".config/opencode/opencode.json", '{"provider": ["anthropic"]}'),
+            (".pi/agent/models.json", '{"providers": [{"name": "x"}]}'),
+            (".qwen/settings.json", '{"security": "none"}'),
+        ):
+            (self.home / path).parent.mkdir(parents=True)
+            (self.home / path).write_text(said)
+        # Nor does it write anything.
+        kept = self.home / "nothing" / "here"
+        with mock.patch.dict(os.environ, {"COMPACHE_HOME": str(kept)}):
+            found = doctor.checked(port=1)
+        self.assertEqual([f for f in found if f["level"] == "problem"], [])
+        self.assertTrue(any("compache wrap pi" in f["text"] for f in found))
+        self.assertFalse(kept.exists())
 
     def test_a_record_that_cannot_be_read_is_a_problem(self):
         folder = self.home / "kept" / "broken"

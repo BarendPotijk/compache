@@ -137,7 +137,7 @@ def checked(env: dict | None = None, port: int = 8787) -> list[dict]:
     for name, agent in here:
         try:
             _, _, upstreams = prepared(agent, "http://127.0.0.1:1", env)
-        except ValueError as error:
+        except (ValueError, OSError) as error:
             say("note", f"{agent.title}: {error}")
             continue
         goes = ", ".join(sorted(set(upstreams.values())))

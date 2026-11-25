@@ -211,6 +211,11 @@ def _parser() -> argparse.ArgumentParser:
         "--upstream", help="One base URL to forward everything to, such as a gateway's"
     )
     sub.add_argument(
+        "--careful",
+        action="store_true",
+        help="Send a provider's own address only keys that look like its own",
+    )
+    sub.add_argument(
         "--openai-url", help="Where OpenAI's API goes instead of api.openai.com"
     )
     sub.add_argument(

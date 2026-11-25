@@ -415,7 +415,7 @@ def serve(
             """Where a key belongs is not known, so it goes nowhere."""
             message = (
                 f"compache: this key does not look like one for {base}, so it was not sent there. Say "
-                "where it belongs: compache wrap --upstream URL ..."
+                "where it belongs with --upstream URL"
             )
             if speaks not in forward["told"]:
                 forward["told"].add(speaks)
@@ -502,6 +502,8 @@ def main(args) -> int:
     server = serve(
         live, host=args.host, port=args.port, upstream=upstream, upstreams=named
     )
+    if args.careful:
+        server.forward(upstream, named, careful=True)
     where = f"http://{args.host}:{server.server_address[1]}"
     doing = []
     if live.policy is not None:
