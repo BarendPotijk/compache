@@ -32,6 +32,7 @@ import socket
 import ssl
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -498,24 +499,28 @@ def play_one(args, arm: str, which: str, repeat: int, key: str, bill: Bill) -> d
         f"-p{args.parts}" if args.parts > 1 else ""
     )
     folder = work / "runs" / name
-    shutil.rmtree(folder, ignore_errors=True)
-    home = folder / "home"
-    (home / "tmp").mkdir(parents=True)
-    task = folder / "task"
-    asked.make(task)
-    for words in (["init", "-q"], ["add", "-A"]):
-        subprocess.run(["git", *words], cwd=task, check=True)
-    subprocess.run(
-        ["git", "-c", "user.email=a@b", "-c", "user.name=a", "commit", "-qm", "task"],
-        cwd=task,
-        check=True,
-    )
+    home, task, first = folder / "home", folder / "task", 0
+    if args.resume and task.is_dir():
+        # It was broken off. The prompt that was under way is given again.
+        first = max(0, len(list(folder.glob("out-*.txt"))) - 1)
+        with tempfile.TemporaryDirectory() as other:
+            asked.make(Path(other) / "task")
+    else:
+        shutil.rmtree(folder, ignore_errors=True)
+        (home / "tmp").mkdir(parents=True)
+        asked.make(task)
+        for words in (["init", "-q"], ["add", "-A"]):
+            subprocess.run(["git", *words], cwd=task, check=True)
+        who = ["-c", "user.email=a@b", "-c", "user.name=a"]
+        subprocess.run(["git", *who, "commit", "-qm", "task"], cwd=task, check=True)
     log = folder / "provider.jsonl"
     server = provider(key, bill, log)
     between = Between(arm, at(server), folder, args, which)
     status, begun, said, pauses = None, time.time(), [], args.pause
     try:
         for k, prompt in enumerate(asked.prompts(args.parts)):
+            if k < first:
+                continue
             if k:
                 time.sleep(pauses[(k - 1) % len(pauses)])
             words, env = command(args, between.base, prompt, k > 0, home)
@@ -720,6 +725,9 @@ def main(argv=None):
         nargs="+",
         default=[60, 20, 420, 120, 780, 30, 330],
         help="Seconds before each prompt after the first, over and over",
+    )
+    sub.add_argument(
+        "--resume", action="store_true", help="Go on with runs that were broken off"
     )
     sub.add_argument("--model")
     sub.add_argument("--env", help="A file of NAME=value lines with OPENROUTER_API_KEY")
