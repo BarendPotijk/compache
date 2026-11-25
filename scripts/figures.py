@@ -22,6 +22,7 @@ Where the data comes from:
 from __future__ import annotations
 
 import json
+import re
 import sys
 from decimal import ROUND_HALF_UP, Decimal
 from html import escape
@@ -710,6 +711,8 @@ def preview(data):
         chrome --headless --window-size=1200,630 --screenshot=site/preview.png docs/assets/preview.svg
     """
     row = data["rows"][0]
+    drawn = (ROOT / "site" / "mark.svg").read_text("utf-8")
+    mark = re.search(r' d="([^"]+)"', drawn)[1]
     width, height, x0, full, bar = 1200, 630, 80, 820, 74
     longest = max(row["openclaw"], row["compache"])
     style = (
@@ -724,8 +727,8 @@ def preview(data):
         )
 
     body = [
-        f'<rect class="c" x="{x0}" y="66" width="30" height="30" rx="8"/>',
-        line(x0 + 46, 94, 36, "compache", weight=650),
+        f'<path class="c" transform="translate({x0 - 2.5} 59) scale(.65)" d="{mark}"/>',
+        line(x0 + 50, 94, 36, "compache", weight=650),
         line(x0, 186, 58, "What would your long chats cost?", weight=650),
         line(
             x0,
