@@ -314,6 +314,9 @@ class Flow:
         """
         if self.recipe.rounds is None:
             return []
+        if self.longer and self.size > (self.spec.long_input_threshold or self.cap):
+            # There is no room for that, or it is paid for dearer.
+            self.longer, self.ripe, self.freed, self.ahead = 0, 0, 0, (0, 0)
         limit, live = self.rounds - self.recipe.rounds - self.longer, self.live
         # They arrived in order, so the first that stays ends the search.
         while self.ripe < len(live) and self.round[live[self.ripe]] <= limit:

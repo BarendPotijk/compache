@@ -212,6 +212,21 @@ class MiddlewareTests(unittest.TestCase):
                 self.assertGreater(kept[-1], 0, "what came after the cut stays")
                 self.assertEqual(live.stats["stood_down"], 0)
 
+    def test_what_a_reply_says_beside_what_it_reasons(self):
+        from compache.langchain import _said
+
+        thinking = {"type": "thinking", "thinking": "Hm.", "signature": "s"}
+        call = {"type": "tool_use", "id": "c", "name": "read", "input": {}}
+        text = {"type": "text", "text": "It is in clause 4."}
+        for content in (
+            "It is in clause 4.",
+            [text],
+            [thinking, text, call],
+            [{"type": "reasoning", "reasoning": "Hm."}, "It is in clause 4."],
+        ):
+            self.assertEqual(_said(content), "It is in clause 4.")
+        self.assertEqual(_said([call]), "")
+
     def test_async_and_learning(self):
         import asyncio
 

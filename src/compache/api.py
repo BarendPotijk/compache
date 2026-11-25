@@ -693,11 +693,11 @@ class Session:
         else:
             # Two sessions of one name know nothing of each other, as in a server that makes one a request.
             mine = str(next(_SESSIONS))
-            self._engine = WorkloadSession(
-                policy._compiled,
-                CacheScope("compache", "declared", self._model, thread_id, mine),
-                policy._checker,
-            )
+            scope = CacheScope("compache", "declared", self._model, thread_id, mine)
+            checker = policy._checker
+            self._engine = WorkloadSession(policy._compiled, scope, checker)
+            ended = weakref.finalize(self._engine, checker.forget, scope.fingerprint)
+            ended.atexit = False
         self._history: list[Source] = []
         self._run = 0
         self._pending = None

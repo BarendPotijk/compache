@@ -432,6 +432,10 @@ class _Call:
     pending: Any = None
     # What went out of it last, as long as the reply to that may hold reasoning.
     sent: Any = None
+    # What reasoning had been given up before it and what had gone out, and the session, where that
+    # gave up more for it.
+    before: tuple = (frozenset(), None)
+    kept: Any = None
 
 
 class _Unsent(Exception):
@@ -536,6 +540,8 @@ class _Passing:
             reading.asked = False
             return False
         if not reading.begun:
+            # Once, whatever becomes of it.
+            reading.begun = True
             release()
         return True
 
@@ -1048,8 +1054,8 @@ class Live:
                 made.session.follows(other.session)
             if scan.model and point.requested not in (None, scan.model):
                 # It has a cache of its own, and nothing of this is in it.
-                made.requested = scan.model
                 made.session.lost()
+        made.requested = scan.model or point.requested
         if other.pending is None and scan.model in (None, "", other.requested):
             # What they share is kept warm for the newest of them. Another model has a cache of its own.
             other.superseded = True
@@ -1246,7 +1252,11 @@ class Live:
         """
         with self._lock:
             made = [c for c in self._by_call.get(call or "", ()) if c.named == thread]
-            made = made or [c for c in (self._latest.get(thread),) if c is not None]
+            latest = self._latest.get(thread)
+        if not made and call:
+            # It is not known whose call that is.
+            made = [c for c in self.conversations() if c.named == thread]
+        made = made or ([latest] if latest is not None else [])
         made = [c for c in made if c.session is not None]
         conversation = made[-1] if len(made) == 1 else None
         if len(made) > 1 and reference.strip().startswith("ctx:"):
@@ -1422,7 +1432,8 @@ class Live:
         now, number, current = self._now(conversation), len(turns), turns[-1]
         conversation.system_bytes, conversation.tools_bytes = self._opens(scan)
         conversation.superseded = False
-        plain = body
+        plain, kept = body, None
+        before = frozenset(conversation.unbound), conversation.sent_as
         try:
             conversation.went = []
             session = conversation.session
@@ -1483,6 +1494,7 @@ class Live:
                 holds = scan.thoughts or conversation.inserts
                 if holds and self._unbind(conversation, dialect, body, plain):
                     held = dialect.said_so_far(body)
+                    kept = conversation.session.copy()
                     conversation.session.unbound(
                         [
                             place
@@ -1519,6 +1531,8 @@ class Live:
             marked,
             asks=asks,
             pending=conversation.pending,
+            before=before,
+            kept=kept,
         )
         try:
             call.outgoing, call.asked, call.carrier = self._with_note(call, scan)
@@ -1608,17 +1622,17 @@ class Live:
         return result
 
     def _sent(self, call: _Call, pending: _Pending) -> Result:
-        conversation, before = call.conversation, call.conversation.sent_as
+        conversation = call.conversation
         try:
             result = self._taken_as(call, pending)
-            if result.status in _REFUSED and conversation.binds and before is None:
+            unknown = conversation.binds and call.before[1] is None
+            if result.status in _REFUSED and unknown:
                 result = self._without_any(call, result)
         except BaseException:
-            conversation.sent_as = before
+            self._not_taken(call)
             raise
         if result.status >= 400:
-            # Nothing is reasoned behind it.
-            conversation.sent_as = before
+            self._not_taken(call)
             return result
         pending.asked = pending.asked or call.asked
         if result.json is None and result.events is None:
@@ -1637,6 +1651,15 @@ class Live:
             return replace(result, events=_Passing(events, release, reading))
         return self._settle(call, result)
 
+    @staticmethod
+    def _not_taken(call: _Call) -> None:
+        """Nothing is reasoned behind a request that failed, and none is given up for it."""
+        conversation = call.conversation
+        conversation.unbound = set(call.before[0])
+        conversation.sent_as = call.before[1]
+        if call.kept is not None and conversation.session is not None:
+            conversation.session = call.kept
+
     def _taken_as(self, call: _Call, pending: _Pending) -> Result:
         """Send a request, and plainer forms of it where it is refused."""
         conversation = call.conversation
@@ -1651,7 +1674,10 @@ class Live:
             self._goes(call, call.outgoing)
             result = self._under_default(call, call.send(call.outgoing))
         if result.status in _REFUSED and call.outgoing is not call.body:
-            # Refused with the policy applied: send what the application wrote.
+            # Refused with the policy applied: send what the application wrote, and all that was
+            # reasoned before this request.
+            conversation.unbound = set(call.before[0])
+            conversation.sent_as = call.before[1]
             result = self._send_written(call)
             if result.status < 400:
                 # So it was the policy. What is refused either way is none of its doing.
@@ -1747,12 +1773,15 @@ class Live:
         conversation.session = base.session.copy()
         conversation.session.follows(session)
         conversation.inserts = list(base.inserts)
+        # Its results go by the same names, and may be others now.
+        conversation.fetched = set()
 
     def _walk(self, conversation, chains, turns, now, scan) -> None:
         """Walk the policy through a conversation that is met in the middle, up to its last question."""
         done = len(turns) - 1
         conversation.pending, conversation.turns, conversation.stale = None, 0, False
         conversation.inserts, conversation.went = [], []
+        conversation.fetched = set()
         conversation.base = conversation.here = conversation.quotes = None
         policy = self._start(conversation, conversation.thread_id, scan)
         if policy is not None:
@@ -1896,6 +1925,7 @@ class Live:
             }
             # Where the host runs our tool, what it returned stands among the results of the others.
             hosted = _REOPEN in dialect.tool_names(body)
+            known = set(notice.values())
             for k, segment in enumerate(turns, 1):
                 pieces = [
                     (f"{name}:{k}:input", segment.inputs),
@@ -1905,8 +1935,9 @@ class Live:
                     part_id = f"{name}:{k}:retrieval:{j}"
                     pieces.append((part_id, found.slots))
                     of = _FETCHED.match(found.text) if hosted else None
-                    if of and part_id in notice:
-                        # A copy is no text of its own: the notice names what it is a copy of.
+                    if of and part_id in notice and _notice(of[1]) in known:
+                        # A copy is no text of its own: the notice names what it is a copy of,
+                        # as long as that is there.
                         notice[part_id] = _notice(of[1])
                 for part_id, slots in pieces:
                     if part_id in notice and slots and slots[0].whole is not None:
@@ -2403,7 +2434,7 @@ class Live:
         sees them, so they are put into its later requests for as long as what
         they returned is new. `alone` says that it sees nothing of that reply.
         """
-        answers, names = {}, []
+        answers, names, before = {}, [], set(conversation.fetched)
         for call in calls:
             self.stats["reopened"] += 1
             part = None
@@ -2424,11 +2455,14 @@ class Live:
                     pending.reopened.append(part)
             told = json.dumps(_for_model(found), ensure_ascii=False)
             answers[call["id"]] = self._with_pictures(asked, part, told)
-            in_view = bool(part) and conversation.session.shows_again(part)
+            in_view = bool(part) and (
+                conversation.session.shows_again(part)
+                or (asked is None and self._copied(conversation, found))
+            )
             if part and not in_view:
                 # A model that works with more than stays in view would fetch for ever.
                 piece = part, found.get("offset")
-                if piece in conversation.fetched:
+                if piece in before:
                     conversation.session.stay_longer()
                 conversation.fetched.add(piece)
             if not part or in_view:
@@ -2466,6 +2500,18 @@ class Live:
             except Exception:
                 logger.warning("compache: a fetched part does not stay", exc_info=True)
         return answers
+
+    @staticmethod
+    def _copied(conversation, found) -> bool:
+        """Whether what a host fetched back before still stands among the results of its tools."""
+        turn = conversation.pending.turn if conversation.pending is not None else None
+        where = f'"offset": {found.get("offset")},'
+        for part in turn.parts if turn is not None else ():
+            if part.part_id not in turn.archived_ids:
+                of = _FETCHED.match(part.text or "")
+                if of and of[1] == found.get("handle") and where in part.text[:400]:
+                    return True
+        return False
 
     @staticmethod
     def _with_pictures(asked: _Call | None, part: str | None, told: str) -> Any:

@@ -529,6 +529,11 @@ _REASONING = (
 )
 
 
+def _named(part: Any) -> str | None:
+    """The name that a piece of reasoning goes by, which may be that of a call."""
+    return part.get("id") if isinstance(part, dict) else None
+
+
 def _joined(held: Any, more: Any) -> Any:
     """Reasoning that arrives piece by piece: text, or a list of blocks of it."""
     if isinstance(more, str):
@@ -594,9 +599,13 @@ class OpenAIChat:
             ]
             calls = message.get("tool_calls") or message.get("function_call")
             if role == "assistant" and any(message.get(k) for k in _REASONING):
-                # A gateway may say the same in two of them.
-                held = max(len(json.dumps(message.get(k) or "")) for k in _REASONING)
-                scan.thoughts[i] = max(16, held // 6)
+                # A gateway may say the same in two of them. Enclosed, it is longer than it was.
+                sizes = {k: len(json.dumps(message.get(k) or "")) for k in _REASONING}
+                enclosed = max(sizes["reasoning_details"], sizes["thinking_blocks"])
+                plain = max(sizes["reasoning_content"], sizes["reasoning"])
+                scan.thoughts[i] = max(
+                    16, enclosed // 6 if enclosed > 2 else plain // 4
+                )
             if role == "assistant" and not calls and not any(text for _, text in found):
                 scan.slots.append(Slot("output", base, "", i, i, closes=True))
         scan.system = "\n\n".join(system)
@@ -884,15 +893,20 @@ class OpenAIChat:
         """A response without its calls of the tool `name`."""
         choice = body["choices"][0]
         message = dict(choice["message"])
-        kept = [
-            c
-            for c in message.pop("tool_calls", None) or ()
-            if (c.get("function") or {}).get("name") != name
-        ]
+        calls = message.pop("tool_calls", None) or ()
+        kept = [c for c in calls if (c.get("function") or {}).get("name") != name]
         if kept:
             message["tool_calls"] = kept
         elif choice.get("finish_reason") == "tool_calls":
             choice = {**choice, "finish_reason": "stop"}
+        gone = {c.get("id") for c in calls} - {c.get("id") for c in kept}
+        if any(_named(part) in gone for part in message.get("reasoning_details") or ()):
+            # What belongs to a call goes where that call is.
+            message["reasoning_details"] = [
+                part
+                for part in message["reasoning_details"]
+                if _named(part) not in gone
+            ]
         return {
             **body,
             "choices": [{**choice, "message": message}, *body["choices"][1:]],
@@ -969,6 +983,14 @@ class OpenAIChat:
                     delta.pop("tool_calls")
                     if kept:
                         delta["tool_calls"] = kept
+            mine = {self._calls[i]["id"] for i in self._mine}
+            details = delta.get("reasoning_details")
+            if isinstance(details, list) and any(_named(p) in mine for p in details):
+                changed = True
+                delta.pop("reasoning_details")
+                others = [part for part in details if _named(part) not in mine]
+                if others:
+                    delta["reasoning_details"] = others
             if isinstance(delta.get("content"), str):
                 self._shown += delta["content"]
                 self._round += delta["content"]
@@ -2411,6 +2433,8 @@ def dialect_for(path: str):
 
 # What is sent along and is no text a model reads.
 _NO_TEXT = {"data", "signature", "encrypted_content", "thoughtSignature"}
+# What is reasoned is counted by itself, in full view or not.
+_NO_TEXT |= {"thinking", *_REASONING}
 
 
 def volume(value: Any) -> int:
@@ -2420,6 +2444,8 @@ def volume(value: Any) -> int:
             return 0
         return len(value) if value.isascii() else len(value.encode("utf-8", "replace"))
     if isinstance(value, dict):
+        if value.get("type") == "reasoning":
+            return 0
         return sum(volume(v) for k, v in value.items() if k not in _NO_TEXT)
     if isinstance(value, (list, tuple)):
         return sum(map(volume, value))

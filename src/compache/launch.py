@@ -24,6 +24,7 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 import urllib.parse
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -54,6 +55,8 @@ _CRUSH = {
     "openai": ("OPENAI_API_ENDPOINT",),
     "anthropic": ("ANTHROPIC_API_ENDPOINT",),
 }
+# After how many seconds without a model call it is worth saying that there was none.
+_WHILE = 60
 # What says that this machine reaches others through a proxy.
 _PROXIES = ("http_proxy", "https_proxy", "all_proxy")
 
@@ -543,7 +546,14 @@ def main(args) -> int:
     else:
         live = Live(learn=Learner(folder))
         live.recorder = kept
+    begun = time.monotonic()
     status = run(agent, words, live, port=args.port or 0, upstream=args.upstream)
+    if not args.quiet and not kept.calls and time.monotonic() - begun > _WHILE:
+        print(
+            "compache: no model call came through. If there were some, the agent has another place "
+            "for them: compache doctor",
+            file=sys.stderr,
+        )
     if not args.quiet:
         for line in _said(live, kept.calls):
             print(line, file=sys.stderr)

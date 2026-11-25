@@ -11,6 +11,7 @@ from unittest import mock
 
 import compache
 from compache import agent, wire
+from compache import live as live_module
 from compache.api import Session
 from compache.learn import Learner
 from compache.models import binds_reasoning
@@ -993,6 +994,56 @@ class BoundReasoningTests(unittest.TestCase):
             app.made += 1
         app.clock.at += away
 
+    def test_a_request_that_is_not_taken_costs_no_reasoning(self):
+        """One with a tool that is refused, or with other instructions while the provider is overloaded."""
+        for odd, status in (
+            ({"tools": [{"name": "broken", "input_schema": {}}]}, 400),
+            ({"system": "Another mode."}, 529),
+        ):
+            with self.subTest(status=status):
+                app, model, what, _ = self.working()
+                self.read(app, 5)
+                plain = app.shape.body
+                app.shape.body = lambda stream, plain=plain, odd=odd: {
+                    **plain(stream),
+                    **odd,
+                }
+                for _ in range(3):
+                    what.append(lambda request, s=status: {"status": s, "error": "no"})
+                with self.assertRaises(KeyError):
+                    app.call()
+                what.clear()
+                app.shape.body = plain
+                before = app.live.tokens["cache_read"]
+                self.read(app, 1)
+                self.assertEqual(self.held(model.bodies[-1]), [0, 1, 2, 3, 4])
+                self.assertGreater(app.live.tokens["cache_read"] - before, 1000)
+
+    def test_a_chat_whose_first_cut_is_refused(self):
+        """What the application wrote goes out with all that was reasoned before."""
+
+        def script(request):
+            if any(tool["name"] == REOPEN for tool in request["body"]["tools"]):
+                return {"status": 400, "error": "tool 'reopen' is not allowed here"}
+            return {"text": f"Answer {request['n']}.", "thinking": 300}
+
+        clock = Clock(1_970_000_000.0)
+        model = FakeModel(script, clock=clock, binds="error")
+        live = compache.Live(test_live.fitted("claude-sonnet-5-5"), clock=clock)
+        shape = Claude()
+        shape.model = "claude-sonnet-5-5"
+        app = Agent(live, shape, model, thread="t")
+        for n in range(1, 7):
+            shape.ask(f"What does section {n} say?")
+            call = {"type": "tool_use", "id": f"toolu_{n:020d}aB", "name": "read"}
+            shape.said.append({"role": "assistant", "content": [{**call, "input": {}}]})
+            shape.answer([(call["id"], test_live.passage(n))])
+            app.call()
+            clock.at += 3600
+        self.assertEqual(live.stats["policy_refused"], 1)
+        # A turn's call was made by nobody here. Its answer is every second reply.
+        self.assertEqual(len(self.held(model.bodies[-1])), 5)
+
     def test_a_refusal_costs_no_reasoning(self):
         """What is wrong with the request itself says nothing about the reasoning in it."""
         app, model, what, _ = self.working()
@@ -1433,6 +1484,65 @@ class AgainTests(unittest.TestCase):
                 self.assertGreaterEqual(conversation.session._engine.flow.longer, 14)
                 self.assertEqual(live.stats["stood_down"], 0)
 
+    def test_there_has_to_be_room_for_what_stays_longer(self):
+        """And a request that is billed dearer for its size is none to grow into."""
+        dearer = {"long_input_factor": 5.0, "long_output_factor": 5.0}
+        dearer["schema_version"] = "compache-model-spec-v2"
+        for spec in (
+            replace(SPEC, context_tokens=9_000),
+            replace(SPEC, long_input_threshold=9_000, **dearer),
+        ):
+            flow, largest = agent.Flow(spec, agent.AgentRecipe(2, 0.0)), 0
+            for k in range(60):
+                flow.rounds += 1
+                flow.add(700, f"result {k}")
+                if k in (5, 10, 15, 30):
+                    flow.stay_longer()
+                flow.cut(5.0 * k)
+                flow.sent(5.0 * k, flow.size)
+                largest = max(largest, flow.size)
+            self.assertGreater(largest, 5_000)
+            self.assertLess(largest, 9_800)
+
+    def test_what_is_no_repetition(self):
+        """The same twice in one reply, and what comes after the application has rewritten its history."""
+        fetch: list = []
+
+        def script(request):
+            handles = NOTICE.findall(json.dumps(request["body"]["messages"]))
+            made = {"tool": ("read", {"file": len(request["texts"])})}
+            if fetch:
+                looks = (REOPEN, {"reference": handles[0]})
+                made = {"tools": [looks] * fetch.pop()}
+            return made
+
+        clock = Clock()
+        live = compache.Live(policy(2), clock=clock)
+        app = Agent(live, Claude(), FakeModel(script), clock=clock)
+        app.shape.ask("Go")
+
+        def read(*files):
+            for k in files:
+                _, calls = app.call()
+                app.shape.answer([(call, result(k)) for call, _ in calls])
+
+        def longer():
+            (conversation,) = live.conversations()
+            return conversation.session._engine.flow.longer
+
+        read(*range(6))
+        fetch.append(2)
+        read(6)
+        self.assertEqual((live.stats["reopened"], longer()), (2, 0))
+        for message in app.shape.said:
+            if message["role"] == "user" and isinstance(message["content"], list):
+                for block in message["content"]:
+                    block["content"] = block["content"].replace("a line of", "pruned")
+        read(*range(7, 12))
+        fetch.append(1)
+        read(12)
+        self.assertEqual((live.stats["reopened"], longer()), (3, 0))
+
     def test_pages_of_one_result_are_no_repetition(self):
         live, asked = compache.Live(policy(2)), []
 
@@ -1479,6 +1589,31 @@ class BesideTests(unittest.TestCase):
                     other.call()
                 self.assertLessEqual(copied.call_count, 4)
                 self.assertLessEqual(len(live.conversations()), before + 1)
+
+    def test_another_model_beside_one_that_is_left_alone(self):
+        model = FakeModel(worker(3))
+        with tempfile.TemporaryDirectory() as folder:
+            with mock.patch.object(Learner, "choose", lambda *of: (None, True)):
+                live = compache.Live(learn=folder)
+                app = Agent(live, Claude(), model, thread="t")
+                app.run("Work through three files")
+                app.shape.ask("Go on")
+                app.call()
+                other = Agent(live, Claude(), model, thread="t")
+                other.shape.model = "claude-other"
+                other.shape.said = [*app.shape.said[:-2]]
+                other.shape.ask("A title, please")
+                model.script = lambda request: {"text": "Three files"}
+                made = []
+                whole = live_module._Conversation.__init__
+
+                def init(self, *of, **named):
+                    made.append(self)
+                    whole(self, *of, **named)
+
+                with mock.patch.object(live_module._Conversation, "__init__", init):
+                    other.call()
+                self.assertLessEqual(len(made), 1)
 
 
 class ToolPingTests(unittest.TestCase):

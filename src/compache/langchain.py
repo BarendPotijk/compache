@@ -129,6 +129,15 @@ def _text(content: Any) -> str | None:
     return None
 
 
+def _said(content: Any) -> str:
+    """What a reply says in text, beside whatever else it holds."""
+    if isinstance(content, str):
+        return content
+    parts = content if isinstance(content, list) else ()
+    said = [p.get("text") if isinstance(p, dict) else p for p in parts]
+    return "\n\n".join(text for text in said if isinstance(text, str) and text)
+
+
 def _shown(request, body: dict, shown: dict, owners: list) -> list:
     """The request's messages with what is archived replaced by its notice."""
     messages = list(request.messages)
@@ -179,7 +188,7 @@ def _replied(shown, name: str, body: dict, response) -> None:
         {"id": c.get("id"), "arguments": c.get("args")}
         for c in getattr(reply, "tool_calls", None) or ()
     ]
-    said = _text(reply.content) or ""
+    said = _said(reply.content)
     shown.heard(_usage(reply), model=body.get("model"), said=said, calls=calls)
     if not calls:
         messages = [*body["messages"], *convert_to_openai_messages([reply])]

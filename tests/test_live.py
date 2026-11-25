@@ -1,6 +1,7 @@
 """compache in the request path: what goes to the provider, what comes back, what is kept."""
 
 import copy
+import gc
 import json
 import tempfile
 import unittest
@@ -1423,6 +1424,21 @@ class SharedPolicyTests(unittest.TestCase):
             said.append(answered.json["choices"][0]["message"])
             clock.at += 10
             self.assertEqual(live.stats["stood_down"], 0)
+
+    def test_nothing_is_left_of_sessions_that_are_over(self):
+        chosen = fitted("claude-sonnet-5-5")
+        usage = {"input_tokens": 100, "output_tokens": 10}
+        for n in range(40):
+            session = chosen.session("t")
+            turn = session.prepare("What now?", [passage(1)], at=1.79e9 + 10 * n)
+            session.complete(turn, "This.", at=1.79e9 + 10 * n + 1, usage=usage)
+        del session, turn
+        gc.collect()
+        chosen.session("t").prepare("What now?", [passage(1)], at=1.8e9)
+        (count,) = chosen._checker._db.execute(
+            "SELECT COUNT(*) FROM compache_cache_guard_v1"
+        ).fetchone()
+        self.assertLessEqual(count, 1)
 
 
 class ApartTests(unittest.TestCase):

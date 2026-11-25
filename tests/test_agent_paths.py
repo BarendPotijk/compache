@@ -562,6 +562,12 @@ class NobodyElsesTests(unittest.TestCase):
             self.assertIn(f"{name}'s private", json.dumps(found))
             self.assertNotIn(f"{other}'s private", json.dumps(found))
 
+    others = 0
+
+    def test_calls_of_two_agents_that_count_alike_on_a_busy_server(self):
+        self.others = 16
+        self.test_calls_of_two_agents_that_count_alike()
+
     def test_calls_of_two_agents_that_count_alike(self):
         """Both call it `functions.reopen:4`: the notice says whose text is meant, and words do not."""
         live = compache.Live(policy(rounds=1, ratio=0.0), clock=self.clock)
@@ -573,7 +579,8 @@ class NobodyElsesTests(unittest.TestCase):
 
         def call(name, tool, k):
             body = {"model": "m", "messages": list(said[name]), "tools": tools}
-            shown = live.show("/v1/chat/completions", body, thread="t-1")
+            thread = "t-1" if name in names else name
+            shown = live.show("/v1/chat/completions", body, thread=thread)
             made = {"id": f"functions.{tool}:{k}", "arguments": {"k": k}}
             usage = {"prompt_tokens": 900, "completion_tokens": 9}
             shown.heard(usage, model="m", said="", calls=[made])
@@ -584,16 +591,18 @@ class NobodyElsesTests(unittest.TestCase):
             return shown, made["id"]
 
         names = ("alice", "bob")
-        for name in names:
+        # On a busy server, others make calls by the same IDs.
+        others = [f"other {k}" for k in range(self.others)]
+        for name in (*names, *others):
             said[name] = [{"role": "user", "content": f"Work on the files of {name}"}]
         for k in range(4):
-            for name in names:
+            for name in (*names, *others):
                 _, made = call(name, "read", k)
                 text = f"the secret plan of {name}, line {k} " * 60
                 said[name].append(
                     {"role": "tool", "tool_call_id": made, "content": text}
                 )
-        last = {name: call(name, "reopen", 4) for name in names}
+        last = {name: call(name, "reopen", 4) for name in (*names, *others)}
         for name, other in (names, names[::-1]):
             shown, made = last[name]
             for reference in ("secret plan", f"the secret plan of {other}"):
@@ -608,8 +617,8 @@ class NobodyElsesTests(unittest.TestCase):
 class HostTests(unittest.TestCase):
     """A host that runs our tool itself, as LangChain's agents do: what it returns is a result like others."""
 
-    def test_a_copy_is_no_text_of_its_own(self):
-        live, said = compache.Live(policy(2)), [{"role": "user", "content": "Go"}]
+    def host(self, live):
+        said = [{"role": "user", "content": "Go"}]
         tools = [
             {"type": "function", "function": {"name": n, "parameters": {}}}
             for n in ("read", REOPEN)
@@ -630,6 +639,44 @@ class HostTests(unittest.TestCase):
         def answer(made, text):
             said.append({"role": "tool", "tool_call_id": made, "content": text})
 
+        return said, call, answer
+
+    def test_a_copy_whose_text_the_host_has_dropped_names_itself(self):
+        """As where LangGraph puts a summary in place of the first rounds."""
+        live = compache.Live(policy(2))
+        said, call, answer = self.host(live)
+        for k in range(5):
+            answer(call("read", k)[1], result(k))
+        out, made = call(REOPEN, 5)
+        handle = NOTICE.search(json.dumps(out)).group()
+        answer(made, json.dumps(live.reopen("t", handle, call=made)))
+        said[:-2] = [{"role": "user", "content": "Summary: five files read. Go on."}]
+        for k in range(6, 11):
+            answer(call("read", k)[1], result(k))
+        out, made = call(REOPEN, 11)
+        handles = NOTICE.findall(
+            json.dumps([m["content"] for m in out if m["role"] == "tool"])
+        )
+        self.assertGreater(len(handles), 3)
+        for handle in handles:
+            found = live.reopen("t", handle, call=made)
+            self.assertEqual(found["status"], "ok", handle)
+
+    def test_a_copy_that_is_in_view_is_no_repetition(self):
+        live = compache.Live(policy(2))
+        said, call, answer = self.host(live)
+        for k in range(5):
+            answer(call("read", k)[1], result(k))
+        for k in (5, 6):
+            out, made = call(REOPEN, k)
+            handle = NOTICE.search(json.dumps(out)).group()
+            answer(made, json.dumps(live.reopen("t", handle, call=made)))
+        (conversation,) = live.conversations()
+        self.assertEqual(conversation.session._engine.flow.longer, 0)
+
+    def test_a_copy_is_no_text_of_its_own(self):
+        live = compache.Live(policy(2))
+        said, call, answer = self.host(live)
         for k in range(1, 5):
             answer(call("read", k)[1], result(k))
         out, made = call(REOPEN, 5)
@@ -1093,6 +1140,31 @@ class LeftTests(unittest.TestCase):
         answered.events.close()
         self.assertEqual(conversation.pending.in_flight, 0)
 
+    def test_one_that_nobody_reads_is_let_go_of_once(self):
+        """Even if its response cannot be closed the first time."""
+
+        def closing():
+            raise TimeoutError("its loop does not run")
+
+        live = compache.Live(policy())
+        body = {"model": "agent-model", "stream": True}
+        body["messages"] = [{"role": "user", "content": "Hi"}]
+        answered = live.exchange(
+            Chat.path,
+            body,
+            lambda sent: Result(200, events=iter(()), close=closing),
+            thread="t",
+        )
+        with self.assertRaises(TimeoutError):
+            answered.events.close()
+        answered.events.close()
+        (conversation,) = live.conversations()
+        self.assertEqual(conversation.pending.in_flight, 0)
+        del answered
+        gc.collect()
+        time.sleep(0.1)
+        self.assertEqual(conversation.pending.in_flight, 0)
+
     def test_one_that_has_to_wait_holds_up_no_other(self):
         first, waits, gate, _, reader, _ = self.held()
         second, conversation, other, closed, reading, _ = self.held()
@@ -1198,6 +1270,11 @@ class ReasoningItemTests(unittest.TestCase):
             )
             names = {part["id"] for part in ours["reasoning_details"]}
             self.assertEqual(names, {ours["tool_calls"][0]["id"]})
+            if not stream:
+                # And is not in the application's, which does not have the call.
+                held = [m for m in said if m.get("reasoning_details")]
+                named = [p["id"] for m in held for p in m["reasoning_details"]]
+                self.assertEqual(named.count(*names), 1)
 
 
 class FailTests(unittest.TestCase):

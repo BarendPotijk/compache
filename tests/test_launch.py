@@ -982,6 +982,20 @@ class RunTests(Wrapped):
         self.assertEqual(status, 7)
         self.assertTrue(any("ctx:" in json.dumps(b) for b in self.model.bodies))
 
+    def test_an_agent_that_goes_elsewhere(self):
+        """Whatever sends it there, somebody who waits for savings should know."""
+        script = self.home / ("idle.cmd" if os.name == "nt" else "idle")
+        script.write_text("@exit 0\n" if os.name == "nt" else "#!/bin/sh\nexit 0\n")
+        script.chmod(0o755)
+        for after, said in ((0, True), (60, False)):
+            with mock.patch.object(launch, "_WHILE", after):
+                status, _, err = self.wrap("--upstream", self.url, "--", "idle")
+            self.assertEqual(status, 0)
+            self.assertEqual("no model call came through" in err, said)
+        with mock.patch.object(launch, "_WHILE", 0):
+            _, _, err = self.wrap("--quiet", "--upstream", self.url, "--", "idle")
+        self.assertEqual(err, "")
+
     def test_an_agent_that_is_not_there(self):
         status, _, err = self.wrap("--", "no-such-agent-here")
         self.assertEqual(status, 1)
