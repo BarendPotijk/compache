@@ -9,7 +9,6 @@ import unittest
 
 import compache
 from compache import agent, wire
-from compache.live import Result
 from compache.record import load, load_calls
 from fakes import NOTICE, FakeModel, noticed, tokens
 

@@ -1341,7 +1341,7 @@ class Live:
 
     def _carry(self, call: _Call, scan) -> Result:
         """Send the request, fall back to plainer forms of it if it is refused, and read the reply."""
-        conversation, pending = call.conversation, call.conversation.pending
+        pending = call.conversation.pending
         pending.in_flight += 1
         try:
             result = self._sent(call, pending)

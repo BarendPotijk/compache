@@ -6,7 +6,6 @@ import json
 import tempfile
 import threading
 import unittest
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import compache
 from compache import wire
@@ -1140,6 +1139,7 @@ class ChatTests(unittest.TestCase):
         live = compache.Live(fitted(), clock=clock)
         model = FakeModel(clock=clock)
         said: list = []
+        last = None
         for n in range(1, 7):
             opens: list = [{"type": "text", "text": f"Question {n}?"}]
             if n > 1:

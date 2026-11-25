@@ -248,7 +248,7 @@ def rules(r: random.Random) -> dict[str, dict]:
                 return int(c) if c.isdigit() else ord(c) - ord("A") + 1
             """,
             f"""[(t,) for t in ("ab 12", "A{sep}7.c", "zz9", "", "{"1" * length}", "{"1" * (length + 1)}", "a*b", "q4{sep}44")]""",
-            f"""[("ab 12",), ("zz9",)]""",
+            """[("ab 12",), ("zz9",)]""",
         ),
         "backoff": rule(
             f"""
