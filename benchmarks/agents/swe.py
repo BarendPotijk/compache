@@ -9,6 +9,7 @@ where those tests fail before the fix and pass after it on this machine.
 
 A session is several issues in one checkout, given one after the other as a user would. Its
 issues are those that can all be fixed at the same commit, checked with the project's own fixes.
+A day is all sessions one after the other, in one conversation.
 """
 
 from __future__ import annotations
@@ -157,6 +158,43 @@ class Session:
             "fixed": fixed,
             "broke": broke[:5],
             "broken": len(broke),
+        }
+
+
+class Day:
+    """All sessions in one conversation, each in a checkout of its own."""
+
+    def __init__(self, root: Path, name: str):
+        self.root, self.name = Path(root), name
+        plans = json.loads((self.root / "sessions.json").read_text())
+        self.parts = {
+            f"checkout{k}": Session(root, base) for k, base in enumerate(plans, 1)
+        }
+
+    def make(self, tree: Path) -> None:
+        for name, session in self.parts.items():
+            session.make(tree / name)
+            for words in (["init", "-q"], ["add", "-A"]):
+                subprocess.run(["git", *words], cwd=tree / name, check=True)
+            who = ["-c", "user.email=a@b", "-c", "user.name=a"]
+            words = ["commit", "-qm", "task"]
+            subprocess.run(["git", *who, *words], cwd=tree / name, check=True)
+
+    def prompts(self, parts: int) -> list[str]:
+        said = []
+        for name, session in self.parts.items():
+            for k, prompt in enumerate(session.prompts(1)):
+                where = f"Work in the folder {name}, a checkout of its own. "
+                said.append(prompt if k else where + prompt)
+        return said
+
+    def grade(self, tree: Path) -> dict:
+        found = {n: s.grade(tree / n) for n, s in self.parts.items()}
+        return {
+            "right": sum(f["right"] for f in found.values()),
+            "of": sum(f["of"] for f in found.values()),
+            "broken": sum(f["broken"] for f in found.values()),
+            "fixed": {n: f["fixed"] for n, f in found.items()},
         }
 
 

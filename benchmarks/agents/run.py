@@ -487,7 +487,7 @@ class Repository:
 
 def task_of(args, name: str):
     if args.swe:
-        kind = swe.Session if args.session else swe.Issue
+        kind = swe.Day if args.day else swe.Session if args.session else swe.Issue
         return kind(Path(args.swe), name)
     return Repository(int(name), args.modules, args.long)
 
@@ -554,7 +554,9 @@ def play_one(args, arm: str, which: str, repeat: int, key: str, bill: Bill) -> d
         "repeat": repeat,
         "parts": args.parts,
         "long": args.long,
-        "pause": args.pause if args.parts > 1 or args.session or args.long else [],
+        "pause": args.pause
+        if args.parts > 1 or args.session or args.long or args.day
+        else [],
         "status": status,
         "seconds": round(time.time() - begun, 1),
         "cost": sum(r["cost"] for r in rows if r.get("cost")),
@@ -705,6 +707,9 @@ def main(argv=None):
     sub.add_argument("--parts", type=int, default=1, help="Prompts a task is given in")
     sub.add_argument(
         "--session", action="store_true", help="Sessions of several issues"
+    )
+    sub.add_argument(
+        "--day", action="store_true", help="All sessions in one conversation"
     )
     sub.add_argument(
         "--long", action="store_true", help="A long session on a generated task"
