@@ -144,6 +144,9 @@ def provider(key: str, bill: Bill, log: Path) -> ThreadingHTTPServer:
         def handle_one(self):
             raw = self.rfile.read(int(self.headers.get("Content-Length") or 0))
             if bill.spent >= bill.budget:
+                row = {"at": round(time.time(), 2), "status": 402, "cost": 0}
+                with bill.lock, open(log, "a", encoding="utf-8") as stream:
+                    stream.write(json.dumps(row) + "\n")
                 return self._send(402, b'{"error": {"message": "the budget is spent"}}')
             sent = None
             try:
@@ -542,6 +545,9 @@ def play_one(args, arm: str, which: str, repeat: int, key: str, bill: Bill) -> d
             said.append(
                 (folder / f"out-{k}.txt").read_bytes()[-300:].decode("utf-8", "replace")
             )
+            with open(folder / "prompts.jsonl", "a", encoding="utf-8") as stream:
+                ended = {"prompt": k, "until": round(time.time(), 2), "status": status}
+                stream.write(json.dumps(ended) + "\n")
     finally:
         told = between.end()
         server.shutdown()
@@ -628,11 +634,39 @@ def play(args):
 # -- report ---------------------------------------------------------------------
 
 
+def curve(folder: Path) -> list[float]:
+    """What a run had cost after each of its prompts, as far as the budget went."""
+
+    def rows(name):
+        return [json.loads(line) for line in (folder / name).read_text().splitlines()]
+
+    ended = {row["prompt"]: row["until"] for row in rows("prompts.jsonl")}
+    calls, found = [r for r in rows("provider.jsonl") if "at" in r], []
+    for k in sorted(ended):
+        mine = [r for r in calls if r["at"] <= ended[k]]
+        if any(r["status"] == 402 for r in mine):
+            break
+        found.append(round(sum(r["cost"] for r in mine), 4))
+    return found
+
+
 def report(args):
     rows = [
-        json.loads(line)
-        for line in (Path(args.work) / "results.jsonl").read_text().splitlines()
+        json.loads(line) | {"work": work}
+        for work in args.work
+        for line in (Path(work) / "results.jsonl").read_text().splitlines()
     ]
+    if args.figure:
+        panels: dict[str, list] = {}
+        for r in rows:
+            name = f"{r['agent']}-{r['arm']}-{r['task']}-{r['repeat']}"
+            panels.setdefault(Path(r["work"]).name, []).append(
+                {
+                    **{k: r[k] for k in ("arm", "repeat", "right", "of", "largest")},
+                    "curve": curve(Path(r["work"]) / "runs" / name),
+                }
+            )
+        Path(args.figure).write_text(json.dumps(panels, indent=1) + "\n", "utf-8")
     for agent in sorted({r["agent"] for r in rows}):
         for parts in sorted({r["parts"] for r in rows}):
             mine = [r for r in rows if r["agent"] == agent and r["parts"] == parts]
@@ -749,7 +783,10 @@ def main(argv=None):
         "--past", help="The folder whose sessions `learned` learns from, if another"
     )
     sub = commands.add_parser("report")
-    sub.add_argument("--work", default="agents-out")
+    sub.add_argument("--work", nargs="+", default=["agents-out"])
+    sub.add_argument(
+        "--figure", help="Write what each run had cost by prompt to this file"
+    )
     sub = commands.add_parser("priced")
     sub.add_argument("--agent", choices=["claude", "codex"], default="claude")
     sub.add_argument("--work", default="agents-out")

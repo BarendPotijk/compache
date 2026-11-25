@@ -2,7 +2,7 @@
 """Draw the figures under docs/assets from the data files in docs/assets/data.
 
     python scripts/figures.py              # every figure
-    python scripts/figures.py breaks thread   # some of: headline, requests, breaks, agents, thread, openclaw, preview, live, compare, workflow
+    python scripts/figures.py breaks thread   # some of: headline, requests, breaks, agents, sessions, thread, openclaw, preview, live, compare, workflow
 
 Every figure paints its own surface and carries a light and a dark palette, so it
 reads on either GitHub theme. The palette, typeface and marks are the calculator's.
@@ -15,6 +15,7 @@ Where the data comes from:
     answers.json       the graded answers on benchmarks/live/README.md
     requests.json      python scripts/request_sizes.py
     agents.json        python benchmarks/agents/public.py price <runs> --output ...
+    agents-live.json   python benchmarks/agents/run.py report --work <folders> --figure ..., with its headings
     compare.json       python benchmarks/compare/run.py price --data <fast> <mixed> <slow> --sizes ... --output ...
 """
 
@@ -399,6 +400,111 @@ def agents(data):
         "Cost per 1,000 model calls of sending everything and of compache, for three ways of working. "
         + " ".join(summary),
         dollars,
+    )
+
+
+def sessions(data):
+    """A panel per long session, one line per run: what the provider had billed after each prompt."""
+    called = {
+        "none": "alone",
+        "headroom": "Headroom",
+        "kompressor": "Kompressor",
+        "compache": "compache",
+    }
+    width, height = 880, 372
+    left, right, top, bottom, gap = 62, 126, 116, 56, 188
+    panel = (width - left - right - gap) / 2
+    plot, base = height - top - bottom, height - bottom
+    body = [
+        "<style>.n2s{stroke:#b5b3a9}.n2{fill:#b5b3a9}"
+        "@media (prefers-color-scheme:dark){.n2s{stroke:#66655f}.n2{fill:#66655f}}</style>",
+        text(24, 32, data["title"], "big"),
+        text(24, 51, data["subtitle"], "t2"),
+    ]
+    at = 24
+    for cls, label in (
+        ("ns", "Claude Code alone"),
+        ("n2s", "with Headroom or Kompressor"),
+        ("cs", "with compache"),
+    ):
+        body.append(f'<path class="line {cls}" d="M{at},71 h16"/>')
+        body.append(text(at + 23, 75.5, label, "t2"))
+        at += 6.2 * len(label) + 48
+    said = []
+    for i, part in enumerate(data["panels"]):
+        x0, runs = left + i * (panel + gap), part["runs"]
+        count = max(len(run["curve"]) for run in runs)
+        highest = max(run["curve"][-1] for run in runs)
+        step = next(s for s in (0.1, 0.2, 0.5, 1.0, 2.0) if highest / s <= 4.5)
+        ceiling = step * -(-highest // step)
+
+        def x(k, x0=x0, count=count):
+            return x0 + (k - 1) / (count - 1) * panel
+
+        def y(value, ceiling=ceiling):
+            return base - value / ceiling * plot
+
+        body.append(text(x0 - 38, top - 14, part["heading"], "h"))
+        for j in range(round(ceiling / step) + 1):
+            at = y(j * step)
+            body.append(
+                f'<line class="{"grid" if j else "axis"}" x1="{x0:.1f}" x2="{x0 + panel:.1f}" '
+                f'y1="{at:.1f}" y2="{at:.1f}"/>'
+            )
+            label = f"${j * step:.2f}" if j else "0"
+            body.append(text(x0 - 9, at + 4, label, "tm", "end"))
+        for k in (1, 5, 10, 15, count):
+            if k == count or count - k > 2:
+                body.append(text(x(k), base + 20, k, "tm", "middle"))
+        body.append(text(x0 + panel / 2, base + 40, "Prompt", "t2", "middle"))
+        order, ends = ("headroom", "kompressor", "none", "compache"), []
+        for run in sorted(runs, key=lambda r: order.index(r["arm"])):
+            points = [(x(k), y(v)) for k, v in enumerate(run["curve"], 1)]
+            cls = {"compache": "c", "none": "n"}.get(run["arm"], "n2")
+            path = " ".join(f"{a:.1f},{b:.1f}" for a, b in points)
+            body.append(f'<polyline class="line {cls}s" points="{path}"/>')
+            ends.append((*points[-1], cls, run))
+        for a, b, cls, _ in ends:
+            body.append(f'<circle class="{cls} ring" cx="{a:.1f}" cy="{b:.1f}" r="5"/>')
+        # A label at the end of each line, moved apart where two would touch, with a line to its own.
+        free = float("-inf")
+        for a, b, _, run in sorted(ends, key=lambda end: end[1]):
+            cost, last = run["curve"][-1], len(run["curve"])
+            words = f"{called[run['arm']]} ${cost:.2f}"
+            style = "h" if run["arm"] == "compache" else "t2"
+            if count - last > 2:
+                # It ends inside the panel: over the lines there, or just above its own end.
+                top_one = all(
+                    other["curve"][last - 1] <= cost
+                    for other in runs
+                    if len(other["curve"]) >= last
+                )
+                body.append(
+                    text(a - 10, b, words, style, "end")
+                    if top_one
+                    else text(a + 3, b - 11, words, style)
+                )
+                continue
+            place = max(b + 4, free + 16)
+            free = place
+            if place - b - 4 > 2:
+                body.append(
+                    f'<line class="axis" x1="{a + 7:.1f}" y1="{b + 2:.1f}" x2="{a + 13:.1f}" y2="{place - 4:.1f}"/>'
+                )
+            body.append(text(a + 16, place, words, style))
+        said.append(
+            f"{part['heading']}: "
+            + ", ".join(
+                f"{called[r['arm']]} ${r['curve'][-1]:.2f} after {len(r['curve'])} prompts"
+                for r in runs
+            )
+        )
+    return svg(
+        width,
+        height,
+        data["title"],
+        f"{data['subtitle']} {'. '.join(said)}.",
+        body,
     )
 
 
@@ -918,6 +1024,7 @@ FIGURES = {
     "requests": ("requests.svg", "requests.json", requests),
     "breaks": ("breaks-cost.svg", "policy-grid.json", breaks),
     "agents": ("agents-cost.svg", "agents.json", agents),
+    "sessions": ("agents-live.svg", "agents-live.json", sessions),
     "thread": ("thread-dependencies.svg", "thread.json", thread),
     "openclaw": ("openclaw-cost.svg", "openclaw.json", openclaw),
     "preview": ("preview.svg", "openclaw.json", preview),

@@ -146,8 +146,9 @@ class FakeModel:
         )
         made.setdefault("text", "")
         made.setdefault("thinking", 0)
-        # A number of its own for every call, also where several are made at the same moment.
-        made["id"] = next(self._numbers)
+        # A name of its own for every call, also where several are made at the same moment.
+        name = f"call {next(self._numbers)}".encode()
+        made["id"] = hashlib.sha256(name).hexdigest()[:24]
         made["tools"] = made.get("tools") or (
             [made["tool"]] if made.get("tool") else []
         )

@@ -798,7 +798,7 @@ class Live:
             chains.append(_link(chains[-1], segment))
         done = len(turns) - 1
         with self._lock:
-            found = self._in_loop(scan.results, chains, turns, thread)
+            found = self._in_loop(scan.results, chains, turns)
             others = [] if found is None else [found]
             if not others and (thread or done):
                 others = self._by_chain.get(chains[-1], ())[::-1]
@@ -845,7 +845,7 @@ class Live:
                     self._latest.popitem(last=False)
             return found, chains
 
-    def _in_loop(self, results, chains, turns, thread) -> _Conversation | None:
+    def _in_loop(self, results, chains, turns) -> _Conversation | None:
         """The conversation whose reply made the tool calls that a request answers."""
         done, near = len(turns) - 1, []
         for call_id in reversed(results[-_LOOK_BACK:]):
@@ -859,9 +859,7 @@ class Live:
                         return found
                     if call_id in pending.called and found not in near:
                         # What was asked has been rendered anew. An ID that counts says little then.
-                        if _ONE_OF_A_KIND.search(call_id) or (
-                            thread and self._alike(pending, turns[-1])
-                        ):
+                        if _ONE_OF_A_KIND.search(call_id):
                             near.append(found)
                 elif pending.index == done and done and found.chain == chains[-2]:
                     if self._goes_on(pending, turns[-2]):
@@ -901,12 +899,6 @@ class Live:
         return seen == pending.seen and segment.question.startswith(pending.question)
 
     @staticmethod
-    def _alike(pending: _Pending, segment: _Segment) -> bool:
-        """Whether a question that was rendered anew still holds most of what was asked."""
-        asked = set(pending.question.split())
-        return 2 * len(asked & set(segment.question.split())) > len(asked)
-
-    @staticmethod
     def _several(conversation: _Conversation) -> bool:
         """Whether several conversations may be under way where this one is.
 
@@ -929,10 +921,7 @@ class Live:
         )
         if not self._goes_on(pending, current):
             # What it had said was rendered anew, or it is somebody else's.
-            return any(
-                _ONE_OF_A_KIND.search(call_id) or self._alike(pending, current)
-                for call_id in answers
-            )
+            return any(map(_ONE_OF_A_KIND.search, answers))
         if not (pending.calls or pending.in_flight):
             # Nothing has come of it yet.
             return True
