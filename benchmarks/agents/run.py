@@ -453,6 +453,25 @@ RANDOM = (
 )
 
 
+def sweep(folder: Path) -> None:
+    """End what an agent left running in a folder: it goes on for hours, and slows the others."""
+    said = subprocess.run(
+        ["lsof", "-a", "-d", "cwd", "-Fpn"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+    ).stdout
+    pid = None
+    for line in said.splitlines():
+        if line.startswith("p"):
+            pid = int(line[1:])
+        elif line.startswith("n") and Path(line[1:]).is_relative_to(folder):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+
 class Repository:
     """A generated task (tasks.py), in one prompt, in several, or as a long session."""
 
@@ -552,6 +571,7 @@ def play_one(args, arm: str, which: str, repeat: int, key: str, bill: Bill) -> d
         told = between.end()
         server.shutdown()
         server.server_close()
+        sweep(folder.resolve())
     rows = (
         [json.loads(line) for line in log.read_text().splitlines()]
         if log.exists()
