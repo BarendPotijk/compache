@@ -79,67 +79,80 @@ def away(seconds):
 
 
 def headline(data):
-    """Two panels: what the provider billed and how many answers were right, without and with compache."""
+    """Two panels, a chatbot and a coding agent: the bill without and with compache, and that the work held up."""
     answers = json.loads((DATA / "answers.json").read_text("utf-8"))
     ways = [w for w in data["ways"] if answers["model"] in w["detail"]]
 
-    def average(arm):
+    def mean(costs):
         # In decimals: a float mean lands on either side of half a cent, by Python version.
-        costs = [
-            Decimal(str(a["cost"])) for w in ways for a in w["arms"] if a["name"] == arm
-        ]
-        mean = sum(costs) / len(costs)
-        return mean, f"${mean.quantize(Decimal('0.01'), ROUND_HALF_UP)}"
+        costs = [Decimal(str(cost)) for cost in costs]
+        return sum(costs) / len(costs)
 
-    (before, was), (after, now) = average("No policy"), average("Fitted on past traces")
-    saving = f"{1 - after / before:.0%}"
+    def billed(arm):
+        return mean(
+            a["cost"] for w in ways for a in w["arms"] if a["name"].startswith(arm)
+        )
+
+    task = json.loads((DATA / "agents-live.json").read_text("utf-8"))["panels"][0]
+
+    def spent(arm):
+        return mean(r["curve"][-1] for r in task["runs"] if r["arm"] == arm)
+
+    def passed(arm):
+        runs = [r for r in task["runs"] if r["arm"] == arm]
+        return f"{min(r['right'] for r in runs)} of {runs[0]['of']}"
+
     right = (answers["no_policy"], answers["past_traces"])
-    width, height, x0, bar, top = 880, 182, 138, 22, 92
     panels = [
         (
-            "Bill per 1,000 user messages",
-            x0,
-            (before, after),
-            (was, now),
+            "Chatbot",
+            "1,000 messages to a document chat",
+            billed("No policy"),
+            billed("Fitted on past traces"),
+            f"{right[0]} answers right without, {right[1]} with, of {answers['turns']}",
         ),
         (
-            f"Right answers, out of {answers['turns']}",
-            x0 + 400,
-            right,
-            (str(right[0]), str(right[1])),
+            "Coding agent",
+            f"a {len(task['runs'][0]['curve'])}-prompt task in Claude Code",
+            spent("none"),
+            spent("compache"),
+            f"{passed('none')} tests passed without, {passed('compache')} with",
         ),
     ]
-    body = [
-        text(24, 32, f"{saving} off the bill, with as many answers right", "big"),
-        text(
-            24,
-            51,
-            f"Live calls to {answers['model']}, billed by the provider: {answers['turns'] // len(ways)} messages "
-            f"compache had not seen, each through {len(ways)} integrations.",
-            "t2",
-        ),
-        text(x0 - 14, top + 38, "Without", "t2", "end"),
-        text(x0 - 14, top + 70, "With compache", "b", "end"),
-    ]
-    for name, left, values, labels in panels:
-        full = 260
+    width, height, gap = 880, 226, 40
+    panel = (width - 48 - gap) / 2
+    body = ["<style>.huge{font-size:34px;font-weight:650;letter-spacing:-1px}</style>"]
+    said = []
+    for i, (name, what, before, after, held) in enumerate(panels):
+        x0 = 24 + i * (panel + gap)
+        was, now = (
+            f"${v.quantize(Decimal('0.01'), ROUND_HALF_UP)}" for v in (before, after)
+        )
         body += [
-            text(left, top + 5, name, "h"),
-            f'<line class="axis" x1="{left}" x2="{left}" y1="{top + 18}" y2="{top + 80}"/>',
+            text(x0, 36, name, "big"),
+            text(x0 + 9 * len(name) + 8, 36, what, "t2"),
+            text(x0, 86, f"{1 - after / before:.0%} less", "huge"),
         ]
-        for j, (value, label) in enumerate(zip(values, labels, strict=True)):
-            yy, length = top + 22 + j * 32, float(value / max(values)) * full
+        if i:
             body.append(
-                f'<path class="{"c" if j else "n"}" d="M{left},{yy} h{length - 4:.1f} a4,4 0 0 1 4,4 '
-                f'v{bar - 8} a4,4 0 0 1 -4,4 h-{length - 4:.1f} z"/>'
+                f'<line class="grid" x1="{x0 - gap / 2}" x2="{x0 - gap / 2}" y1="24" y2="{height - 24}"/>'
             )
-            body.append(text(left + length + 8, yy + 15.5, label, "h" if j else "t2"))
+        bars = [("n", before, was, "Without"), ("c", after, now, "With compache")]
+        for k, (cls, value, label, side) in enumerate(bars):
+            y, length = 110 + 36 * k, float(value / before) * (panel - 160)
+            body += [
+                text(x0, y + 16, side, "b" if k else "t2"),
+                f'<path class="{cls}" d="M{x0 + 100:.1f},{y} h{length - 4:.1f} a4,4 0 0 1 4,4 v16 a4,4 0 0 1 -4,4 '
+                f'h-{length - 4:.1f} z"/>',
+                text(x0 + 100 + length + 9, y + 16.5, label, "h" if k else "t2"),
+            ]
+        body.append(text(x0, 204, held, "t2"))
+        said.append(f"{name}, {what}: {was} without, {now} with, {held}")
     return svg(
         width,
         height,
-        f"{saving} off the bill, with as many answers right",
-        f"Live calls to {answers['model']}. Billed per 1,000 user messages: {was} without compache, "
-        f"{now} with. Answers graded right of {answers['turns']}: {right[0]} without, {right[1]} with.",
+        "The same work for a lower bill",
+        f"Billed by the provider on {answers['model']}. {'. '.join(said)}.",
         body,
     )
 
@@ -148,101 +161,56 @@ def headline(data):
 
 
 def requests(data):
-    """One column per message: the whole history in grey, what compache sends in blue, the cache underneath."""
+    """One column per message: the whole history in grey, what compache sends of it in blue."""
     turns = data["turns"]
-    width, height = 880, 388
-    left, right, top, bottom = 58, 58, 108, 96
+    width, height = 880, 330
+    left, right, top, bottom = 24, 88, 84, 50
     span = (width - left - right) / len(turns)
-    plot = height - top - bottom
-    step = 20_000
-    ceiling = step * -(-max(t["full"] for t in turns) // step)
+    plot, base = height - top - bottom, height - bottom
+    ceiling = max(t["full"] for t in turns)
     thick = min(22, span * 0.7)
 
     def y(value):
-        return top + plot - value / ceiling * plot
+        return base - value / ceiling * plot
 
     def column(cls, x0, value):
         h = value / ceiling * plot
         r = min(4, h)
         return (
-            f'<path class="{cls}" d="M{x0:.1f},{top + plot:.1f} v-{h - r:.1f} a{r:.1f},{r:.1f} 0 0 1 {r:.1f},-{r:.1f} '
+            f'<path class="{cls}" d="M{x0:.1f},{base} v-{h - r:.1f} a{r:.1f},{r:.1f} 0 0 1 {r:.1f},-{r:.1f} '
             f'h{thick - 2 * r:.1f} a{r:.1f},{r:.1f} 0 0 1 {r:.1f},{r:.1f} v{h - r:.1f} z"/>'
         )
 
-    total = sum(t["full"] for t in turns)
-    sent = sum(min(t["sent"], t["full"]) for t in turns)
+    last = turns[-1]
+    full, sent = (f"{last[key] / 1000:.0f}k" for key in ("full", "sent"))
+    title = (
+        f"By message {len(turns)}, your app sends {full} tokens. compache sends {sent}."
+    )
     body = [
-        text(24, 30, "What one chat sends to the model, message by message", "big"),
-        text(
-            24,
-            49,
-            f"A {len(turns)}-message chat with an HR handbook, tokens per request. "
-            f"compache sends {1 - sent / total:.0%} fewer in total.",
-            "t2",
-        ),
-        '<rect class="cell" x="24" y="64" width="10" height="10" rx="2"/>',
-        text(40, 73.5, "the whole history", "t2"),
-        '<rect class="c" x="160" y="64" width="10" height="10" rx="2"/>',
-        text(176, 73.5, "what compache sends", "t2"),
-        '<circle class="o" cx="327" cy="69" r="4.5"/>',
-        text(338, 73.5, "user away too long, cache expired: compache trims", "t2"),
-        '<path class="line cs" d="M664,69 l4,4 l7,-8"/>',
-        text(682, 73.5, "ping kept the cache warm", "t2"),
+        text(24, 32, title, "big"),
+        text(24, 51, "Tokens sent with each message of one chat.", "t2"),
+        f'<line class="axis" x1="{left}" x2="{width - right}" y1="{base}" y2="{base}"/>',
     ]
-    for tick in range(0, ceiling + 1, step):
-        body.append(
-            f'<line class="{"axis" if tick == 0 else "grid"}" x1="{left}" x2="{width - right}" y1="{y(tick):.1f}" y2="{y(tick):.1f}"/>'
-        )
-        body.append(
-            text(
-                left - 8, y(tick) + 4, f"{tick // 1000}k" if tick else "0", "tm", "end"
-            )
-        )
-    base = top + plot
-    trims = 0
-    archived = 0
     for i, t in enumerate(turns):
         middle = left + (i + 0.5) * span
-        x0 = middle - thick / 2
-        shown = min(t["sent"], t["full"])
+        x0, shown = middle - thick / 2, min(t["sent"], t["full"])
         if shown < t["full"]:
             body.append(column("cell", x0, t["full"]))
         body.append(column("c", x0, shown))
-        if t["archived"] > archived:
-            trims, archived = trims + 1, t["archived"]
-        if t["cache"] == "cold":
-            body.append(
-                f'<circle class="o" cx="{middle:.1f}" cy="{base + 16}" r="4.5"/>'
-            )
-        elif t["pings_before"]:
-            body.append(
-                f'<path class="line cs" d="M{middle - 5:.1f},{base + 16} l4,4 l7,-8"/>'
-            )
         if t["turn"] == 1 or t["turn"] % 5 == 0:
-            body.append(text(middle, base + 41, t["turn"], "tm", "middle"))
-    last = turns[-1]
-    end = left + (len(turns) - 0.5) * span + thick / 2
+            body.append(text(middle, base + 20, t["turn"], "tm", "middle"))
+    end = width - right + 6
     body += [
-        text(end + 8, y(last["full"]) + 9, f"{last['full'] / 1000:.0f}k", "t2"),
-        text(end + 8, y(last["sent"]) + 9, f"{last['sent'] / 1000:.0f}k", "h"),
-        text(
-            left + (width - left - right) / 2, base + 60, "User message", "t2", "middle"
-        ),
-        text(
-            24,
-            height - 14,
-            "Trimming rewrites the history, which breaks the cache. So compache trims when the cache is already gone.",
-            "t2",
-        ),
+        text(end, y(last["full"]) + 10, "everything", "t2"),
+        text(end, y(last["sent"]) + 10, "compache", "h"),
+        text(left + (width - left - right) / 2, base + 38, "Message", "t2", "middle"),
     ]
-    cold = sum(t["cache"] == "cold" for t in turns)
     return svg(
         width,
         height,
-        "What one chat sends to the model, message by message",
-        f"A {len(turns)}-message chat. Sending the whole history grows to {last['full']:,} tokens on the last message, "
-        f"compache sends {last['sent']:,} there. The cache had expired before {cold} messages and compache trimmed the history "
-        f"{trims} times, each time on one of those. Before {sum(t['pings_before'] > 0 for t in turns)} other messages a ping kept the cache warm.",
+        title,
+        f"A {len(turns)}-message chat. The whole history grows to {last['full']:,} tokens with the last message, "
+        f"compache sends {last['sent']:,} there and never more than {max(t['sent'] for t in turns):,}.",
         body,
     )
 
@@ -405,37 +373,47 @@ def agents(data):
 
 
 def sessions(data):
-    """A panel per long session, one line per run: what the provider had billed after each prompt."""
+    """A panel per long session, one line per tool: the bill so far after each prompt, averaged over its runs."""
     called = {
         "none": "alone",
         "headroom": "Headroom",
         "kompressor": "Kompressor",
         "compache": "compache",
     }
-    width, height = 880, 372
-    left, right, top, bottom, gap = 62, 134, 116, 56, 186
+    tone = {"compache": "c", "none": "n"}
+    width, height = 880, 400
+    left, right, top, bottom, gap = 62, 134, 118, 82, 186
     panel = (width - left - right - gap) / 2
     plot, base = height - top - bottom, height - bottom
     body = [
-        "<style>.n2s{stroke:#b5b3a9}.n2{fill:#b5b3a9}.over{paint-order:stroke;stroke-width:6;stroke-linejoin:round}"
-        "@media (prefers-color-scheme:dark){.n2s{stroke:#66655f}.n2{fill:#66655f}}</style>",
+        "<style>.n2s{stroke:#b5b3a9}.n2{fill:#b5b3a9}.band{opacity:.16}"
+        "@media (prefers-color-scheme:dark){.n2s{stroke:#66655f}.n2{fill:#66655f}.band{opacity:.26}}</style>",
         text(24, 32, data["title"], "big"),
         text(24, 51, data["subtitle"], "t2"),
     ]
-    at = 24
-    for cls, label in (
-        ("ns", "Claude Code alone"),
-        ("n2s", "with Headroom or Kompressor"),
-        ("cs", "with compache"),
-    ):
-        body.append(f'<path class="line {cls}" d="M{at},71 h16"/>')
-        body.append(text(at + 23, 75.5, label, "t2"))
-        at += 6.2 * len(label) + 48
+
+    def reach(arm):
+        """The largest request of each run of one arm, from the smallest of them to the largest."""
+        sizes = [
+            r["largest"] for p in data["panels"] for r in p["runs"] if r["arm"] == arm
+        ]
+        return f"{min(sizes) / 1000:.0f}k to {max(sizes) / 1000:.0f}k"
+
     said = []
     for i, part in enumerate(data["panels"]):
-        x0, runs = left + i * (panel + gap), part["runs"]
-        count = max(len(run["curve"]) for run in runs)
-        highest = max(run["curve"][-1] for run in runs)
+        x0 = left + i * (panel + gap)
+        runs = {
+            arm: [r["curve"] for r in part["runs"] if r["arm"] == arm] for arm in called
+        }
+        # As far as both compache and the agent alone got in every run. A tool that stopped before that is left out.
+        count = min(len(c) for arm in ("none", "compache") for c in runs[arm])
+        early = [a for a, cs in runs.items() if cs and min(map(len, cs)) < count]
+        lines = {}
+        for arm, curves in runs.items():
+            if curves and arm not in early:
+                at = list(zip(*(c[:count] for c in curves), strict=True))
+                lines[arm] = [(sum(v) / len(v), min(v), max(v)) for v in at]
+        highest = max(v[-1][2] for v in lines.values())
         step = next(s for s in (0.1, 0.2, 0.5, 1.0, 2.0) if highest / s <= 4.5)
         ceiling = step * -(-highest // step)
 
@@ -445,7 +423,7 @@ def sessions(data):
         def y(value, ceiling=ceiling):
             return base - value / ceiling * plot
 
-        body.append(text(x0 - 38, top - 14, part["heading"], "h"))
+        body.append(text(x0 - 38, top - 34, part["heading"], "h"))
         for j in range(round(ceiling / step) + 1):
             at = y(j * step)
             body.append(
@@ -454,54 +432,68 @@ def sessions(data):
             )
             label = f"${j * step:.2f}" if j else "0"
             body.append(text(x0 - 9, at + 4, label, "tm", "end"))
-        for k in (1, 5, 10, 15, count):
-            if k == count or count - k > 2:
-                body.append(text(x(k), base + 20, k, "tm", "middle"))
-        body.append(text(x0 + panel / 2, base + 40, "Prompt", "t2", "middle"))
-        order, ends = ("headroom", "kompressor", "none", "compache"), []
-        for run in sorted(runs, key=lambda r: order.index(r["arm"])):
-            points = [(x(k), y(v)) for k, v in enumerate(run["curve"], 1)]
-            cls = {"compache": "c", "none": "n"}.get(run["arm"], "n2")
-            path = " ".join(f"{a:.1f},{b:.1f}" for a, b in points)
-            body.append(f'<polyline class="line {cls}s" points="{path}"/>')
-            ends.append((*points[-1], cls, run))
-        for a, b, cls, _ in ends:
-            body.append(f'<circle class="{cls} ring" cx="{a:.1f}" cy="{b:.1f}" r="5"/>')
-        # A label at the end of each line, moved apart where two would touch, with a line to its own.
-        free = float("-inf")
-        for a, b, _, run in sorted(ends, key=lambda end: end[1]):
-            cost, last = run["curve"][-1], len(run["curve"])
-            words = f"{called[run['arm']]} ${cost:.2f}"
-            style = "h" if run["arm"] == "compache" else "t2"
-            if count - last > 2:
-                # It ends inside the panel: over the lines there, or just above its own end.
-                top_one = all(
-                    other["curve"][last - 1] <= cost
-                    for other in runs
-                    if len(other["curve"]) >= last
-                )
-                # What it stands over shows no line.
-                style += " ring over"
+        for k in (1, 5, 10, count):
+            body.append(text(x(k), base + 20, k, "tm", "middle"))
+        body.append(text(x0 + panel / 2, base + 38, "Prompt", "t2", "middle"))
+        order = [
+            a for a in ("none", "headroom", "kompressor", "compache") if a in lines
+        ]
+        for arm in order:
+            values, cls = lines[arm], tone.get(arm, "n2")
+            if len(runs[arm]) > 1:
+                upper = [f"{x(k):.1f},{y(v[2]):.1f}" for k, v in enumerate(values, 1)]
+                lower = [f"{x(k):.1f},{y(v[1]):.1f}" for k, v in enumerate(values, 1)]
                 body.append(
-                    text(a - 10, b, words, style, "end")
-                    if top_one
-                    else text(a + 3, b - 11, words, style)
+                    f'<polygon class="band {cls}" points="{" ".join(upper + lower[::-1])}"/>'
                 )
-                continue
-            place = max(b + 4, free + 16)
-            free = place
-            if place - b - 4 > 2:
-                body.append(
-                    f'<line class="axis" x1="{a + 7:.1f}" y1="{b + 2:.1f}" x2="{a + 13:.1f}" y2="{place - 4:.1f}"/>'
-                )
-            body.append(text(a + 16, place, words, style))
-        said.append(
-            f"{part['heading']}: "
-            + ", ".join(
-                f"{called[r['arm']]} ${r['curve'][-1]:.2f} after {len(r['curve'])} prompts"
-                for r in runs
+        for arm in order:
+            values, cls = lines[arm], tone.get(arm, "n2")
+            path = " ".join(
+                f"{x(k):.1f},{y(v[0]):.1f}" for k, v in enumerate(values, 1)
             )
+            body.append(f'<polyline class="line {cls}s" points="{path}"/>')
+        alone, ours = lines["none"][-1][0], lines["compache"][-1][0]
+        # A label at the end of each line, moved apart where two would touch.
+        free = float("-inf")
+        for arm in sorted(order, key=lambda a: -lines[a][-1][0]):
+            cost, cls = lines[arm][-1][0], tone.get(arm, "n2")
+            end = y(cost)
+            body.append(
+                f'<circle class="{cls} ring" cx="{x(count):.1f}" cy="{end:.1f}" r="5"/>'
+            )
+            place = max(end + 4, free + 17)
+            free = place
+            if place - end - 4 > 2:
+                body.append(
+                    f'<line class="axis" x1="{x(count) + 7:.1f}" y1="{end + 1:.1f}" '
+                    f'x2="{x(count) + 12:.1f}" y2="{place - 4:.1f}"/>'
+                )
+            style = "h" if arm == "compache" else "t2"
+            body.append(text(x(count) + 15, place, f"{called[arm]} ${cost:.2f}", style))
+        body.append(text(x(count) + 15, free + 17, f"{1 - ours / alone:.0%} less", "h"))
+        if early:
+            names = " and ".join(called[a] for a in early)
+            body.append(
+                text(
+                    x0 - 38,
+                    top - 17,
+                    f"{names} ran out of budget and are left out.",
+                    "tm",
+                )
+            )
+        said.append(
+            f"{part['heading']}, after prompt {count}: "
+            + ", ".join(f"{called[a]} ${lines[a][-1][0]:.2f}" for a in order)
         )
+    body.append(
+        text(
+            24,
+            height - 16,
+            "Above 100k tokens a request costs five times as much on this model. "
+            f"Largest requests: alone {reach('none')}, with compache {reach('compache')}.",
+            "t2",
+        )
+    )
     return svg(
         width,
         height,

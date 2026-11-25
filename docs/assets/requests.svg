@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="880" height="388" viewBox="0 0 880 388" role="img" aria-labelledby="t d">
-<title id="t">What one chat sends to the model, message by message</title>
-<desc id="d">A 26-message chat. Sending the whole history grows to 89,285 tokens on the last message, compache sends 25,351 there. The cache had expired before 8 messages and compache trimmed the history 8 times, each time on one of those. Before 4 other messages a ping kept the cache warm.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="330" viewBox="0 0 880 330" role="img" aria-labelledby="t d">
+<title id="t">By message 26, your app sends 89k tokens. compache sends 25k.</title>
+<desc id="d">A 26-message chat. The whole history grows to 89,285 tokens with the last message, compache sends 25,351 there and never more than 25,351.</desc>
 <style>
 text{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;font-size:12px;fill:#0b0b0b}
 .surface{fill:#fcfcfb;stroke:rgba(11,11,11,.1)}
@@ -16,95 +16,63 @@ text{fill:#f0efec}.surface{fill:#1a1a19;stroke:rgba(255,255,255,.1)}.t2{fill:#c3
 .cell{fill:#383835}.ring{stroke:#1a1a19}
 }
 </style>
-<rect class="surface" x=".5" y=".5" width="879" height="387" rx="10"/>
-<text x="24.0" y="30.0" class="big">What one chat sends to the model, message by message</text>
-<text x="24.0" y="49.0" class="t2">A 26-message chat with an HR handbook, tokens per request. compache sends 69% fewer in total.</text>
-<rect class="cell" x="24" y="64" width="10" height="10" rx="2"/>
-<text x="40.0" y="73.5" class="t2">the whole history</text>
-<rect class="c" x="160" y="64" width="10" height="10" rx="2"/>
-<text x="176.0" y="73.5" class="t2">what compache sends</text>
-<circle class="o" cx="327" cy="69" r="4.5"/>
-<text x="338.0" y="73.5" class="t2">user away too long, cache expired: compache trims</text>
-<path class="line cs" d="M664,69 l4,4 l7,-8"/>
-<text x="682.0" y="73.5" class="t2">ping kept the cache warm</text>
-<line class="axis" x1="58" x2="822" y1="292.0" y2="292.0"/>
-<text x="50.0" y="296.0" class="tm" text-anchor="end">0</text>
-<line class="grid" x1="58" x2="822" y1="255.2" y2="255.2"/>
-<text x="50.0" y="259.2" class="tm" text-anchor="end">20k</text>
-<line class="grid" x1="58" x2="822" y1="218.4" y2="218.4"/>
-<text x="50.0" y="222.4" class="tm" text-anchor="end">40k</text>
-<line class="grid" x1="58" x2="822" y1="181.6" y2="181.6"/>
-<text x="50.0" y="185.6" class="tm" text-anchor="end">60k</text>
-<line class="grid" x1="58" x2="822" y1="144.8" y2="144.8"/>
-<text x="50.0" y="148.8" class="tm" text-anchor="end">80k</text>
-<line class="grid" x1="58" x2="822" y1="108.0" y2="108.0"/>
-<text x="50.0" y="112.0" class="tm" text-anchor="end">100k</text>
-<path class="c" d="M62.4,292.0 v-0.9 a4.0,4.0 0 0 1 4.0,-4.0 h12.6 a4.0,4.0 0 0 1 4.0,4.0 v0.9 z"/>
-<text x="72.7" y="333.0" class="tm" text-anchor="middle">1</text>
-<path class="c" d="M91.8,292.0 v-8.6 a4.0,4.0 0 0 1 4.0,-4.0 h12.6 a4.0,4.0 0 0 1 4.0,4.0 v8.6 z"/>
-<path class="c" d="M121.2,292.0 v-14.5 a4.0,4.0 0 0 1 4.0,-4.0 h12.6 a4.0,4.0 0 0 1 4.0,4.0 v14.5 z"/>
-<path class="c" d="M150.6,292.0 v-21.1 a4.0,4.0 0 0 1 4.0,-4.0 h12.6 a4.0,4.0 0 0 1 4.0,4.0 v21.1 z"/>
-<path class="c" d="M179.9,292.0 v-28.0 a4.0,4.0 0 0 1 4.0,-4.0 h12.6 a4.0,4.0 0 0 1 4.0,4.0 v28.0 z"/>
-<text x="190.2" y="333.0" class="tm" text-anchor="middle">5</text>
-<path class="c" d="M209.3,292.0 v-32.6 a4.0,4.0 0 0 1 4.0,-4.0 h12.6 a4.0,4.0 0 0 1 4.0,4.0 v32.6 z"/>
-<path class="cell" d="M238.7,292.0 v-39.0 a4.0,4.0 0 0 1 4.0,-4.0 h12.6 a4.0,4.0 0 0 1 4.0,4.0 v39.0 z"/>
-<path class="c" d="M238.7,292.0 v-10.2 a4.0,4.0 0 0 1 4.0,-4.0 h12.6 a4.0,4.0 0 0 1 4.0,4.0 v10.2 z"/>
-<circle class="o" cx="249.0" cy="308" r="4.5"/>
-<path class="cell" d="M268.1,292.0 v-46.0 a4.0,4.0 0 0 1 4.0,-4.0 h12.6 a4.0,4.0 0 0 1 4.0,4.0 v46.0 z"/>
-<path class="c" d="M268.1,292.0 v-17.2 a4.0,4.0 0 0 1 4.0,-4.0 h12.6 a4.0,4.0 0 0 1 4.0,4.0 v17.2 z"/>
-<path class="line cs" d="M273.4,308 l4,4 l7,-8"/>
-<path class="cell" d="M297.5,292.0 v-52.6 a4.0,4.0 0 0 1 4.0,-4.0 h12.6 a4.0,4.0 0 0 1 4.0,4.0 v52.6 z"/>
-<path class="c" d="M297.5,292.0 v-23.7 a4.0,4.0 0 0 1 4.0,-4.0 h12.6 a4.0,4.0 0 0 1 4.0,4.0 v23.7 z"/>
-<path class="cell" d="M326.9,292.0 v-59.2 a4.0,4.0 0 0 1 4.0,-4.0 h12.6 a4.0,4.0 0 0 1 4.0,4.0 v59.2 z"/>
-<path class="c" d="M326.9,292.0 v-30.3 a4.0,4.0 0 0 1 4.0,-4.0 h12.6 a4.0,4.0 0 0 1 4.0,4.0 v30.3 z"/>
-<text x="337.2" y="333.0" class="tm" text-anchor="middle">10</text>
-<path class="cell" d="M356.3,292.0 v-66.2 a4.0,4.0 0 0 1 4.0,-4.0 h12.6 a4.0,4.0 0 0 1 4.0,4.0 v66.2 z"/>
-<path class="c" d="M356.3,292.0 v-37.3 a4.0,4.0 0 0 1 4.0,-4.0 h12.6 a4.0,4.0 0 0 1 4.0,4.0 v37.3 z"/>
-<path class="line cs" d="M361.5,308 l4,4 l7,-8"/>
-<path class="cell" d="M385.6,292.0 v-72.9 a4.0,4.0 0 0 1 4.0,-4.0 h12.6 a4.0,4.0 0 0 1 4.0,4.0 v72.9 z"/>
-<path class="c" d="M385.6,292.0 v-15.3 a4.0,4.0 0 0 1 4.0,-4.0 h12.6 a4.0,4.0 0 0 1 4.0,4.0 v15.3 z"/>
-<circle class="o" cx="395.9" cy="308" r="4.5"/>
-<path class="cell" d="M415.0,292.0 v-79.3 a4.0,4.0 0 0 1 4.0,-4.0 h12.6 a4.0,4.0 0 0 1 4.0,4.0 v79.3 z"/>
-<path class="c" d="M415.0,292.0 v-15.2 a4.0,4.0 0 0 1 4.0,-4.0 h12.6 a4.0,4.0 0 0 1 4.0,4.0 v15.2 z"/>
-<circle class="o" cx="425.3" cy="308" r="4.5"/>
-<path class="cell" d="M444.4,292.0 v-85.9 a4.0,4.0 0 0 1 4.0,-4.0 h12.6 a4.0,4.0 0 0 1 4.0,4.0 v85.9 z"/>
-<path class="c" d="M444.4,292.0 v-15.4 a4.0,4.0 0 0 1 4.0,-4.0 h12.6 a4.0,4.0 0 0 1 4.0,4.0 v15.4 z"/>
-<circle class="o" cx="454.7" cy="308" r="4.5"/>
-<path class="cell" d="M473.8,292.0 v-93.3 a4.0,4.0 0 0 1 4.0,-4.0 h12.6 a4.0,4.0 0 0 1 4.0,4.0 v93.3 z"/>
-<path class="c" d="M473.8,292.0 v-16.7 a4.0,4.0 0 0 1 4.0,-4.0 h12.6 a4.0,4.0 0 0 1 4.0,4.0 v16.7 z"/>
-<circle class="o" cx="484.1" cy="308" r="4.5"/>
-<text x="484.1" y="333.0" class="tm" text-anchor="middle">15</text>
-<path class="cell" d="M503.2,292.0 v-99.4 a4.0,4.0 0 0 1 4.0,-4.0 h12.6 a4.0,4.0 0 0 1 4.0,4.0 v99.4 z"/>
-<path class="c" d="M503.2,292.0 v-16.8 a4.0,4.0 0 0 1 4.0,-4.0 h12.6 a4.0,4.0 0 0 1 4.0,4.0 v16.8 z"/>
-<circle class="o" cx="513.5" cy="308" r="4.5"/>
-<path class="cell" d="M532.6,292.0 v-105.6 a4.0,4.0 0 0 1 4.0,-4.0 h12.6 a4.0,4.0 0 0 1 4.0,4.0 v105.6 z"/>
-<path class="c" d="M532.6,292.0 v-16.0 a4.0,4.0 0 0 1 4.0,-4.0 h12.6 a4.0,4.0 0 0 1 4.0,4.0 v16.0 z"/>
-<circle class="o" cx="542.8" cy="308" r="4.5"/>
-<path class="cell" d="M561.9,292.0 v-111.8 a4.0,4.0 0 0 1 4.0,-4.0 h12.6 a4.0,4.0 0 0 1 4.0,4.0 v111.8 z"/>
-<path class="c" d="M561.9,292.0 v-22.3 a4.0,4.0 0 0 1 4.0,-4.0 h12.6 a4.0,4.0 0 0 1 4.0,4.0 v22.3 z"/>
-<path class="cell" d="M591.3,292.0 v-117.2 a4.0,4.0 0 0 1 4.0,-4.0 h12.6 a4.0,4.0 0 0 1 4.0,4.0 v117.2 z"/>
-<path class="c" d="M591.3,292.0 v-27.6 a4.0,4.0 0 0 1 4.0,-4.0 h12.6 a4.0,4.0 0 0 1 4.0,4.0 v27.6 z"/>
-<path class="cell" d="M620.7,292.0 v-123.4 a4.0,4.0 0 0 1 4.0,-4.0 h12.6 a4.0,4.0 0 0 1 4.0,4.0 v123.4 z"/>
-<path class="c" d="M620.7,292.0 v-33.9 a4.0,4.0 0 0 1 4.0,-4.0 h12.6 a4.0,4.0 0 0 1 4.0,4.0 v33.9 z"/>
-<text x="631.0" y="333.0" class="tm" text-anchor="middle">20</text>
-<path class="cell" d="M650.1,292.0 v-129.1 a4.0,4.0 0 0 1 4.0,-4.0 h12.6 a4.0,4.0 0 0 1 4.0,4.0 v129.1 z"/>
-<path class="c" d="M650.1,292.0 v-39.5 a4.0,4.0 0 0 1 4.0,-4.0 h12.6 a4.0,4.0 0 0 1 4.0,4.0 v39.5 z"/>
-<path class="cell" d="M679.5,292.0 v-136.6 a4.0,4.0 0 0 1 4.0,-4.0 h12.6 a4.0,4.0 0 0 1 4.0,4.0 v136.6 z"/>
-<path class="c" d="M679.5,292.0 v-19.0 a4.0,4.0 0 0 1 4.0,-4.0 h12.6 a4.0,4.0 0 0 1 4.0,4.0 v19.0 z"/>
-<circle class="o" cx="689.8" cy="308" r="4.5"/>
-<path class="cell" d="M708.9,292.0 v-142.7 a4.0,4.0 0 0 1 4.0,-4.0 h12.6 a4.0,4.0 0 0 1 4.0,4.0 v142.7 z"/>
-<path class="c" d="M708.9,292.0 v-25.1 a4.0,4.0 0 0 1 4.0,-4.0 h12.6 a4.0,4.0 0 0 1 4.0,4.0 v25.1 z"/>
-<path class="line cs" d="M714.2,308 l4,4 l7,-8"/>
-<path class="cell" d="M738.3,292.0 v-149.1 a4.0,4.0 0 0 1 4.0,-4.0 h12.6 a4.0,4.0 0 0 1 4.0,4.0 v149.1 z"/>
-<path class="c" d="M738.3,292.0 v-31.4 a4.0,4.0 0 0 1 4.0,-4.0 h12.6 a4.0,4.0 0 0 1 4.0,4.0 v31.4 z"/>
-<path class="line cs" d="M743.5,308 l4,4 l7,-8"/>
-<path class="cell" d="M767.6,292.0 v-154.2 a4.0,4.0 0 0 1 4.0,-4.0 h12.6 a4.0,4.0 0 0 1 4.0,4.0 v154.2 z"/>
-<path class="c" d="M767.6,292.0 v-36.6 a4.0,4.0 0 0 1 4.0,-4.0 h12.6 a4.0,4.0 0 0 1 4.0,4.0 v36.6 z"/>
-<text x="777.9" y="333.0" class="tm" text-anchor="middle">25</text>
-<path class="cell" d="M797.0,292.0 v-160.3 a4.0,4.0 0 0 1 4.0,-4.0 h12.6 a4.0,4.0 0 0 1 4.0,4.0 v160.3 z"/>
-<path class="c" d="M797.0,292.0 v-42.6 a4.0,4.0 0 0 1 4.0,-4.0 h12.6 a4.0,4.0 0 0 1 4.0,4.0 v42.6 z"/>
-<text x="825.6" y="136.7" class="t2">89k</text>
-<text x="825.6" y="254.4" class="h">25k</text>
-<text x="440.0" y="352.0" class="t2" text-anchor="middle">User message</text>
-<text x="24.0" y="374.0" class="t2">Trimming rewrites the history, which breaks the cache. So compache trims when the cache is already gone.</text>
+<rect class="surface" x=".5" y=".5" width="879" height="329" rx="10"/>
+<text x="24.0" y="32.0" class="big">By message 26, your app sends 89k tokens. compache sends 25k.</text>
+<text x="24.0" y="51.0" class="t2">Tokens sent with each message of one chat.</text>
+<line class="axis" x1="24" x2="792" y1="280" y2="280"/>
+<path class="c" d="M28.4,280 v-1.9 a4.0,4.0 0 0 1 4.0,-4.0 h12.7 a4.0,4.0 0 0 1 4.0,4.0 v1.9 z"/>
+<text x="38.8" y="300.0" class="tm" text-anchor="middle">1</text>
+<path class="c" d="M58.0,280 v-11.1 a4.0,4.0 0 0 1 4.0,-4.0 h12.7 a4.0,4.0 0 0 1 4.0,4.0 v11.1 z"/>
+<path class="c" d="M87.5,280 v-18.0 a4.0,4.0 0 0 1 4.0,-4.0 h12.7 a4.0,4.0 0 0 1 4.0,4.0 v18.0 z"/>
+<path class="c" d="M117.0,280 v-25.9 a4.0,4.0 0 0 1 4.0,-4.0 h12.7 a4.0,4.0 0 0 1 4.0,4.0 v25.9 z"/>
+<path class="c" d="M146.6,280 v-34.2 a4.0,4.0 0 0 1 4.0,-4.0 h12.7 a4.0,4.0 0 0 1 4.0,4.0 v34.2 z"/>
+<text x="156.9" y="300.0" class="tm" text-anchor="middle">5</text>
+<path class="c" d="M176.1,280 v-39.6 a4.0,4.0 0 0 1 4.0,-4.0 h12.7 a4.0,4.0 0 0 1 4.0,4.0 v39.6 z"/>
+<path class="cell" d="M205.7,280 v-47.3 a4.0,4.0 0 0 1 4.0,-4.0 h12.7 a4.0,4.0 0 0 1 4.0,4.0 v47.3 z"/>
+<path class="c" d="M205.7,280 v-12.9 a4.0,4.0 0 0 1 4.0,-4.0 h12.7 a4.0,4.0 0 0 1 4.0,4.0 v12.9 z"/>
+<path class="cell" d="M235.2,280 v-55.7 a4.0,4.0 0 0 1 4.0,-4.0 h12.7 a4.0,4.0 0 0 1 4.0,4.0 v55.7 z"/>
+<path class="c" d="M235.2,280 v-21.3 a4.0,4.0 0 0 1 4.0,-4.0 h12.7 a4.0,4.0 0 0 1 4.0,4.0 v21.3 z"/>
+<path class="cell" d="M264.7,280 v-63.5 a4.0,4.0 0 0 1 4.0,-4.0 h12.7 a4.0,4.0 0 0 1 4.0,4.0 v63.5 z"/>
+<path class="c" d="M264.7,280 v-29.1 a4.0,4.0 0 0 1 4.0,-4.0 h12.7 a4.0,4.0 0 0 1 4.0,4.0 v29.1 z"/>
+<path class="cell" d="M294.3,280 v-71.3 a4.0,4.0 0 0 1 4.0,-4.0 h12.7 a4.0,4.0 0 0 1 4.0,4.0 v71.3 z"/>
+<path class="c" d="M294.3,280 v-36.9 a4.0,4.0 0 0 1 4.0,-4.0 h12.7 a4.0,4.0 0 0 1 4.0,4.0 v36.9 z"/>
+<text x="304.6" y="300.0" class="tm" text-anchor="middle">10</text>
+<path class="cell" d="M323.8,280 v-79.7 a4.0,4.0 0 0 1 4.0,-4.0 h12.7 a4.0,4.0 0 0 1 4.0,4.0 v79.7 z"/>
+<path class="c" d="M323.8,280 v-45.3 a4.0,4.0 0 0 1 4.0,-4.0 h12.7 a4.0,4.0 0 0 1 4.0,4.0 v45.3 z"/>
+<path class="cell" d="M353.4,280 v-87.7 a4.0,4.0 0 0 1 4.0,-4.0 h12.7 a4.0,4.0 0 0 1 4.0,4.0 v87.7 z"/>
+<path class="c" d="M353.4,280 v-19.0 a4.0,4.0 0 0 1 4.0,-4.0 h12.7 a4.0,4.0 0 0 1 4.0,4.0 v19.0 z"/>
+<path class="cell" d="M382.9,280 v-95.4 a4.0,4.0 0 0 1 4.0,-4.0 h12.7 a4.0,4.0 0 0 1 4.0,4.0 v95.4 z"/>
+<path class="c" d="M382.9,280 v-18.9 a4.0,4.0 0 0 1 4.0,-4.0 h12.7 a4.0,4.0 0 0 1 4.0,4.0 v18.9 z"/>
+<path class="cell" d="M412.4,280 v-103.3 a4.0,4.0 0 0 1 4.0,-4.0 h12.7 a4.0,4.0 0 0 1 4.0,4.0 v103.3 z"/>
+<path class="c" d="M412.4,280 v-19.2 a4.0,4.0 0 0 1 4.0,-4.0 h12.7 a4.0,4.0 0 0 1 4.0,4.0 v19.2 z"/>
+<path class="cell" d="M442.0,280 v-112.1 a4.0,4.0 0 0 1 4.0,-4.0 h12.7 a4.0,4.0 0 0 1 4.0,4.0 v112.1 z"/>
+<path class="c" d="M442.0,280 v-20.7 a4.0,4.0 0 0 1 4.0,-4.0 h12.7 a4.0,4.0 0 0 1 4.0,4.0 v20.7 z"/>
+<text x="452.3" y="300.0" class="tm" text-anchor="middle">15</text>
+<path class="cell" d="M471.5,280 v-119.3 a4.0,4.0 0 0 1 4.0,-4.0 h12.7 a4.0,4.0 0 0 1 4.0,4.0 v119.3 z"/>
+<path class="c" d="M471.5,280 v-20.8 a4.0,4.0 0 0 1 4.0,-4.0 h12.7 a4.0,4.0 0 0 1 4.0,4.0 v20.8 z"/>
+<path class="cell" d="M501.0,280 v-126.7 a4.0,4.0 0 0 1 4.0,-4.0 h12.7 a4.0,4.0 0 0 1 4.0,4.0 v126.7 z"/>
+<path class="c" d="M501.0,280 v-19.9 a4.0,4.0 0 0 1 4.0,-4.0 h12.7 a4.0,4.0 0 0 1 4.0,4.0 v19.9 z"/>
+<path class="cell" d="M530.6,280 v-134.2 a4.0,4.0 0 0 1 4.0,-4.0 h12.7 a4.0,4.0 0 0 1 4.0,4.0 v134.2 z"/>
+<path class="c" d="M530.6,280 v-27.3 a4.0,4.0 0 0 1 4.0,-4.0 h12.7 a4.0,4.0 0 0 1 4.0,4.0 v27.3 z"/>
+<path class="cell" d="M560.1,280 v-140.5 a4.0,4.0 0 0 1 4.0,-4.0 h12.7 a4.0,4.0 0 0 1 4.0,4.0 v140.5 z"/>
+<path class="c" d="M560.1,280 v-33.7 a4.0,4.0 0 0 1 4.0,-4.0 h12.7 a4.0,4.0 0 0 1 4.0,4.0 v33.7 z"/>
+<path class="cell" d="M589.7,280 v-148.1 a4.0,4.0 0 0 1 4.0,-4.0 h12.7 a4.0,4.0 0 0 1 4.0,4.0 v148.1 z"/>
+<path class="c" d="M589.7,280 v-41.2 a4.0,4.0 0 0 1 4.0,-4.0 h12.7 a4.0,4.0 0 0 1 4.0,4.0 v41.2 z"/>
+<text x="600.0" y="300.0" class="tm" text-anchor="middle">20</text>
+<path class="cell" d="M619.2,280 v-154.8 a4.0,4.0 0 0 1 4.0,-4.0 h12.7 a4.0,4.0 0 0 1 4.0,4.0 v154.8 z"/>
+<path class="c" d="M619.2,280 v-47.9 a4.0,4.0 0 0 1 4.0,-4.0 h12.7 a4.0,4.0 0 0 1 4.0,4.0 v47.9 z"/>
+<path class="cell" d="M648.7,280 v-163.8 a4.0,4.0 0 0 1 4.0,-4.0 h12.7 a4.0,4.0 0 0 1 4.0,4.0 v163.8 z"/>
+<path class="c" d="M648.7,280 v-23.4 a4.0,4.0 0 0 1 4.0,-4.0 h12.7 a4.0,4.0 0 0 1 4.0,4.0 v23.4 z"/>
+<path class="cell" d="M678.3,280 v-171.1 a4.0,4.0 0 0 1 4.0,-4.0 h12.7 a4.0,4.0 0 0 1 4.0,4.0 v171.1 z"/>
+<path class="c" d="M678.3,280 v-30.7 a4.0,4.0 0 0 1 4.0,-4.0 h12.7 a4.0,4.0 0 0 1 4.0,4.0 v30.7 z"/>
+<path class="cell" d="M707.8,280 v-178.6 a4.0,4.0 0 0 1 4.0,-4.0 h12.7 a4.0,4.0 0 0 1 4.0,4.0 v178.6 z"/>
+<path class="c" d="M707.8,280 v-38.3 a4.0,4.0 0 0 1 4.0,-4.0 h12.7 a4.0,4.0 0 0 1 4.0,4.0 v38.3 z"/>
+<path class="cell" d="M737.4,280 v-184.8 a4.0,4.0 0 0 1 4.0,-4.0 h12.7 a4.0,4.0 0 0 1 4.0,4.0 v184.8 z"/>
+<path class="c" d="M737.4,280 v-44.4 a4.0,4.0 0 0 1 4.0,-4.0 h12.7 a4.0,4.0 0 0 1 4.0,4.0 v44.4 z"/>
+<text x="747.7" y="300.0" class="tm" text-anchor="middle">25</text>
+<path class="cell" d="M766.9,280 v-192.0 a4.0,4.0 0 0 1 4.0,-4.0 h12.7 a4.0,4.0 0 0 1 4.0,4.0 v192.0 z"/>
+<path class="c" d="M766.9,280 v-51.7 a4.0,4.0 0 0 1 4.0,-4.0 h12.7 a4.0,4.0 0 0 1 4.0,4.0 v51.7 z"/>
+<text x="798.0" y="94.0" class="t2">everything</text>
+<text x="798.0" y="234.3" class="h">compache</text>
+<text x="408.0" y="318.0" class="t2" text-anchor="middle">Message</text>
 </svg>

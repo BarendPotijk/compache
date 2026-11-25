@@ -78,7 +78,7 @@ session.complete(turn, answer, usage=response.usage)
 
 ## What it saves
 
-![What long sessions with Claude Code on Claude Haiku 5.5 had cost after each prompt: one task alone $0.41 and $0.25, with compache $0.13 and $0.12, and a day of issues alone $1.20 and $0.80, with compache $0.22 and $0.13](assets/agents-live.svg)
+![Long Claude Code sessions on Claude Haiku 5.5, the bill after the last prompt. One task in 13 prompts: alone $0.33, Headroom $0.40, Kompressor $0.28, compache $0.13. 16 issues in one conversation: alone $0.98, compache $0.15. Alone and compache are averages of two runs](assets/agents-live.svg)
 
 Live, 51% to 85% less on long sessions and 16% less on sessions of some fifty calls, with as many solved. [Agent benchmarks](../benchmarks/agents/README.md): real sessions with Claude Code and Codex next to Headroom and Kompressor, and the numbers below.
 
