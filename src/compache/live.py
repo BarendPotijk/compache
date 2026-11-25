@@ -689,6 +689,9 @@ class Live:
             ),
             0,
         )
+        # What the provider counted so far, and what was left out of it, in tokens.
+        counted = ("input", "cache_read", "cache_write", "output", "left_out")
+        self.tokens = dict.fromkeys(counted, 0)
 
     # -- conversations -------------------------------------------------------
 
@@ -2332,6 +2335,12 @@ class Live:
                 pending.first_usage = source.usage
             pending.last_usage = source.usage
             pending.model = source.model or pending.model
+        used = canonical_usage(source.usage)
+        for name, count in (used or {}).items():
+            self.tokens[name] += count
+        if used and pending is not None and pending.held and kind == "answer":
+            out = round(pending.left * used["input"] / pending.held)
+            self.tokens["left_out"] += max(0, out)
         if self.recorder is None:
             return
         archived, left = None, None
@@ -2350,7 +2359,7 @@ class Live:
             at=self.clock() if conversation.when is None else conversation.when,
             model=source.model,
             requested=conversation.requested,
-            usage=canonical_usage(source.usage),
+            usage=used,
             cost=source.cost,
             archived=archived,
             left=left,

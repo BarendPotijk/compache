@@ -121,7 +121,7 @@ compache proxy --policy policy.json --record compache-record --sample 0.1 --port
 
 As a container that is always on, it learns in a volume: `docker build -t compache . && docker run -d --restart unless-stopped -p 127.0.0.1:8787:8787 -v compache:/data compache`. Arguments of its own replace that, such as `--policy`.
 
-It serves `/v1/chat/completions`, `/v1/responses`, `/v1/messages` and Gemini's `:generateContent` on the provider's own paths, forwards the caller's credentials, and passes everything else through. `--upstream URL` sends all of it to one gateway.
+It serves `/v1/chat/completions`, `/v1/responses`, `/v1/messages` and Gemini's `:generateContent` on the provider's own paths, forwards the caller's credentials, and passes everything else through. `--upstream URL` sends all of it to one gateway. `/compache/stats` says what it has done, `/compache/metrics` the same for Prometheus.
 
 | Harness | Setting |
 |---|---|

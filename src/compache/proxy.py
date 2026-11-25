@@ -141,6 +141,13 @@ def _credentials(proxy: urllib.parse.SplitResult) -> dict:
     return {"Proxy-Authorization": "Basic " + base64.b64encode(said).decode()}
 
 
+def _metrics(live: Live) -> str:
+    """What was done so far, as Prometheus reads it."""
+    found = {f"compache_{name}_total": n for name, n in live.stats.items()}
+    found |= {f"compache_{name}_tokens_total": n for name, n in live.tokens.items()}
+    return "".join(f"# TYPE {name} counter\n{name} {n}\n" for name, n in found.items())
+
+
 def _thread(headers, body) -> str | None:
     for name in THREAD_HEADERS:
         if headers.get(name):
@@ -306,8 +313,12 @@ def serve(
                 self.path in ("/compache/stats", "/compache/health")
                 and self.command == "GET"
             ):
-                body = json.dumps({"status": "ok", **live.stats}).encode()
+                said = {"status": "ok", **live.stats, "tokens": live.tokens}
+                body = json.dumps(said).encode()
                 return self._answer(200, [("Content-Type", "application/json")], body)
+            if self.path == "/compache/metrics" and self.command == "GET":
+                kind = [("Content-Type", "text/plain; version=0.0.4")]
+                return self._answer(200, kind, _metrics(live).encode())
             if "websocket" in (self.headers.get("Upgrade") or "").lower():
                 # An agent that tries this first, as Codex does, goes on over HTTP.
                 return self._answer(426, [], b"compache speaks HTTP")
