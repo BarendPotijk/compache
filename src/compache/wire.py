@@ -2408,22 +2408,21 @@ def volume(value: Any) -> int:
     return 0
 
 
-# Where a request holds what is no text, beside blocks of such a type.
-_MEDIA = {"fileData", "file_data", "inlineData", "inline_data"}
-
-
-def holds_media(value: Any) -> bool:
-    """Whether a request holds images, documents or sound, whose tokens have no text."""
-    if isinstance(value, dict):
-        kind = str(value.get("type"))
-        if kind in _MEDIA_TYPES:
-            return True
-        if kind.endswith(("tool_use", "thinking")):
-            return False
-        # What a tool is called with, and what it returns as an object, may have keys of any name.
-        own = {k: v for k, v in value.items() if k not in ("functionCall", "response")}
-        return not _MEDIA.isdisjoint(own) or any(map(holds_media, own.values()))
-    return isinstance(value, (list, tuple)) and any(map(holds_media, value))
+def holds_media(said: list) -> bool:
+    """Whether the messages of a request hold pictures, documents or sound, whose tokens have no text."""
+    for message in said:
+        for key in ("content", "output", "parts"):
+            held = message.get(key) if isinstance(message, dict) else None
+            for block in held if isinstance(held, list) else ():
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") in _MEDIA_TYPES or media_in(block.get("content")):
+                    return True
+                if "inlineData" in block or "fileData" in block:
+                    return True
+                if (block.get("functionResponse") or {}).get("parts"):
+                    return True
+    return False
 
 
 def model_of(path: str) -> str | None:

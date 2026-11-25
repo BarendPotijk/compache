@@ -387,8 +387,8 @@ class _Conversation:
     quotes: Quotes | None = None
     # Whether its requests carry what the model reasoned before.
     carries: bool = False
-    # Whether the model binds its reasoning to what stood ahead of it. What its latest request held, as
-    # hashes, and the reasoning that was made behind something else and stays out.
+    # Whether the model binds its reasoning to what stood ahead of it. What the latest request held
+    # that it reasoned on, as hashes, and the reasoning that was made behind something else and stays out.
     binds: bool = False
     sent_as: tuple | None = None
     planned: tuple | None = None
@@ -428,6 +428,8 @@ class _Call:
     asks: bool = True
     # The turn it belongs to. Another may have begun by the time a stream has ended.
     pending: Any = None
+    # What went out of it last, as long as the reply to that may hold reasoning.
+    sent: Any = None
 
 
 class _Unsent(Exception):
@@ -1144,7 +1146,9 @@ class Live:
                 self.stats["passed_through"] += 1
                 return Shown(self, path, body)
             self.stats["calls"] += 1
-            self._goes(call, call.plain)
+            if conversation.binds and conversation.session is not None:
+                # The host does not say whether its reply holds reasoning.
+                conversation.sent_as = conversation.planned or wire.shape(call.plain)
             return Shown(self, path, call.plain, conversation, conversation.pending)
         finally:
             conversation.lock.release()
@@ -1415,7 +1419,9 @@ class Live:
                         )
                     self.learner.opened(conversation.model, now)
                 plain = self._apply(conversation, dialect, body, scan, turns)
-                if self._unbind(conversation, dialect, body, plain):
+                conversation.planned = None
+                holds = scan.thoughts or conversation.inserts
+                if holds and self._unbind(conversation, dialect, body, plain):
                     held = dialect.said_so_far(body)
                     conversation.session.unbound(
                         [
@@ -1497,7 +1503,9 @@ class Live:
         """A request as the application wrote it, without reasoning that was made behind something else."""
         if not conversation.binds or conversation.sent_as is None:
             return body
-        said = dialect.said_so_far(body)
+        said, conversation.planned = dialect.said_so_far(body), None
+        if not any(map(dialect.reasoned, said)):
+            return body
         out = body
         for _ in range(2):
             kept = self._bound(conversation, dialect, said)
@@ -1508,11 +1516,18 @@ class Live:
 
     @staticmethod
     def _goes(call: _Call, body) -> None:
-        """Remember what goes out: that is what the model reasons behind."""
+        """Remember what goes out: that is what the model reasons behind, if it does."""
         conversation = call.conversation
         if conversation.binds and (conversation.session or conversation.sent_as):
-            planned = conversation.planned if body is call.marked else None
-            conversation.sent_as = planned or wire.shape(body)
+            call.sent = body
+            if body is call.marked and conversation.planned is not None:
+                conversation.sent_as, call.sent = conversation.planned, None
+
+    @staticmethod
+    def _reasoned(call: _Call, reply) -> None:
+        """It did: what stood ahead of it is worth its hashes."""
+        if reply.reasons and call.sent is not None:
+            call.conversation.sent_as, call.sent = wire.shape(call.sent), None
 
     def _carry(self, call: _Call, scan) -> Result:
         """Send the request, fall back to plainer forms of it if it is refused, and read the reply."""
@@ -2016,6 +2031,7 @@ class Live:
         try:
             reply = dialect.reply(data)
             self._ledger(conversation, kind, reply, pending=call.pending)
+            self._reasoned(call, reply)
             while (
                 conversation.session is not None
                 and reply.calls
@@ -2036,6 +2052,7 @@ class Live:
                 reply = dialect.reply(data)
                 how = "retry" if written else "reopen"
                 self._ledger(conversation, how, reply, pending=call.pending)
+                self._reasoned(call, reply)
                 if written:
                     break
             # A reply asked for a note that says nothing is asked again without the note first.
@@ -2052,6 +2069,7 @@ class Live:
                 result, data = again, again.json
                 reply = dialect.reply(data)
                 self._ledger(conversation, "retry", reply, pending=call.pending)
+                self._reasoned(call, reply)
             ours = [c for c in reply.calls if c["name"] == _REOPEN]
             if ours and _REOPEN not in dialect.tool_names(call.body):
                 # Called beside the application's own tools. The application never sees ours, and the
@@ -2147,6 +2165,7 @@ class Live:
                 try:
                     if not counted:
                         self._ledger(conversation, kind, editor, pending=pending)
+                        self._reasoned(call, editor)
                     if editor.finished:
                         if editor.ours and editor.calls:
                             self._reopen(conversation, editor.ours, call, editor.said)
@@ -2168,6 +2187,7 @@ class Live:
                 rounds += 1
                 with conversation.lock:
                     self._ledger(conversation, kind, editor, pending=pending)
+                    self._reasoned(call, editor)
                     # The round that is over is in the books, whatever comes next.
                     counted = True
                     if rounds > most:
