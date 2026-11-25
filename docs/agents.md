@@ -20,7 +20,7 @@ An agent makes dozens of model calls per message, and every call sends every too
 | `compache stats` | What was saved, per agent and model. For Claude Code's status line: `"statusLine": {"type": "command", "command": "compache stats claude --line"}` in its settings |
 | `compache doctor` | Whether it works here, and what it can be used with |
 
-`wrap` starts a proxy on a free local port, starts the agent with its base URL set to it, and says at the end what the session cost and what it would have cost. No file of the agent's is changed. Where the agent's own settings name a server, such as a gateway, requests go on to that. A key goes where the agent itself would send it: one that is none of the provider's own goes nowhere until `--upstream URL` says where. On a subscription nothing is billed by the token: what is saved there is room in the window and in the plan's limits.
+`wrap` starts a proxy on a free local port, starts the agent with its base URL set to it, and says at the end what the session cost and what it would have cost. No file of the agent's is changed. Where the agent's own settings or command line name a server, such as a gateway, requests go on to that. Where a project's file names another one, or a key is none of the provider's own, nothing is sent until `--upstream URL` says where. On a subscription nothing is billed by the token: what is saved there is room in the window and in the plan's limits.
 
 ## What it does
 
