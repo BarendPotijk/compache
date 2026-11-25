@@ -831,6 +831,11 @@ class Live:
         done = len(turns) - 1
         with self._lock:
             found = self._in_loop(scan.results, chains, turns)
+            if found is not None and found.chain != chains[-1]:
+                # It made those calls, but another may have given the answer that the request shows.
+                here = self._by_chain.get(chains[-1], ())
+                if any(self._own(c, turns, scan, closing) for c in here):
+                    found = None
             others = [] if found is None else [found]
             if not others and (thread or done):
                 others = self._by_chain.get(chains[-1], ())[::-1]
@@ -942,7 +947,7 @@ class Live:
     def _own(self, conversation, turns, scan, closing=False) -> bool:
         """Whether a request that meets a conversation at this point is its next one."""
         pending, current = conversation.pending, turns[-1]
-        if pending is None and conversation.agentic:
+        if pending is None and (conversation.agentic or conversation.left_alone):
             # What another model is asked beside is no turn of this one, whose cache is kept.
             return not scan.model or conversation.requested in (None, scan.model)
         if pending is None or pending.index != len(turns):
@@ -1032,6 +1037,10 @@ class Live:
             made.session = point.session.copy()
             if other.requested == point.requested:
                 made.session.follows(other.session)
+            if scan.model and point.requested not in (None, scan.model):
+                # It has a cache of its own, and nothing of this is in it.
+                made.requested = scan.model
+                made.session.lost()
         if other.pending is None and scan.model in (None, "", other.requested):
             # What they share is kept warm for the newest of them. Another model has a cache of its own.
             other.superseded = True
@@ -1391,7 +1400,9 @@ class Live:
             session = conversation.session
             same = not scan.model or conversation.requested in (None, scan.model)
             warm = same and session is not None and session.warm(now)
-            conversation.binds = self._binds(conversation, dialect, body, scan)
+            conversation.binds = self._binds(
+                dialect, body, scan.model, conversation.answered
+            )
             if session is not None:
                 session.binds(conversation.binds)
                 if conversation.agentic:
@@ -1490,14 +1501,14 @@ class Live:
     # -- what reasoning is bound to ----------------------------------------------
 
     @staticmethod
-    def _binds(conversation, dialect, body, scan) -> bool:
-        """Whether the model only takes its reasoning back behind what stood ahead of it when it was made."""
+    def _binds(dialect, body, *models) -> bool:
+        """Whether a model only takes its reasoning back behind what stood ahead of it when it was made."""
         manual = body.get("thinking")
         if not hasattr(dialect, "reasoned") or (
             isinstance(manual, dict) and manual.get("type") == "enabled"
         ):
             return False
-        return any(binds_reasoning(m) for m in (scan.model, conversation.answered))
+        return any(map(binds_reasoning, models))
 
     @staticmethod
     def _unbind(conversation, dialect, written, out) -> bool:
@@ -1539,16 +1550,22 @@ class Live:
     def _goes(call: _Call, body) -> None:
         """Remember what goes out: that is what the model reasons behind, if it does."""
         conversation = call.conversation
-        if conversation.binds and (conversation.session or conversation.sent_as):
+        if conversation.session or conversation.sent_as:
             call.sent = body
-            if body is call.marked and conversation.planned is not None:
-                conversation.sent_as, call.sent = conversation.planned, None
+            planned = conversation.planned if conversation.binds else None
+            if body is call.marked and planned is not None:
+                conversation.sent_as, call.sent = planned, None
 
     @staticmethod
     def _reasoned(call: _Call, reply) -> None:
         """It did: what stood ahead of it is worth its hashes."""
+        conversation = call.conversation
         if reply.reasons and call.sent is not None:
-            call.conversation.sent_as, call.sent = wire.shape(call.sent), None
+            # A gateway may have a name of its own for the model, which is known once it has replied.
+            if conversation.binds or Live._binds(
+                call.dialect, call.body, conversation.answered
+            ):
+                conversation.sent_as, call.sent = wire.shape(call.sent), None
 
     def _carry(self, call: _Call, scan) -> Result:
         """Send the request, fall back to plainer forms of it if it is refused, and read the reply."""
@@ -1564,31 +1581,20 @@ class Live:
         return result
 
     def _sent(self, call: _Call, pending: _Pending) -> Result:
-        conversation = call.conversation
-        self._goes(call, call.outgoing)
-        result = call.send(call.outgoing)
-        result = self._under_default(call, result)
-        if result.status in _REFUSED and call.outgoing is not call.marked:
-            # Refused with the note in it: send it without.
-            self._note_refused(call)
-            self.stats["retried"] += 1
-            call.outgoing, call.asked, call.carrier = call.marked, False, None
-            self._goes(call, call.outgoing)
-            result = self._under_default(call, call.send(call.outgoing))
-        if result.status in _REFUSED and call.outgoing is not call.body:
-            # Refused with the policy applied: send what the application wrote.
-            self.stats["retried"] += 1
-            call.body = self._written(conversation, call.dialect, call.body)
-            self._goes(call, call.body)
-            result = call.send(call.body)
-            if result.status < 400:
-                # So it was the policy. What is refused either way is none of its doing.
-                self.stats["policy_refused"] += 1
-                self._stand_down(conversation, pending.index, pending.started_at)
-                call.plain = call.marked = call.outgoing = call.body
-                call.asked, call.carrier = False, None
+        conversation, before = call.conversation, call.conversation.sent_as
+        try:
+            result = self._taken_as(call, pending)
+            if result.status in _REFUSED and conversation.binds and before is None:
+                result = self._without_any(call, result)
+        except BaseException:
+            conversation.sent_as = before
+            raise
+        if result.status >= 400:
+            # Nothing is reasoned behind it.
+            conversation.sent_as = before
+            return result
         pending.asked = pending.asked or call.asked
-        if result.status >= 400 or (result.json is None and result.events is None):
+        if result.json is None and result.events is None:
             return result
         if result.events is not None:
 
@@ -1603,6 +1609,66 @@ class Live:
             events = self._stream(call, result, pending, reading)
             return replace(result, events=_Passing(events, release, reading))
         return self._settle(call, result)
+
+    def _taken_as(self, call: _Call, pending: _Pending) -> Result:
+        """Send a request, and plainer forms of it where it is refused."""
+        conversation = call.conversation
+        self._goes(call, call.outgoing)
+        result = call.send(call.outgoing)
+        result = self._under_default(call, result)
+        if result.status in _REFUSED and call.outgoing is not call.marked:
+            # Refused with the note in it: send it without.
+            self._note_refused(call)
+            self.stats["retried"] += 1
+            call.outgoing, call.asked, call.carrier = call.marked, False, None
+            self._goes(call, call.outgoing)
+            result = self._under_default(call, call.send(call.outgoing))
+        if result.status in _REFUSED and call.outgoing is not call.body:
+            # Refused with the policy applied: send what the application wrote.
+            result = self._send_written(call)
+            if result.status < 400:
+                # So it was the policy. What is refused either way is none of its doing.
+                self.stats["policy_refused"] += 1
+                self._stand_down(conversation, pending.index, pending.started_at)
+                call.plain = call.marked = call.outgoing = call.body
+                call.asked, call.carrier = False, None
+        return result
+
+    def _send_written(self, call: _Call) -> Result:
+        """Send what the application wrote. What reasoning it costs is only given up once that is taken."""
+        conversation = call.conversation
+        before = set(conversation.unbound), conversation.sent_as
+        self.stats["retried"] += 1
+        try:
+            call.body = self._written(conversation, call.dialect, call.body)
+            self._goes(call, call.body)
+            result = call.send(call.body)
+        except BaseException:
+            conversation.unbound, conversation.sent_as = before
+            raise
+        if result.status >= 400:
+            conversation.unbound, conversation.sent_as = before
+        return result
+
+    def _without_any(self, call: _Call, result: Result) -> Result:
+        """A refused request once more, without its reasoning: what that was made behind is not known here."""
+        conversation, dialect = call.conversation, call.dialect
+        said = dialect.said_so_far(call.body)
+        found = {dialect.reasoned(m) for m in said} - {None}
+        if not found:
+            return result
+        bare = {**call.body, "messages": self._bare(dialect, said, found)}
+        self.stats["retried"] += 1
+        again = call.send(bare)
+        if again.status >= 400:
+            return result
+        conversation.unbound |= found
+        conversation.sent_as, call.sent = wire.shape(bare), None
+        call.body = call.plain = call.marked = call.outgoing = bare
+        call.asked, call.carrier = False, None
+        if conversation.session is not None and call.pending is not None:
+            call.pending.whole = True
+        return again
 
     def _under_default(self, call: _Call, result: Result) -> Result:
         """What became of a request. One that was refused goes out again under the default lifetime.
@@ -2274,12 +2340,9 @@ class Live:
         whether it was the policy's doing.
         """
         conversation = call.conversation
-        self.stats["retried"] += 1
         call.asked, call.carrier = False, None
-        call.body = self._written(conversation, call.dialect, call.body)
-        self._goes(call, call.body)
         try:
-            result = call.send(call.body)
+            result = self._send_written(call)
         except Exception as error:
             raise _Unsent() from error
         if result.status < 400:

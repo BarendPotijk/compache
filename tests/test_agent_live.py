@@ -7,9 +7,12 @@ import tempfile
 import threading
 import unittest
 from dataclasses import replace
+from unittest import mock
 
 import compache
 from compache import agent, wire
+from compache.api import Session
+from compache.learn import Learner
 from compache.models import binds_reasoning
 from compache.record import load, load_calls
 from fakes import NOTICE, FakeModel, noticed, tokens
@@ -968,6 +971,145 @@ class BoundReasoningTests(unittest.TestCase):
                 self.assertEqual(self.held(model.bodies[-1]), [7, 8, 9, 10, 11])
                 self.more(app, 3)
 
+    def working(self, size=100):
+        """An agent that goes on reading, and a model that `what` can make do something else once."""
+        what: list = []
+
+        def script(request):
+            made = {"tool": ("read", {"file": request["n"]}), "thinking": size}
+            return what.pop(0)(request) if what else made
+
+        clock = Clock()
+        model = FakeModel(script, clock=lambda: clock.at, binds="error")
+        live = compache.Live(policy(3, None, spec=self.SPEC), clock=clock)
+        app = Agent(live, Claude(), model, clock=clock)
+        app.shape.ask("Work")
+        return app, model, what, clock
+
+    def read(self, app, count, away=0):
+        for _ in range(count):
+            _, calls = app.call()
+            app.shape.answer([(call, result(app.made)) for call, _ in calls])
+            app.made += 1
+        app.clock.at += away
+
+    def test_a_refusal_costs_no_reasoning(self):
+        """What is wrong with the request itself says nothing about the reasoning in it."""
+        app, model, what, _ = self.working()
+        self.read(app, 5)
+        for _ in range(2):
+            what.append(lambda request: {"status": 400, "error": "image too large"})
+        with self.assertRaises(KeyError):
+            app.call()
+        before = app.live.tokens["cache_read"]
+        self.read(app, 1)
+        self.assertEqual(self.held(model.bodies[-1]), [0, 1, 2, 3, 4])
+        self.assertGreater(app.live.tokens["cache_read"] - before, 1000)
+
+    def test_a_provider_that_is_overloaded_costs_no_reasoning(self):
+        app, model, what, _ = self.working()
+        self.read(app, 5, away=400)
+        self.read(app, 5)
+        before = len(self.held(model.bodies[-1]))
+
+        def fetch(request):
+            handle = NOTICE.findall(json.dumps(request["body"]))[0]
+            return {"tool": (REOPEN, {"reference": handle}), "thinking": 100}
+
+        what += [fetch, *[lambda request: {"status": 529, "error": "overloaded"}] * 2]
+        with self.assertRaises(KeyError):
+            app.call()
+        read = app.live.tokens["cache_read"]
+        app.call()
+        # And what the model reasoned when it looked back.
+        self.assertEqual(len(self.held(model.bodies[-1])), before + 2)
+        self.assertGreater(app.live.tokens["cache_read"] - read, 1000)
+
+    def test_a_reply_that_is_thrown_away(self):
+        """The turn goes on in the request that was asked anew, with what that had fetched."""
+        for stream in (False, True):
+            with self.subTest(stream=stream):
+                app, model, what, _ = self.working()
+                app.stream = stream
+                self.read(app, 6, away=400)
+                self.read(app, 3)
+
+                def fetch(request):
+                    handle = NOTICE.findall(json.dumps(request["body"]))[-1]
+                    return {"tool": (REOPEN, {"reference": handle})}
+
+                app.call()
+                said = app.shape.said.pop()
+                self.assertEqual(said["role"], "assistant")
+                what += [fetch, lambda request: {"text": "So it is.", "thinking": 90}]
+                self.assertEqual(app.call()[0], "So it is.")
+                before = len(model.bodies)
+                app.shape.ask("And now?")
+                app.call()
+                self.assertEqual(len(model.bodies), before + 1)
+                fetched = json.dumps(model.bodies[-1]["messages"]).count('"reopen"')
+                self.assertEqual(fetched, 1)
+                self.assertEqual(app.live.stats["stood_down"], 0)
+                self.assertEqual(app.live.stats["retried"], 0)
+
+    def test_one_that_was_begun_elsewhere_and_is_left_as_it_is(self):
+        """Its reasoning was made behind what another process had sent. It is asked again without."""
+        for policies in ({"record": True}, {}):
+            with self.subTest(**policies):
+                app, model, _, clock = self.working()
+                self.read(app, 4)
+                with tempfile.TemporaryDirectory() as folder:
+                    record = folder if policies else None
+                    app.live = compache.Live(record=record, clock=clock)
+                    self.read(app, 1)
+                    self.assertEqual(self.held(model.bodies[-1]), [])
+                    self.assertEqual(app.live.stats["retried"], 1)
+                    # What is made from there on goes back.
+                    self.read(app, 2)
+                    self.assertEqual(self.held(model.bodies[-1]), [4, 5])
+                    self.assertEqual(app.live.stats["retried"], 1)
+
+    def test_another_model_that_is_left_as_it_is(self):
+        clock = Clock(1.9e9)
+        model = FakeModel(clock=lambda: clock.at, binds="error")
+        chosen = policy(3, None, spec=self.SPEC)
+
+        def choose(learner, name, tools):
+            return (chosen, False) if "haiku" in name else (None, True)
+
+        with tempfile.TemporaryDirectory() as folder:
+            with mock.patch.object(Learner, "choose", choose):
+                live = compache.Live(learn=folder, clock=clock)
+                app = Agent(live, Claude(), model, clock=clock)
+                app.shape.model = "claude-haiku-5-5"
+                self.more(app, 8)
+                clock.at += 4000
+                self.more(app, 2)
+                self.assertTrue(noticed(model.bodies[-1]))
+                app.shape.model = "claude-sonnet-5-5"
+                self.more(app, 2)
+                self.assertFalse(noticed(model.bodies[-1]))
+                # Which does not make it the first one's way.
+                app.shape.model = "claude-haiku-5-5"
+                self.more(app, 1)
+                self.assertTrue(noticed(model.bodies[-1]))
+
+    def test_a_gateway_s_own_name_for_the_model(self):
+        """What it is, is known once it has replied. What it reasoned in that reply stays."""
+
+        class Named(FakeModel):
+            def messages(self, body, *more):
+                status, said = super().messages(body, *more)
+                name = "claude-sonnet-5-5-20260901"
+                return status, {**said, "model": name} if status == 200 else said
+
+        app, model, what, clock = self.working()
+        model = app.model = Named(model.script, binds="error")
+        app.shape.model = "smart"
+        self.read(app, 4)
+        self.assertEqual(self.held(model.bodies[-1]), [0, 1, 2])
+        self.assertEqual(app.live.stats["retried"], 0)
+
     def test_after_a_fetch(self):
         for stream in (False, True):
             for beside in (False, True):
@@ -1198,6 +1340,33 @@ class ParallelTests(unittest.TestCase):
         self.assertFalse(any(noticed(t) for t in sent[-2:]))
         self.assertEqual(live.stats["stood_down"], 0)
         self.assertEqual(live.stats["turns"], 1)
+
+
+class BesideTests(unittest.TestCase):
+    def test_another_model_beside_is_one_conversation_more(self):
+        for thread in (None, "t"):
+            with self.subTest(thread=thread):
+                model = FakeModel(worker(9))
+                live = compache.Live(policy(2))
+                app = Agent(live, Claude(), model, thread=thread)
+                app.run("Work through nine files")
+                model.script = worker(99)
+                app.shape.ask("Go on")
+                _, calls = app.call()
+                app.shape.answer([(call, result(1)) for call, _ in calls])
+                app.call()
+                before = len(live.conversations())
+                other = Agent(live, Claude(), model, thread=thread)
+                other.shape.model = "claude-other"
+                other.shape.said = [*app.shape.said[:-3]]
+                other.shape.ask("A title, please")
+                model.script = lambda request: {"text": "Nine files"}
+                with mock.patch.object(
+                    Session, "copy", autospec=True, side_effect=Session.copy
+                ) as copied:
+                    other.call()
+                self.assertLessEqual(copied.call_count, 4)
+                self.assertLessEqual(len(live.conversations()), before + 1)
 
 
 class ToolPingTests(unittest.TestCase):
