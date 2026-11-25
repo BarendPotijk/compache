@@ -148,12 +148,14 @@ _CLAUDE_VERSION = re.compile(
 _OLD_CLAUDE = re.compile(r"claude-(?:instant|v?[0-4])")
 
 
-def binds_reasoning(model) -> bool:
+def binds_reasoning(model, budget: bool = False) -> bool:
     """Whether a model's reasoning is only good behind what stood ahead of it when it was made.
 
     So it is with Claude from 5.1 on: where an earlier message, the instructions or
     the tools have changed since, the provider drops the reasoning or refuses the
     request. https://platform.claude.com/docs/en/build-with-claude/preserved-thinking
+    `budget` says that a request gives it one, which those models take through a
+    gateway only, so that a name without a version is that of an older one.
     """
     name = str(model or "").lower()
     if not _CLAUDE.search(name):
@@ -161,7 +163,7 @@ def binds_reasoning(model) -> bool:
     version = _CLAUDE_VERSION.search(name)
     if version is not None:
         return (int(version[1]), int(version[2] or 0)) >= (5, 1)
-    return not _OLD_CLAUDE.search(name)
+    return not (budget or _OLD_CLAUDE.search(name))
 
 
 def pricing(model) -> dict | None:

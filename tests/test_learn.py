@@ -9,6 +9,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import compache
 from compache import learn
@@ -410,6 +411,32 @@ class LearnerTests(unittest.TestCase):
             self.assertFalse(failed)
             left = [p.name for p in (Path(folder) / "policies").iterdir()]
             self.assertEqual(left, ["state.json"])
+
+    def test_a_file_that_cannot_be_had_at_this_moment(self):
+        """As on Windows, while another process reads or replaces it."""
+        with tempfile.TemporaryDirectory() as folder:
+            learner, refused = Learner(folder), []
+
+            def busy(action):
+                def tried(*arguments):
+                    if len(refused) < 3:
+                        refused.append(arguments)
+                        raise PermissionError(13, "Access is denied")
+                    return action(*arguments)
+
+                return tried
+
+            with mock.patch.object(learn, "_AGAIN", 9):
+                for name in ("replace", "read_text"):
+                    refused.clear()
+                    whole = getattr(Path, name)
+                    with mock.patch.object(Path, name, autospec=True) as patched:
+                        patched.side_effect = busy(whole)
+                        if name == "replace":
+                            learner._write("state.json", '{"k": 1}')
+                        else:
+                            self.assertEqual(learner._read_state(), {"k": 1})
+                    self.assertEqual(len(refused), 3)
 
     def test_a_broken_policy_file_does_not_stop_anything(self):
         with tempfile.TemporaryDirectory() as folder:

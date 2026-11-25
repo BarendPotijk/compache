@@ -31,8 +31,9 @@ import time
 import uuid
 from collections import Counter
 from dataclasses import replace
+from functools import partial
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 from . import record
 from .agent import default_header
@@ -81,6 +82,20 @@ def _asked(row: dict):
     return row.get("requested") or row.get("model")
 
 
+# How often a file is asked for again that cannot be had, as on Windows while another process replaces it.
+_AGAIN = 100 if os.name == "nt" else 0
+
+
+def _patiently(action: Callable[[], Any]) -> Any:
+    for left in range(_AGAIN, -1, -1):
+        try:
+            return action()
+        except PermissionError:
+            if not left:
+                raise
+            time.sleep(0.01)
+
+
 class Learner:
     """The policies a record teaches, for the models it has seen. Safe to share between threads."""
 
@@ -109,10 +124,9 @@ class Learner:
     # -- files -----------------------------------------------------------------
 
     def _read_state(self) -> dict:
+        path = self.folder / "policies" / "state.json"
         try:
-            found = json.loads(
-                (self.folder / "policies" / "state.json").read_text("utf-8")
-            )
+            found = json.loads(_patiently(partial(path.read_text, "utf-8")))
         except (OSError, ValueError):
             return {}
         return found if isinstance(found, dict) else {}
@@ -123,7 +137,7 @@ class Learner:
         aside = path.with_name(f"{name}.{uuid.uuid4().hex}.part")
         try:
             aside.write_text(text, "utf-8")
-            aside.replace(path)
+            _patiently(partial(aside.replace, path))
         finally:
             aside.unlink(missing_ok=True)
 
@@ -133,8 +147,9 @@ class Learner:
         self._write("state.json", json.dumps(self._state, indent=2) + "\n")
 
     def _load(self, key: str) -> Policy | None:
+        path = self.folder / "policies" / f"{key}.json"
         try:
-            return Policy.load(self.folder / "policies" / f"{key}.json")
+            return _patiently(partial(Policy.load, path))
         except FileNotFoundError:
             return None
         except (OSError, ValueError, ContractError):

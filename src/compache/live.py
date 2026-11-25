@@ -1522,12 +1522,11 @@ class Live:
     @staticmethod
     def _binds(dialect, body, *models) -> bool:
         """Whether a model only takes its reasoning back behind what stood ahead of it when it was made."""
-        manual = body.get("thinking")
-        if not hasattr(dialect, "reasoned") or (
-            isinstance(manual, dict) and manual.get("type") == "enabled"
-        ):
+        if not hasattr(dialect, "reasoned"):
             return False
-        return any(map(binds_reasoning, models))
+        asked = body.get("thinking")
+        budget = isinstance(asked, dict) and asked.get("type") == "enabled"
+        return any(binds_reasoning(name, budget) for name in models)
 
     @staticmethod
     def _unbind(conversation, dialect, written, out) -> bool:

@@ -547,7 +547,7 @@ class OwnFilesTests(Told):
 
         self.put(".qwen/settings.json", says(self.GATEWAY + "/v1"))
         self.put("work/project/.qwen/settings.json", says("https://other.example/v1"))
-        with self.assertRaisesRegex(ValueError, "project/.qwen/settings.json"):
+        with self.assertRaisesRegex(ValueError, "project.\\.qwen.settings.json"):
             self.told("qwen")
         # A variable comes before both.
         env = {"OPENAI_BASE_URL": "https://one.example/v1"}

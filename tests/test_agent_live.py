@@ -1287,6 +1287,36 @@ class BoundReasoningTests(unittest.TestCase):
             (None, False),
         ):
             self.assertEqual(binds_reasoning(name), binds, name)
+        # A budget for it says that a name without a version is an older model's.
+        self.assertFalse(binds_reasoning("haiku", True))
+        self.assertTrue(binds_reasoning("anthropic/claude-haiku-5.5", True))
+
+    def test_a_budget_through_a_gateway(self):
+        """An agent may think that it speaks to an older model, and asks as that one wants it."""
+
+        class Asking(Claude):
+            model = "claude-haiku-4-5"
+
+            def body(self, stream):
+                budget = {"type": "enabled", "budget_tokens": 2048}
+                return {**super().body(stream), "thinking": budget}
+
+        class Served(FakeModel):
+            def messages(self, body, *more):
+                status, said = super().messages(body, *more)
+                name = "anthropic/claude-haiku-5.5"
+                return status, {**said, "model": name} if status == 200 else said
+
+        app, model, _, clock = self.working()
+        served = app.model = Served(model.script, binds="error")
+        app.shape, app.live = Asking(), compache.Live(policy(3, None), clock=clock)
+        app.shape.ask("Work")
+        self.read(app, 6, away=400)
+        self.read(app, 3)
+        self.assertTrue(noticed(served.bodies[-1]))
+        self.assertEqual(app.live.stats["retried"], 0)
+        # What stands ahead of the cut, and what came after it.
+        self.assertEqual(self.held(served.bodies[-1]), [0, 6, 7])
 
 
 class ParallelTests(unittest.TestCase):
