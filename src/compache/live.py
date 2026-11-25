@@ -157,6 +157,8 @@ _HANDLE = re.compile(r"ctx:[0-9a-f]{24}")
 _REFUSED = (400, 422)
 # What Claude's cache marks ask for where they name no lifetime.
 _FIVE_MINUTES = 300
+# How many results have to come back again and again before a model is taken to be going round.
+_SEVERAL = 3
 # How often in a row the model may fetch something back within one call of the application's.
 _ROUNDS = 3
 _AGENT_ROUNDS = 8
@@ -346,6 +348,49 @@ class _Pending:
             setattr(self, name, getattr(earlier, name))
 
 
+class _Wanted:
+    """What comes back into an agent's conversation after it went out of view.
+
+    A model that works with more than stays in view may run its own tools again, and they return
+    the same words. One result that comes again and again, as that of a test, is no sign of that.
+    Several are.
+    """
+
+    def __init__(self):
+        # By text: the latest result, and by result its text.
+        self.latest: dict[int, str] = {}
+        self.texts: dict[str, int] = {}
+        # What came back, and what did so more than once.
+        self.once: set[int] = set()
+        self.twice: set[int] = set()
+
+    def copy(self) -> _Wanted:
+        made = _Wanted()
+        made.latest, made.texts = dict(self.latest), dict(self.texts)
+        made.once, made.twice = set(self.once), set(self.twice)
+        return made
+
+    def fetched(self, name: str) -> None:
+        """A result was fetched back."""
+        if name in self.texts:
+            self.once.add(self.texts[name])
+
+    def returned(self, name: str, text: str, gone) -> bool:
+        """A tool returned this. Says whether the model is going round, by what is `gone`."""
+        said = hash(text)
+        before = self.latest.get(said)
+        self.latest[said], self.texts[name] = name, said
+        if before is None or not gone(before):
+            return False
+        if said in self.once:
+            self.twice.add(said)
+        self.once.add(said)
+        if len(self.twice) < _SEVERAL:
+            return False
+        self.twice.clear()
+        return True
+
+
 @dataclass
 class _Conversation:
     # The name its policy session and its parts go by, and the name it is recorded under.
@@ -383,8 +428,9 @@ class _Conversation:
     left_alone: bool = False
     # What was fetched back and still stands in the conversation, in order.
     inserts: list = field(default_factory=list)
-    # What was ever fetched back, and from where on.
+    # What was ever fetched back, and from where on. And what came back whichever way.
     fetched: set = field(default_factory=set)
+    wanted: _Wanted = field(default_factory=_Wanted)
     # How it stood before its latest turn and at its latest request, for one that branches off there.
     base: _Point | None = None
     here: _Point | None = None
@@ -1039,7 +1085,7 @@ class Live:
         made = _Conversation(other.thread_id, chain, record, other.named)
         made.agentic, made.left_alone = other.agentic, other.left_alone
         made.inserts, made.reopens = list(point.inserts), point.reopens
-        made.fetched = set(other.fetched)
+        made.fetched, made.wanted = set(other.fetched), other.wanted.copy()
         made.lifetime, made.five_minutes = other.lifetime, other.five_minutes
         made.header_lifetime = other.header_lifetime
         made.default_lifetime = other.default_lifetime
@@ -1099,6 +1145,7 @@ class Live:
             session=other.session.copy(),
             inserts=list(other.inserts),
             fetched=set(other.fetched),
+            wanted=other.wanted.copy(),
             unbound=set(other.unbound),
             went=[],
             quotes=None,
@@ -1831,14 +1878,14 @@ class Live:
         conversation.session.follows(session)
         conversation.inserts = list(base.inserts)
         # Its results go by the same names, and may be others now.
-        conversation.fetched = set()
+        conversation.fetched, conversation.wanted = set(), _Wanted()
 
     def _walk(self, conversation, chains, turns, now, scan) -> None:
         """Walk the policy through a conversation that is met in the middle, up to its last question."""
         done = len(turns) - 1
         conversation.pending, conversation.turns, conversation.stale = None, 0, False
         conversation.inserts, conversation.went = [], []
-        conversation.fetched = set()
+        conversation.fetched, conversation.wanted = set(), _Wanted()
         conversation.base = conversation.here = conversation.quotes = None
         policy = self._start(conversation, conversation.thread_id, scan)
         if policy is not None:
@@ -1930,7 +1977,15 @@ class Live:
         """Take in what the tools of a turn have returned since its last request."""
         first = len(pending.seen) + 1
         pending.seen += _hashes(found)
-        if conversation.session is not None:
+        session = conversation.session
+        if session is not None:
+            for j, part in enumerate(found, first):
+                name = f"{conversation.thread_id}:{pending.index}:retrieval:{j}"
+                ours = _FETCHED.match(part.text)
+                if not ours and conversation.wanted.returned(
+                    name, part.text, session.gone
+                ):
+                    session.stay_longer()
             pending.turn = self._extended(conversation, pending.turn, found, now, scan)
         self._heard(conversation, pending.index, "", found, first)
 
@@ -2527,6 +2582,7 @@ class Live:
                 if piece in before:
                     conversation.session.stay_longer()
                 conversation.fetched.add(piece)
+                conversation.wanted.fetched(part)
             if not part or in_view:
                 part = f"reopened:{uuid.uuid4().hex[:12]}"
             names.append((part, told))

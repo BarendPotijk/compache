@@ -913,6 +913,10 @@ class Session:
         if self.policy.agentic:
             self._engine.flow.stay_longer()
 
+    def gone(self, name: str) -> bool:
+        """Whether a result is out of view, where the policy decides call by call."""
+        return self.policy.agentic and self._engine.flow.gone(name)
+
     def lost(self) -> None:
         """Say that the provider has nothing of the conversation in its cache any more."""
         if self.policy.agentic:
