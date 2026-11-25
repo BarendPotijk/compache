@@ -755,7 +755,8 @@ class KeyTests(unittest.TestCase):
 
 class Wrapped(unittest.TestCase):
     def setUp(self):
-        self.folder = tempfile.TemporaryDirectory()
+        # What learns goes on for a moment, and Windows deletes nothing that is in use.
+        self.folder = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(self.folder.cleanup)
         self.home = Path(self.folder.name)
         if os.name == "nt":
