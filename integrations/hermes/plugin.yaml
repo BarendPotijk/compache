@@ -1,5 +1,5 @@
 name: compache
-version: 0.14.0
+version: 0.15.0
 manifest_version: 2
 description: Cuts the cost of long conversations. Trims the history when the prompt cache has expired, by a policy fitted to your own conversations, and lets the model fetch a trimmed part back.
 license: Apache-2.0
