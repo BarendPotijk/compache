@@ -13,6 +13,7 @@ An agent makes dozens of model calls per message, and every call sends every too
 |---|---|
 | `compache wrap claude` | Claude Code. Also `codex`, `opencode`, `gemini`, `qwen`, `aider`, `goose`, `crush`, `copilot`, `kilo`, `pi`, `openhands` |
 | `compache wrap codex -- exec "fix the failing test"` | With arguments of its own |
+| `alias claude='compache wrap claude --'` | Every session, from your shell's profile |
 | `compache wrap -- my-agent` | Any other command. It is told by the variables that SDKs read |
 | `compache wrap --watch claude` | Record only, and change nothing |
 | `compache wrap --print claude` | Show the proxy to start and what to set, for an agent in an editor or one that is always on |
@@ -20,7 +21,7 @@ An agent makes dozens of model calls per message, and every call sends every too
 | `compache stats` | What was saved, per agent and model. For Claude Code's status line: `"statusLine": {"type": "command", "command": "compache stats claude --line"}` in its settings |
 | `compache doctor` | Whether it works here, and what it can be used with |
 
-`wrap` starts a proxy on a free local port, starts the agent with its base URL set to it, and says at the end what the session cost and what it would have cost. No file of the agent's is changed. Where the agent's own settings or command line name a server, such as a gateway, requests go on to that. Where a project's file names another one, or a key is none of the provider's own, nothing is sent until `--upstream URL` says where. On a subscription nothing is billed by the token: what is saved there is room in the window and in the plan's limits.
+`wrap` starts a proxy on a free local port, starts the agent with its base URL set to it, and says at the end what the session cost and what it would have cost. No file of the agent's is changed, and a session that began with compache goes on without it, or the other way round. Where the agent's own settings or command line name a server, such as a gateway, requests go on to that. Where a project's file names another one, or a key is none of the provider's own, nothing is sent until `--upstream URL` says where. On a subscription nothing is billed by the token: what is saved there is room in the window and in the plan's limits.
 
 ## What it does
 
