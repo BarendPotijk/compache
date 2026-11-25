@@ -17,16 +17,9 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    permissions:
-      contents: read
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Check out source
         uses: actions/checkout@v6
@@ -38,12 +31,33 @@ jobs:
         run: node --test site/*.test.mjs
       - name: Prepare website files
         run: rsync -a --exclude '*.test.mjs' site/ _site/
-      - name: Configure Pages
-        uses: actions/configure-pages@v5
       - name: Upload website
         uses: actions/upload-pages-artifact@v4
         with:
           path: _site
+  deploy:
+    # A job of its own: in the second after an upload the artifact is not always listed yet,
+    # and a deployment that looks then finds none. Failed here, only this job is run again.
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.first.outputs.page_url || steps.second.outputs.page_url }}
+    steps:
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
       - name: Deploy website
-        id: deployment
+        id: first
+        continue-on-error: true
+        uses: actions/deploy-pages@v4
+      - name: Wait before trying once more
+        if: steps.first.outcome == 'failure'
+        run: sleep 30
+      - name: Deploy website, second try
+        id: second
+        if: steps.first.outcome == 'failure'
         uses: actions/deploy-pages@v4
