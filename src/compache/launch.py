@@ -24,13 +24,12 @@ import signal
 import subprocess
 import sys
 import threading
-import tomllib
 import urllib.parse
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable
 
-from . import stats
+from . import places, stats
 from .learn import Learner
 from .live import Live
 from .proxy import DEFAULTS, serve
@@ -51,10 +50,6 @@ _LITELLM = {
 }
 # What a base URL of that API ends on, and so what is set when none is.
 _PATHS = {"anthropic": "", "openai": "/v1", "gemini": ""}
-_GOOSE = {
-    "openai": ("OPENAI_BASE_URL", "OPENAI_HOST"),
-    "anthropic": ("ANTHROPIC_HOST",),
-}
 _CRUSH = {
     "openai": ("OPENAI_API_ENDPOINT",),
     "anthropic": ("ANTHROPIC_API_ENDPOINT",),
@@ -66,20 +61,6 @@ _PROXIES = ("http_proxy", "https_proxy", "all_proxy")
 def home() -> Path:
     """Where records and what was learned from them are kept: `COMPACHE_HOME`, or `~/.compache`."""
     return Path(os.environ.get("COMPACHE_HOME") or Path.home() / ".compache")
-
-
-class Unclear(ValueError):
-    """Where an agent's requests go on to is for its user to say."""
-
-    def __init__(self, what: str):
-        super().__init__(f"{what}, or say where requests go with --upstream URL")
-
-    @classmethod
-    def told_by(cls, file: Path, name: str) -> Unclear:
-        """A project's file may come with somebody else's repository. Whether it is trusted is not known here."""
-        return cls(
-            f"{file} says where the model is. If that is yours, set {name} to the same in the environment"
-        )
 
 
 @dataclass(frozen=True)
@@ -97,168 +78,12 @@ class Agent:
     reads: dict
     # The one API it speaks, where it is one.
     speaks: str | None = None
-    # The base URLs that its own files name, by API.
-    keeps: Callable[[dict], dict] = lambda env: {}
+    # What its own files say of where its models are, for an environment and its arguments.
+    says: Callable[[dict, list], list] = lambda env, words: []
     # Whether its files come before its variables.
     files_first: bool = False
     # What has to be on disk before it starts.
     needs: Callable[[], None] = lambda: None
-
-
-# -- what agents keep in files -------------------------------------------------------
-
-
-def _home(env: dict) -> Path:
-    return Path(env.get("HOME") or Path.home())
-
-
-def _config(env: dict) -> Path:
-    return Path(env.get("XDG_CONFIG_HOME") or _home(env) / ".config")
-
-
-def _text(file: Path) -> str:
-    try:
-        return file.read_text("utf-8", "replace")
-    except OSError:
-        return ""
-
-
-def _json(file: Path) -> dict:
-    """A JSON file, which may hold comments. Empty where there is none."""
-    quoted = r'("(?:\\.|[^"\\])*")'
-    text = _text(file)
-    text = re.sub(
-        quoted + r"|//[^\n]*|/\*.*?\*/", lambda m: m[1] or "", text, flags=re.S
-    )
-    text = re.sub(quoted + r"|,(?=\s*[}\]])", lambda m: m[1] or "", text)
-    try:
-        found = json.loads(text or "{}")
-    except ValueError:
-        raise ValueError(f"{file} could not be read") from None
-    return found if isinstance(found, dict) else {}
-
-
-def _at(value, *names):
-    """What stands at a path in a JSON file that somebody wrote. None where it is something else."""
-    for name in names:
-        value = value.get(name) if isinstance(value, dict) else None
-    return value
-
-
-def _url(value) -> str | None:
-    return value.strip() or None if isinstance(value, str) else None
-
-
-def _in_env_file(folder: str, api: str, variable: str):
-    """An agent that takes variables from the first `.env` file it meets: its own, or one of the project."""
-    line = re.compile(
-        rf"^[ \t]*(?:export[ \t]+)?{variable}[ \t]*=[ \t]*[\"'`]?([^\"'`\s#]*)", re.M
-    )
-
-    def keeps(env: dict) -> dict:
-        at, home = Path.cwd(), _home(env)
-        for place in (at, *at.parents, home):
-            for file in (place / folder / ".env", place / ".env"):
-                if not os.path.isfile(file):
-                    continue
-                # The last one counts, and one that is left empty says nothing.
-                said = ["", *line.findall(_text(file))][-1]
-                if said and not env.get(variable) and place != home:
-                    raise Unclear.told_by(file, variable)
-                return {api: said} if said else {}
-        return {}
-
-    return keeps
-
-
-def _opencode_keeps(env: dict) -> dict:
-    at, own = Path.cwd(), _config(env) / "opencode"
-    names = ("opencode.json", "opencode.jsonc")
-    files = [own / name for name in ("config.json", *names)]
-    files += [Path(env["OPENCODE_CONFIG"])] if env.get("OPENCODE_CONFIG") else []
-    # The project's come after the user's, the nearest last. It looks up to the root of the repository.
-    above = [at, *at.parents]
-    root = next((i for i, p in enumerate(above) if (p / ".git").exists()), len(above))
-    places = above[root::-1] if root < len(above) else above[::-1]
-    files += [p / name for p in places for name in names]
-    for place in (_home(env), *places):
-        files += [place / ".opencode" / name for name in reversed(names)]
-    found: dict = {}
-    for file in files:
-        providers = _json(file).get("provider")
-        for name, api in (
-            ("anthropic", "anthropic"),
-            ("openai", "openai"),
-            ("google", "gemini"),
-        ):
-            base = _at(providers, name, "options", "baseURL")
-            if isinstance(base, str):
-                found[api] = re.sub(
-                    r"\{env:([^}]+)\}", lambda m: env.get(m[1], ""), base
-                )
-    return {api: base for api, base in found.items() if base}
-
-
-def _goose_keeps(env: dict) -> dict:
-    text, found = _text(_config(env) / "goose" / "config.yaml"), {}
-    for api, names in _GOOSE.items():
-        for name in names:
-            said = re.search(rf"^{name}:\s*[\"']?([^\"'\s#]+)", text, re.M)
-            if said and api not in found:
-                found[api] = said[1]
-    return found
-
-
-def _pi_keeps(env: dict) -> dict:
-    folder = env.get("PI_CODING_AGENT_DIR") or _home(env) / ".pi" / "agent"
-    providers = _json(Path(folder) / "models.json").get("providers")
-    names = {"anthropic": "anthropic", "openai": "openai", "google": "gemini"}
-    found = {api: _url(_at(providers, n, "baseUrl")) for n, api in names.items()}
-    return {api: base for api, base in found.items() if base}
-
-
-def _qwen_keeps(env: dict) -> dict:
-    found = _in_env_file(".qwen", "openai", "OPENAI_BASE_URL")(env)
-    if found or env.get("OPENAI_BASE_URL"):
-        return found
-    own, here = (p / ".qwen" / "settings.json" for p in (_home(env), Path.cwd()))
-    ours, theirs = (
-        _url(_at(_json(file), "security", "auth", "baseUrl")) for file in (own, here)
-    )
-    if theirs and (not ours or _origin(theirs) != _origin(ours)):
-        raise Unclear.told_by(here, "OPENAI_BASE_URL")
-    return {"openai": ours} if ours else {}
-
-
-def _claude_settings(env: dict) -> list[tuple[Path, dict]]:
-    """The variables that Claude Code's settings files set, and that come before its environment.
-
-    The user's file comes last, and those of the project before it.
-    """
-    folder = Path(env.get("CLAUDE_CONFIG_DIR") or _home(env) / ".claude")
-    own, here = folder / "settings.json", Path.cwd() / ".claude"
-    files = [here / "settings.local.json", here / "settings.json"]
-    found = []
-    for file in (*(f for f in files if f != own), own):
-        said = _json(file).get("env")
-        said = said if isinstance(said, dict) else {}
-        found.append((file, {k: str(v) for k, v in said.items() if v is not None}))
-    return found
-
-
-def _claude_keeps(env: dict) -> dict:
-    *project, (_, own) = _claude_settings(env)
-    ours = {**env, **own}
-    for file, said in project:
-        # What decides where Claude Code's requests go.
-        for name in said:
-            decides = re.match(
-                r"ANTHROPIC_.*(URL|RESOURCE)$|CLAUDE_CODE_USE_|CLOUD_ML_", name
-            )
-            if decides and said[name] != ours.get(name):
-                raise Unclear.told_by(file, name)
-    given = _url(own.get("ANTHROPIC_BASE_URL"))
-    return {"anthropic": given} if given else {}
 
 
 # -- how agents are told ---------------------------------------------------------------
@@ -290,24 +115,23 @@ def _any(bases: dict, env: dict, given: dict, words: list) -> tuple[dict, list, 
     return {**{n: url for n, url in more.items() if not env.get(n)}, **changes}, [], {}
 
 
-def _set(env: dict, name: str) -> bool:
-    return env.get(name, "").strip().lower() in ("1", "true", "yes", "on")
-
-
 def _claude(
     bases: dict, env: dict, given: dict, words: list
 ) -> tuple[dict, list, dict]:
     origin, changes, told = _origin(bases["anthropic"]), {}, {}
-    settings = _claude_settings(env)
-    for _, said in reversed(settings):
-        # Its own settings come before its environment.
-        env = {**env, **said}
-    if any(_set(env, f"CLAUDE_CODE_USE_{name}") for name in ("BEDROCK", "MANTLE")):
+    env, kept = places.claude_env(env, words)
+    uses = places.claude_uses(env)
+    if any("AWS" in use or use in ("BEDROCK", "MANTLE") for use in uses):
         raise ValueError(
             "Claude Code signs what it sends to AWS, so nothing can be changed in it. compache "
             "carries what it sends to Anthropic, Vertex AI and Foundry"
         )
-    if _set(env, "CLAUDE_CODE_USE_VERTEX"):
+    if "ANTHROPIC_GOOGLE_CLOUD" in uses:
+        raise ValueError(
+            "compache carries what Claude Code sends to Anthropic, Vertex AI and Foundry, and nothing "
+            "that goes to Anthropic's own service on Google Cloud"
+        )
+    if "VERTEX" in uses:
         region = env.get("CLOUD_ML_REGION") or "global"
         host = "aiplatform.googleapis.com"
         if region in ("us", "eu"):
@@ -317,7 +141,7 @@ def _claude(
         base = env.get("ANTHROPIC_VERTEX_BASE_URL") or f"https://{host}/v1"
         changes["ANTHROPIC_VERTEX_BASE_URL"] = origin + _path(base)
         told["anthropic"] = base
-    elif _set(env, "CLAUDE_CODE_USE_FOUNDRY"):
+    elif "FOUNDRY" in uses:
         resource = env.get("ANTHROPIC_FOUNDRY_RESOURCE", "")
         base = (
             env.get("ANTHROPIC_FOUNDRY_BASE_URL")
@@ -334,103 +158,18 @@ def _claude(
             # Behind a base URL of one's own, Claude Code would send every tool's definition up front.
             changes["ENABLE_TOOL_SEARCH"] = "true"
     # What is said on its command line comes before all its files.
-    kept = {name for _, said in settings for name in said}
     over = {name: value for name, value in changes.items() if name in kept}
     ahead = ["--settings", json.dumps({"env": over})] if over else []
     return changes, ahead, told
-
-
-def _codex_home(env: dict) -> Path:
-    folder = env.get("CODEX_HOME") or Path(env.get("HOME", "~")) / ".codex"
-    return Path(folder).expanduser()
-
-
-def _codex_plan(env: dict) -> bool:
-    """Whether Codex is signed in to a ChatGPT plan. Only the kind of sign-in is looked at."""
-    try:
-        found = json.loads((_codex_home(env) / "auth.json").read_text("utf-8"))
-    except (OSError, ValueError):
-        return False
-    if not isinstance(found, dict):
-        return False
-    mode = found.get("auth_mode")
-    if mode:
-        return str(mode).lower() not in ("apikey", "api_key", "api-key")
-    return bool(found.get("tokens")) and not found.get("OPENAI_API_KEY")
-
-
-def _toml(file: Path) -> dict:
-    try:
-        return tomllib.loads(file.read_text("utf-8"))
-    except (OSError, ValueError):
-        return {}
-
-
-def _over(under: dict, more: dict) -> dict:
-    """Settings with others laid over them."""
-    found = dict(under)
-    for name, value in more.items():
-        before = found.get(name)
-        both = isinstance(before, dict) and isinstance(value, dict)
-        found[name] = _over(before, value) if both else value
-    return found
-
-
-def _codex_words(words: list) -> tuple[dict, str | None, set]:
-    """What Codex is told on its command line: settings, a profile, and which flags are there."""
-    settings: dict = {}
-    profile, flags, waiting = None, set(), None
-    for word in map(str, words):
-        name, _, value = word.partition("=")
-        if waiting is None and word == "--":
-            break
-        if waiting is None:
-            flags.add(name)
-            if word in ("-c", "--config", "-p", "--profile"):
-                waiting = word
-                continue
-            if name not in ("-c", "--config", "-p", "--profile"):
-                if word[:2] not in ("-c", "-p") or len(word) < 3:
-                    continue
-                name, value = word[:2], word[2:]
-            word, waiting = value, name
-        told, waiting = waiting, None
-        if told in ("-p", "--profile"):
-            profile = word
-            continue
-        path, _, value = word.partition("=")
-        try:
-            read = tomllib.loads(f"it = {value}")["it"]
-        except ValueError:
-            read = value
-        for name in reversed(path.strip().split(".")):
-            read = {name.strip().strip('"'): read}
-        settings = _over(settings, read)
-    return settings, profile, flags
-
-
-def _codex_settings(env: dict, words: list) -> dict:
-    """Codex's own settings, with those of the profile it uses and those on its command line."""
-    told, profile, flags = _codex_words(words)
-    folder = _codex_home(env)
-    found = {} if "--ignore-user-config" in flags else _toml(folder / "config.toml")
-    name = profile or told.get("profile") or found.get("profile")
-    if isinstance(name, str) and re.fullmatch(r"[\w.-]+", name):
-        found = _over(found, _toml(folder / f"{name}.config.toml"))
-        # As it was until it had files for them.
-        named = _at(found, "profiles", name)
-        found = _over(found, named if isinstance(named, dict) else {})
-    found = _over(found, told)
-    return _over(found, {"model_provider": "oss"}) if "--oss" in flags else found
 
 
 def _codex(bases: dict, env: dict, given: dict, words: list) -> tuple[dict, list, dict]:
     # Codex reads no variable for this: what it is told on its command line holds for this run only.
     # Its bodies come compressed otherwise, and Python reads that only from 3.14 on.
     said = ["features.enable_request_compression=false"]
-    settings, origin = _codex_settings(env, words), _origin(bases["openai"])
-    name = _url(settings.get("model_provider"))
-    given = _url(_at(settings, "model_providers", name, "base_url"))
+    settings, origin = places.codex_settings(env, words), _origin(bases["openai"])
+    name = places.url(settings.get("model_provider"))
+    given = places.url(places.at(settings, "model_providers", name, "base_url"))
     if given and re.fullmatch(r"[A-Za-z0-9_-]+", name):
         # A provider it has been given: everything about it stays, but for where it is.
         base = json.dumps(origin + _path(given))
@@ -442,25 +181,25 @@ def _codex(bases: dict, env: dict, given: dict, words: list) -> tuple[dict, list
             f"Codex is set to its own provider {name!r}, which does not go through compache. One "
             "with a base_url under [model_providers] does"
         )
-    given = _url(settings.get("openai_base_url"))
-    if _codex_plan(env):
+    given = places.url(settings.get("openai_base_url"))
+    key = places.codex_key(env, words)
+    if key == "plan":
         # A ChatGPT plan is served at a place of its own, under the same API. Its sign-in goes there
         # and nowhere else, whatever other tools have been told.
         given = given or "https://chatgpt.com/backend-api/codex"
         said.append(f"openai_base_url={json.dumps(origin + _path(given))}")
     else:
         given = given or "https://api.openai.com/v1"
-        stored = not env.get("OPENAI_API_KEY")
         said += [
             'model_provider="compache"',
             'model_providers.compache.name="compache"',
             f"model_providers.compache.base_url={json.dumps(origin + _path(given))}",
             'model_providers.compache.wire_api="responses"',
             "model_providers.compache.supports_websockets=false",
-            # A key that Codex keeps itself is not in the environment.
-            "model_providers.compache.requires_openai_auth=true"
-            if stored
-            else 'model_providers.compache.env_key="OPENAI_API_KEY"',
+            # One that Codex keeps itself comes before one in the environment.
+            f"model_providers.compache.env_key={json.dumps(key)}"
+            if key in env
+            else "model_providers.compache.requires_openai_auth=true",
         ]
     return {}, [w for line in said for w in ("-c", line)], {"openai": given}
 
@@ -532,9 +271,12 @@ def _copilot(
 def _openhands(
     bases: dict, env: dict, given: dict, words: list
 ) -> tuple[dict, list, dict]:
-    kept = _json(_home(env) / ".openhands" / "agent_settings.json").get("llm")
-    own = env.get("LLM_BASE_URL") or _url(_at(kept, "base_url"))
-    model = str(env.get("LLM_MODEL") or _at(kept, "model") or "")
+    try:
+        kept = places.read(places.home(env) / ".openhands" / "agent_settings.json")
+    except places.Unclear:
+        kept = {}
+    own = env.get("LLM_BASE_URL") or places.url(places.at(kept, "llm", "base_url"))
+    model = str(env.get("LLM_MODEL") or places.at(kept, "llm", "model") or "")
     if not own and model.startswith("openrouter/"):
         own = "https://openrouter.ai/api/v1"
     # Without the version: what it calls for Claude has it on its own path, and the proxy puts it
@@ -579,7 +321,7 @@ AGENTS = {
         _claude,
         _reading("anthropic"),
         "anthropic",
-        _claude_keeps,
+        places.claude,
         files_first=True,
     ),
     "codex": Agent("codex", "Codex", _codex, {}, "openai"),
@@ -588,7 +330,7 @@ AGENTS = {
         "opencode",
         _configured("OPENCODE_CONFIG_CONTENT"),
         _reading("openai", "anthropic"),
-        keeps=_opencode_keeps,
+        says=places.opencode,
         files_first=True,
     ),
     "kilo": Agent(
@@ -603,7 +345,7 @@ AGENTS = {
         _plain(_reading("gemini")),
         _reading("gemini"),
         "gemini",
-        _in_env_file(".gemini", "gemini", "GOOGLE_GEMINI_BASE_URL"),
+        places.gemini,
     ),
     "qwen": Agent(
         "qwen",
@@ -611,13 +353,13 @@ AGENTS = {
         _plain(_reading("openai")),
         _reading("openai"),
         "openai",
-        _qwen_keeps,
+        places.qwen,
     ),
     "aider": Agent("aider", "aider", _plain(_LITELLM), _LITELLM),
-    "goose": Agent("goose", "goose", _goose, _GOOSE, keeps=_goose_keeps),
+    "goose": Agent("goose", "goose", _goose, places.GOOSE, says=places.goose),
     "crush": Agent("crush", "Crush", _crush, _CRUSH),
     "copilot": Agent("copilot", "Copilot CLI", _copilot, {}),
-    "pi": Agent("pi", "pi", _pi, {}, keeps=_pi_keeps, needs=_pi_needs),
+    "pi": Agent("pi", "pi", _pi, {}, says=places.pi, needs=_pi_needs),
     "openhands": Agent("openhands", "OpenHands", _openhands, {}),
 }
 
@@ -655,11 +397,13 @@ def prepared(
             said = {n: env[n] for n in names if env.get(n)}
             if len({_origin(url) for url in said.values()}) > 1:
                 names = " and ".join(said)
-                raise Unclear(f"{names} say different things: set them to the same")
+                raise places.Unclear(
+                    f"{names} say different things: set them to the same"
+                )
             given.update({api: url for url in said.values()})
-        kept = agent.keeps(env)
+        kept = places.settled(agent.says(env, words), given, agent.files_first)
         given = {**given, **kept} if agent.files_first else {**kept, **given}
-    except Unclear:
+    except places.Unclear:
         if not decided:
             raise
         given = {}

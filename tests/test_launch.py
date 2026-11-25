@@ -19,7 +19,7 @@ from pathlib import Path
 from unittest import mock
 
 import compache
-from compache import doctor, launch, proxy
+from compache import doctor, launch, places, proxy
 from compache.cli import main
 from compache.proxy import _decoded, serve as proxied
 from compache.record import load, load_calls, thread_name
@@ -448,13 +448,23 @@ class OwnFilesTests(Told):
                 "google": "http://127.0.0.1:9999/v1beta",
             },
         )
-        # A project's comes after the user's.
-        options = {"options": {"baseURL": "https://two.example/v1"}}
-        self.put("work/opencode.json", {"provider": {"openai": options}})
-        self.assertEqual(self.told("opencode")[2]["openai"], "https://two.example")
+        # A project's is not followed, unless it says the same.
+        for base in ("https://one.example/v1", "https://two.example/v1"):
+            options = {"options": {"baseURL": base}}
+            self.put("work/opencode.json", {"provider": {"openai": options}})
+            if "one" in base:
+                upstreams = self.told("opencode", {"OURS": self.GATEWAY})[2]
+                self.assertEqual(upstreams["openai"], "https://one.example")
+                continue
+            with self.assertRaisesRegex(ValueError, "set OPENAI_BASE_URL"):
+                self.told("opencode")
+            off = {"OPENCODE_DISABLE_PROJECT_CONFIG": "1"}
+            upstreams = self.told("opencode", off)[2]
+            self.assertEqual(upstreams["openai"], "https://one.example")
         self.put("work/opencode.json", "{ not json")
-        with self.assertRaisesRegex(ValueError, "could not be read"):
+        with self.assertRaisesRegex(ValueError, "could not be read.*--upstream"):
             self.told("opencode")
+        self.told("opencode", decided=True)
 
     def test_opencode_s_variables_hold_the_version(self):
         changes, _, upstreams = self.told(
@@ -488,6 +498,31 @@ class OwnFilesTests(Told):
         _, ahead, upstreams = self.told("claude")
         self.assertEqual(upstreams, {"anthropic": self.GATEWAY})
         self.assertEqual(ahead[0], "--settings")
+        # What it is told not to read counts for nothing.
+        for words in (
+            ("--restricted",),
+            ("--setting-sources", "project,local"),
+            ("--setting-sources=project", "-p", "hi"),
+        ):
+            self.assertEqual(self.told("claude", None, *words)[2], {}, words)
+            other = {"ANTHROPIC_BASE_URL": "https://other.example"}
+            upstreams = self.told("claude", other, *words)[2]
+            self.assertEqual(upstreams, {"anthropic": "https://other.example"})
+        self.put(
+            "work/project/.claude/settings.json",
+            {"env": {"CLAUDE_CODE_USE_VERTEX": "1"}},
+        )
+        words = ("--setting-sources", "user")
+        self.assertEqual(
+            self.told("claude", None, *words)[2], {"anthropic": self.GATEWAY}
+        )
+        (self.home / "work/project/.claude/settings.json").unlink()
+        for word in ("--bare", "--safe-mode"):
+            with self.assertRaisesRegex(ValueError, "--upstream"):
+                self.told("claude", None, word)
+            same = {"ANTHROPIC_BASE_URL": self.GATEWAY + "/api"}
+            upstreams = self.told("claude", same, word)[2]
+            self.assertEqual(upstreams, {"anthropic": self.GATEWAY})
         base = json.loads(ahead[1])["env"]["ANTHROPIC_BASE_URL"]
         self.assertEqual(base, "http://127.0.0.1:9999/api")
 
@@ -501,10 +536,24 @@ class OwnFilesTests(Told):
         # Whoever says where everything goes need not say it again.
         changes, _, _ = self.told("qwen", decided=True)
         self.assertEqual(changes["OPENAI_BASE_URL"], "http://127.0.0.1:9999/v1")
-        # It is the only one that is read, so one that says nothing leaves nothing said.
+        # One that says nothing leaves it to the user's own. Gemini CLI reads only the first it meets.
         self.put("work/project/.qwen/.env", "OTHER=1\n")
         self.put(".qwen/.env", f"OPENAI_BASE_URL={self.GATEWAY}/v1\n")
-        self.assertEqual(self.told("qwen")[2], {})
+        self.assertEqual(self.told("qwen")[2], {"openai": self.GATEWAY})
+        self.put("work/project/.env", "OTHER=1\n")
+        self.put(".gemini/.env", f"GOOGLE_GEMINI_BASE_URL={self.GATEWAY}\n")
+        self.assertEqual(self.told("gemini")[2], {})
+        (self.home / "work/project/.env").unlink()
+        self.assertEqual(self.told("gemini")[2], {"gemini": self.GATEWAY})
+
+    @unittest.skipIf(os.name == "nt", "links")
+    def test_a_home_that_is_met_by_another_name(self):
+        self.put(".gemini/.env", f"GOOGLE_GEMINI_BASE_URL={self.GATEWAY}\n")
+        linked = self.home.with_name(self.home.name + "-linked")
+        linked.symlink_to(self.home)
+        self.addCleanup(linked.unlink)
+        upstreams = self.told("gemini", {"HOME": str(linked)})[2]
+        self.assertEqual(upstreams, {"gemini": self.GATEWAY})
 
     def test_claude_code_s_project_settings(self):
         """They come before the user's, and are not followed unless the environment says the same."""
@@ -522,6 +571,17 @@ class OwnFilesTests(Told):
                         self.told("claude")
             self.put(path, {"env": {"ANTHROPIC_BASE_URL": self.GATEWAY, "OTHER": 1}})
             self.assertEqual(self.told("claude")[2], {"anthropic": self.GATEWAY})
+            for said in (
+                {"CLAUDE_CODE_USE_POWERSHELL_TOOL": "1"},
+                {"CLAUDE_CODE_USE_BEDROCK": "0", "CLOUD_ML_REGION": "us-east5"},
+            ):
+                self.put(path, {"env": said})
+                self.assertEqual(self.told("claude")[2], {"anthropic": self.GATEWAY})
+            # One that cannot be read may say anything, and does not matter once that is said.
+            self.put(path, "{ not json")
+            with self.assertRaisesRegex(ValueError, "could not be read.*--upstream"):
+                self.told("claude")
+            self.told("claude", decided=True)
             # Somebody has said where everything goes: what is on the command line comes before the files.
             self.put(path, {"env": {"ANTHROPIC_BASE_URL": other}})
             _, ahead, _ = self.told("claude", decided=True)
@@ -529,10 +589,28 @@ class OwnFilesTests(Told):
             self.assertEqual(told["ANTHROPIC_BASE_URL"], "http://127.0.0.1:9999")
             (self.home / path).unlink()
 
-    def test_what_claude_code_s_settings_say_about_where_it_runs(self):
-        self.put(".claude/settings.json", {"env": {"CLAUDE_CODE_USE_BEDROCK": "1"}})
-        with self.assertRaisesRegex(ValueError, "AWS"):
+    def test_claude_code_s_project_settings_lie_at_the_root_of_its_repository(self):
+        other = {"env": {"ANTHROPIC_BASE_URL": "https://other.example"}}
+        self.put("work/.git/HEAD", "ref: refs/heads/main\n")
+        self.put("work/.claude/settings.local.json", other)
+        with self.assertRaisesRegex(ValueError, "work.\\.claude.settings.local"):
             self.told("claude")
+        # And of the checkout that a worktree was made from.
+        (self.home / "work/.claude/settings.local.json").unlink()
+        self.put("main/.git/worktrees/one/HEAD", "ref: refs/heads/one\n")
+        self.put("main/.claude/settings.local.json", other)
+        link = f"gitdir: {self.home / 'main' / '.git' / 'worktrees' / 'one'}\n"
+        self.put("work/project/.git", link)
+        with self.assertRaisesRegex(ValueError, "main.\\.claude.settings.local"):
+            self.told("claude")
+        (self.home / "main/.claude/settings.local.json").unlink()
+        self.assertEqual(self.told("claude")[2], {})
+
+    def test_what_claude_code_s_settings_say_about_where_it_runs(self):
+        for use in ("BEDROCK", "MANTLE", "ANTHROPIC_AWS", "ANTHROPIC_GOOGLE_CLOUD"):
+            self.put(".claude/settings.json", {"env": {f"CLAUDE_CODE_USE_{use}": "1"}})
+            with self.assertRaisesRegex(ValueError, "AWS|Google Cloud"):
+                self.told("claude")
         vertex = {"CLAUDE_CODE_USE_VERTEX": True, "CLOUD_ML_REGION": "us-east5"}
         self.put(".claude/settings.json", {"env": vertex})
         changes, ahead, upstreams = self.told("claude")
@@ -554,6 +632,20 @@ class OwnFilesTests(Told):
         self.assertEqual(self.told("qwen", env)[2], {"openai": "https://one.example"})
         self.put("work/project/.qwen/settings.json", says(self.GATEWAY + "/v1"))
         self.assertEqual(self.told("qwen")[2], {"openai": self.GATEWAY})
+        # Places of the user's own that differ are for the user to bring together.
+        for path, said in (
+            (".qwen/.env", "OPENAI_BASE_URL=https://other.example/v1\n"),
+            (
+                ".qwen/settings.json",
+                {**says(self.GATEWAY), "env": {"OPENAI_BASE_URL": "https://x.example"}},
+            ),
+        ):
+            self.put(path, said)
+            with self.subTest(path):
+                with self.assertRaisesRegex(ValueError, "say different things"):
+                    self.told("qwen")
+                self.told("qwen", decided=True)
+            (self.home / path).unlink()
 
     def test_variables_in_a_file(self):
         """As agents read them: the last one counts, and one that is left empty says nothing."""
@@ -586,24 +678,44 @@ class OwnFilesTests(Told):
             return {"provider": {"openai": {"options": {"baseURL": base + "/v1"}}}}
 
         env = {"OPENAI_BASE_URL": "https://other.example/v1"}
+        same = {"OPENAI_BASE_URL": self.GATEWAY + "/v1"}
         goes = {"openai": self.GATEWAY}
-        for path in (
-            ".config/opencode/opencode.json",
-            ".opencode/opencode.json",
-            "work/project/opencode.json",
-            "work/project/.opencode/opencode.jsonc",
-        ):
+        for path in (".config/opencode/opencode.json", ".opencode/opencode.jsonc"):
             self.put(path, says(self.GATEWAY))
             with self.subTest(path):
                 self.assertEqual(self.told("opencode", env)[2], goes)
+                # Two of them have to agree.
+                self.put(".config/opencode/config.json", says("https://x.example"))
+                with self.assertRaisesRegex(ValueError, "say different things"):
+                    self.told("opencode")
+                (self.home / ".config/opencode/config.json").unlink()
             (self.home / path).unlink()
+        for path in (
+            "work/project/opencode.json",
+            "work/project/.opencode/opencode.jsonc",
+            "work/.opencode/opencode.json",
+        ):
+            self.put(path, says(self.GATEWAY))
+            with self.subTest(path):
+                with self.assertRaisesRegex(ValueError, "set OPENAI_BASE_URL"):
+                    self.told("opencode", env)
+                self.assertEqual(self.told("opencode", same)[2], goes)
+                self.put(".opencode/opencode.json", says(self.GATEWAY))
+                self.assertEqual(self.told("opencode")[2], goes)
+                (self.home / ".opencode/opencode.json").unlink()
+            (self.home / path).unlink()
+        folder = {"OPENCODE_CONFIG_DIR": str(self.home / "mine")}
+        self.put("mine/opencode.json", says(self.GATEWAY))
+        self.assertEqual(self.told("opencode", {**env, **folder})[2], goes)
         # It looks no further up than its repository.
         self.put("opencode.json", says(self.GATEWAY))
         self.assertEqual(self.told("opencode")[2], goes)
         (self.home / "work" / ".git").mkdir()
         self.assertEqual(self.told("opencode")[2], {})
-        self.put("work/opencode.json", says(self.GATEWAY))
-        self.assertEqual(self.told("opencode")[2], goes)
+        # What another file holds is not known.
+        self.put("work/opencode.json", says("{file:where}"))
+        with self.assertRaisesRegex(ValueError, "in another file"):
+            self.told("opencode")
 
     def test_what_is_not_what_it_should_be_says_nothing(self):
         for name, path, said in (
@@ -670,6 +782,35 @@ class OwnFilesTests(Told):
         self.assertEqual(upstreams, {"openai": "https://api.openai.com"})
         with self.assertRaisesRegex(ValueError, "'oss'"):
             self.told("codex", None, "--oss")
+
+    def test_which_key_codex_takes(self):
+        """The one it keeps, whatever is in the environment."""
+        env = {"OPENAI_API_KEY": "sk-proj-own"}
+        stored = {"auth_mode": "apikey", "OPENAI_API_KEY": "key of the gateway"}
+        plan = {"auth_mode": "chatgpt", "tokens": {"access_token": "x"}}
+        told = 'model_providers.compache.env_key="%s"'
+        for kept, env, words, way in (
+            (stored, env, (), "requires_openai_auth=true"),
+            (stored, {}, (), "requires_openai_auth=true"),
+            ({}, env, (), told % "OPENAI_API_KEY"),
+            ({}, {}, (), "requires_openai_auth=true"),
+            (plan, env, (), "openai_base_url="),
+            (plan, {"CODEX_API_KEY": "k"}, ("exec", "hi"), told % "CODEX_API_KEY"),
+            (plan, {"CODEX_API_KEY": "k"}, (), "openai_base_url="),
+        ):
+            self.put(".codex/auth.json", kept)
+            with self.subTest(kept=kept, env=env, words=words):
+                _, ahead, upstreams = self.told("codex", env, *words)
+                self.assertIn(way, " ".join(ahead))
+                host = "chatgpt.com" if "openai_base" in way else "api.openai.com"
+                self.assertEqual(upstreams, {"openai": f"https://{host}"})
+
+    def test_what_codex_is_told_for_the_whole_machine(self):
+        self.put("etc.toml", f'openai_base_url = "{self.GATEWAY}/v1"\n')
+        with mock.patch.object(places, "CODEX_SYSTEM", self.home / "etc.toml"):
+            self.assertEqual(self.told("codex")[2], {"openai": self.GATEWAY})
+            self.put(".codex/config.toml", 'openai_base_url = "https://x.example/v1"')
+            self.assertEqual(self.told("codex")[2], {"openai": "https://x.example"})
 
     def test_codex_on_a_provider_of_its_own(self):
         self.put(".codex/config.toml", 'model_provider = "ollama"\n')
