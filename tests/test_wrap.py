@@ -693,7 +693,9 @@ if __name__ == "__main__":
     unittest.main()
 
 
-@unittest.skipUnless(has("anthropic"), "needs the Anthropic SDK")
+@unittest.skipUnless(
+    has("anthropic", "botocore"), "needs the Anthropic SDK and botocore"
+)
 class SignedTests(unittest.TestCase):
     """A request signed over its body (AWS SigV4) goes out as it was signed, or not at all."""
 
@@ -736,7 +738,9 @@ class SignedTests(unittest.TestCase):
         self.assertEqual(live.stats["passed_through"], 1)
 
 
-@unittest.skipUnless(has("google.genai", "aiohttp"), "needs the Google GenAI SDK and aiohttp")
+@unittest.skipUnless(
+    has("google.genai", "aiohttp"), "needs the Google GenAI SDK and aiohttp"
+)
 class GeminiAsyncTests(SdkCase):
     def test_async_calls_come_through_where_aiohttp_is_installed(self):
         from google import genai
@@ -744,7 +748,9 @@ class GeminiAsyncTests(SdkCase):
 
         live = self.start(lambda request: {"text": "Fine."}, sample=0.0)
         client = wrap(
-            genai.Client(api_key="key", http_options=types.HttpOptions(base_url=self.url)),
+            genai.Client(
+                api_key="key", http_options=types.HttpOptions(base_url=self.url)
+            ),
             live=live,
         )
 

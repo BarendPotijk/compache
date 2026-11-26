@@ -2132,13 +2132,22 @@ class ThreadTests(unittest.TestCase):
                         {
                             "role": "assistant",
                             "content": [
-                                {"type": "tool_use", "id": f"toolu_{k:020d}ab", "name": "read", "input": {}}
+                                {
+                                    "type": "tool_use",
+                                    "id": f"toolu_{k:020d}ab",
+                                    "name": "read",
+                                    "input": {},
+                                }
                             ],
                         },
                         {
                             "role": "user",
                             "content": [
-                                {"type": "tool_result", "tool_use_id": f"toolu_{k:020d}ab", "content": result(k)}
+                                {
+                                    "type": "tool_result",
+                                    "tool_use_id": f"toolu_{k:020d}ab",
+                                    "content": result(k),
+                                }
                             ],
                         },
                     )
@@ -2191,7 +2200,14 @@ class WarmTests(unittest.TestCase):
                 content, stop = [], "max_tokens"
             elif state["k"] < 5:
                 state["n"] += 1
-                content = [{"type": "tool_use", "id": f"toolu_{state['n']:020d}ab", "name": "read", "input": {}}]
+                content = [
+                    {
+                        "type": "tool_use",
+                        "id": f"toolu_{state['n']:020d}ab",
+                        "name": "read",
+                        "input": {},
+                    }
+                ]
                 stop = "tool_use"
             else:
                 content, stop = [{"type": "text", "text": "Done."}], "end_turn"
@@ -2204,12 +2220,22 @@ class WarmTests(unittest.TestCase):
                     "model": "claude-sonnet-5-5",
                     "content": content,
                     "stop_reason": stop,
-                    "usage": {"input_tokens": 100, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0, "output_tokens": 0 if not content else 5},
+                    "usage": {
+                        "input_tokens": 100,
+                        "cache_read_input_tokens": 0,
+                        "cache_creation_input_tokens": 0,
+                        "output_tokens": 0 if not content else 5,
+                    },
                 },
             )
 
         state = {"k": 0, "n": 0}
-        base = {"model": "claude-sonnet-5-5", "max_tokens": 64, "system": "You read files.", "tools": tools}
+        base = {
+            "model": "claude-sonnet-5-5",
+            "max_tokens": 64,
+            "system": "You read files.",
+            "tools": tools,
+        }
         mark = 0
         for prompt in range(3):
             messages.append({"role": "user", "content": f"Prompt {prompt}"})
@@ -2221,14 +2247,27 @@ class WarmTests(unittest.TestCase):
                 for block in reply["content"]:
                     if block["type"] == "tool_use":
                         messages.append(
-                            {"role": "user", "content": [{"type": "tool_result", "tool_use_id": block["id"], "content": result(len(messages))}]}
+                            {
+                                "role": "user",
+                                "content": [
+                                    {
+                                        "type": "tool_result",
+                                        "tool_use_id": block["id"],
+                                        "content": result(len(messages)),
+                                    }
+                                ],
+                            }
                         )
                 clock.at += 5
             clock.at += 200
             if warm and prompt < 2:
                 for limit in (0, 1):
                     mark = len(sent)
-                    again = {**base, "max_tokens": limit, "messages": json.loads(json.dumps(messages[:-1]))}
+                    again = {
+                        **base,
+                        "max_tokens": limit,
+                        "messages": json.loads(json.dumps(messages[:-1])),
+                    }
                     live.exchange("/v1/messages", again, send, thread="warmed")
                     # One request each, never asked again as written.
                     self.assertEqual(len(sent), mark + 1)
@@ -2286,13 +2325,19 @@ class ListedTests(unittest.TestCase):
         said, model, agent = self.run_agent()
         self.assertEqual(said, "All done.")
         mine = agent.shape.said
-        cut = [b for b in model.bodies if any(
-            i.get("role") == "developer" for i in b["input"] if isinstance(i, dict)
-        )]
+        cut = [
+            b
+            for b in model.bodies
+            if any(
+                i.get("role") == "developer" for i in b["input"] if isinstance(i, dict)
+            )
+        ]
         self.assertTrue(cut)
         for body in model.bodies:
             items = body["input"]
-            listed = [i for i in items if isinstance(i, dict) and i.get("role") == "developer"]
+            listed = [
+                i for i in items if isinstance(i, dict) and i.get("role") == "developer"
+            ]
             kept = [i for i in items if i not in listed]
             # Nothing that is left was changed: every item is one the application sent, as it sent it.
             for item in kept:
@@ -2300,16 +2345,28 @@ class ListedTests(unittest.TestCase):
             # Every reasoning item that is left still leads to what it said.
             for k, item in enumerate(kept):
                 if item.get("type") == "reasoning":
-                    self.assertTrue(kept[k + 1].get("type", "").endswith("_call") or kept[k + 1].get("role") == "assistant")
+                    self.assertTrue(
+                        kept[k + 1].get("type", "").endswith("_call")
+                        or kept[k + 1].get("role") == "assistant"
+                    )
             if listed:
                 self.assertIs(items[-1], listed[0])
                 handles = NOTICE.findall(listed[0]["content"][0]["text"])
                 self.assertTrue(handles)
-                calls = {i.get("call_id") for i in kept if i.get("type") == "function_call"}
-                outputs = {i.get("call_id") for i in kept if i.get("type") == "function_call_output"}
+                calls = {
+                    i.get("call_id") for i in kept if i.get("type") == "function_call"
+                }
+                outputs = {
+                    i.get("call_id")
+                    for i in kept
+                    if i.get("type") == "function_call_output"
+                }
                 self.assertEqual(calls, outputs)
         tools = model.bodies[-1]["tools"]
-        self.assertIn("listed at the end", [t for t in tools if t["name"] == REOPEN][0]["description"])
+        self.assertIn(
+            "listed at the end",
+            [t for t in tools if t["name"] == REOPEN][0]["description"],
+        )
 
     def test_what_was_cleared_can_be_read_again(self):
         said, model, agent = self.run_agent(fetch_at=6)

@@ -1330,7 +1330,9 @@ class QuietTests(unittest.TestCase):
             with contextlib.redirect_stderr(screen):
                 handler, undo = launch._quiet(Path(tmp))
                 try:
-                    logging.getLogger("compache.live").warning("compache: a request was passed on unchanged")
+                    logging.getLogger("compache.live").warning(
+                        "compache: a request was passed on unchanged"
+                    )
                 finally:
                     undo()
             self.assertEqual(screen.getvalue(), "")

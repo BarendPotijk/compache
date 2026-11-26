@@ -1692,7 +1692,9 @@ class Live:
             return send(body)
         if _warming(body) and at is None:
             try:
-                return self._only_warm(conversation, chains, dialect, body, scan, turns, send)
+                return self._only_warm(
+                    conversation, chains, dialect, body, scan, turns, send
+                )
             finally:
                 conversation.lock.release()
         try:
@@ -1719,7 +1721,9 @@ class Live:
             conversation.when = None
             conversation.lock.release()
 
-    def _only_warm(self, conversation, chains, dialect, body, scan, turns, send) -> Result:
+    def _only_warm(
+        self, conversation, chains, dialect, body, scan, turns, send
+    ) -> Result:
         """A request that only warms the cache, as an agent sends before it expires.
 
         It goes out once, as the conversation would go out now, so that it warms what the
@@ -2144,7 +2148,11 @@ class Live:
             if sent is not None and now - sent < ttl:
                 # It went out from here within the lifetime: whatever else went out since, it is cached.
                 before = min(sent, now - 1e-3)
-            elif policy.agentic and turns[-1].retrievals and turns[-1].retrievals[-1].answers:
+            elif (
+                policy.agentic
+                and turns[-1].retrievals
+                and turns[-1].retrievals[-1].answers
+            ):
                 before = now - 1.0
             if elsewhere:
                 # The earlier turns are decided again as they were decided there.
@@ -2319,8 +2327,17 @@ class Live:
                         shown[part_id] = explained(at.group()) if at else shown[part_id]
                         first = False
                 for part_id, slots in pieces:
-                    if listed and part_id in shown and slots and ":retrieval:" in part_id:
-                        item = body["input"][slots[0].message] if isinstance(body.get("input"), list) else None
+                    if (
+                        listed
+                        and part_id in shown
+                        and slots
+                        and ":retrieval:" in part_id
+                    ):
+                        item = (
+                            body["input"][slots[0].message]
+                            if isinstance(body.get("input"), list)
+                            else None
+                        )
                         call = item.get("call_id") if isinstance(item, dict) else None
                         handle = _HANDLE.search(shown[part_id])
                         if call and handle:
@@ -2370,7 +2387,9 @@ class Live:
             # a chat it comes with the first notice, and stays: the first cut rewrites the request
             # from near its start anyway, and after that the tool never changes what is cached.
             if conversation.agentic:
-                out = dialect.with_tool(out, _AGENT_TOOL_LISTED if listed else _AGENT_TOOL)
+                out = dialect.with_tool(
+                    out, _AGENT_TOOL_LISTED if listed else _AGENT_TOOL
+                )
             elif listed:
                 out = dialect.with_tool(out, _REOPEN_TOOL_LISTED, _REOPEN_HOW_LISTED)
             else:
@@ -2406,7 +2425,9 @@ class Live:
         So it is where the API drops the reasoning that follows an earlier item that was changed,
         and not the reasoning behind items that are taken out whole.
         """
-        return hasattr(dialect, "without_calls") and drops_reasoning_on_edits(scan.model)
+        return hasattr(dialect, "without_calls") and drops_reasoning_on_edits(
+            scan.model
+        )
 
     @staticmethod
     def _without_cleared(dialect, body, out, cleared: dict) -> Any:
@@ -2418,7 +2439,11 @@ class Live:
             if call in cleared and kind.endswith("_call"):
                 named = item.get("name") or kind
                 said = item.get("arguments") or item.get("input") or ""
-                said = said if isinstance(said, str) else json.dumps(said, ensure_ascii=False)
+                said = (
+                    said
+                    if isinstance(said, str)
+                    else json.dumps(said, ensure_ascii=False)
+                )
                 said = " ".join(said.split())
                 said = said if len(said) <= 80 else said[:79] + "…"
                 lines.append(f"- {cleared[call]}: {named} {said}".rstrip())

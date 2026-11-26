@@ -37,8 +37,14 @@ Claude Haiku 5.5 in Claude Code and GPT-6 Luna in Codex, billed through OpenRout
 | caching.ai | Keeps every token, and the provider's cache warm | Pings, or one-hour entries | The entries' lifetime | Modeled: the cheapest cache setting. Live: one-hour entries |
 | OptScale Kompressor | Shrinks tool output for coding agents | One-hour entries after a first long pause. Its pings are for running tools | The lifetime | Run live, and on the text |
 | Headroom | Compresses the content of new tool output, keeps every message | Nothing | No | Run live, and on the text |
-| OpenClaw | Clears old tool results or summarizes at fixed shares of the window | Nothing | No | Modeled in the [calculator](calculator.md) |
+| OpenClaw | Clears old tool results or summarizes at fixed shares of the window | Nothing in 2026.11.10. Pings on its main branch since 23 November | No | Modeled in the [calculator](calculator.md) |
 | Provider compaction | Compacts on the server at a context-size threshold | Nothing | No | Not modeled |
+| Context Mode Gateway | Leaves older messages of a coding agent out of view, the model searches them. Hosted | Trims after a pause longer than the cache | A fixed rule: trims once reading has cost one write | Read |
+| lean-ctx | Stubs old tool results of coding agents, 16 messages at a time | Repacks a lapsed cache where that costs less | No | Read |
+| Sleev | Compresses a coding agent's session with model calls of its own. Closed | Not found | A rule it does not publish | Read |
+| Hermes, pi | Built into the agent. Hermes prunes old output on a cold cache | Both keep the cache warm themselves | No | Read |
+
+Read from their source and documentation on 2026-11-25. Nobody else read fits what to leave out on recorded traffic, or sits inside the SDK's HTTP client.
 
 ## caching.ai
 

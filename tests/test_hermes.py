@@ -463,6 +463,10 @@ class HermesAgentPolicyTests(unittest.TestCase):
 
         agentic = hermes.make(Live(policy(rounds=2))).get_tool_schemas()
         chat = hermes.make(Live(fitted())).get_tool_schemas()
-        self.assertEqual(agentic[0]["description"], _AGENT_TOOL["function"]["description"])
-        self.assertEqual(chat[0]["description"], _REOPEN_TOOL["function"]["description"])
+        self.assertEqual(
+            agentic[0]["description"], _AGENT_TOOL["function"]["description"]
+        )
+        self.assertEqual(
+            chat[0]["description"], _REOPEN_TOOL["function"]["description"]
+        )
         self.assertEqual(agentic[0]["name"], "reopen")

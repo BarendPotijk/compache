@@ -223,7 +223,7 @@ compache proxy --policy policy.json                    # for anything that lets 
 On the way out, the parts the policy archives are replaced by a notice, the end of the conversation is marked cacheable, and the model is given a `reopen` tool whose calls are answered before your application sees the reply. A background thread sends the keep-warm pings. [Integrations](integrations.md) lists every way in: frameworks, LiteLLM, Hermes and agent harnesses included.
 
 - **Record and apply together.** `record=` and `sample=` work with a policy too, so the next fit has fresher threads.
-- **No long-lived process.** Pings need one. Where there is none, fit with `ping_counts=(0,)`. Trimming needs no state: a process that meets a conversation in the middle takes the cache to have expired.
+- **No long-lived process, or several.** Pings need one that stays up. Where there is none, fit with `ping_counts=(0,)`. Trimming needs no shared state: a process that meets a conversation another one served decides by how likely its users are back while the cache lives, as the others do.
 - **Retrieved text pasted into the question.** The request path sees one message, so it can only keep or archive the two together. Fit such an application on a record made going forward, which sees it the same way.
 
 ### By hand

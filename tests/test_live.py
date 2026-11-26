@@ -1825,7 +1825,10 @@ class SharedTests(unittest.TestCase):
         clock = Clock(1_970_000_000.0)
         model = FakeModel(looping, clock=clock)
         lives = [Live(policy, clock=clock) for _ in range(workers)]
-        apps = [ChatApp(live, model, thread="shared", name="claude-sonnet-5-5") for live in lives]
+        apps = [
+            ChatApp(live, model, thread="shared", name="claude-sonnet-5-5")
+            for live in lives
+        ]
         messages = []
         for n in range(1, turns + 1):
             app = apps[(n - 1) % workers]

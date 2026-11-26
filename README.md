@@ -115,7 +115,7 @@ It saves least in short chats and where the cache outlasts the breaks: 2% to 5% 
 
 **How does it compare with Headroom or Kompressor?** They make each tool result smaller. compache decides which parts are sent at all. Live on the same document chats it was [36% and 26% cheaper](docs/comparisons.md#live), with at least as many answers right. Those chats are prose, and Headroom is made for structured tool output.
 
-**Does it work in serverless functions?** Trimming does: no state is kept outside the process. Keep-warm pings need a process that stays up, so fit with `ping_counts=(0,)`.
+**Does it work in serverless functions, or behind a load balancer?** Yes. A process that meets a conversation another one served decides by how likely its users are back while the cache lives, as every other process does, so they reach the same requests. Keep-warm pings need a process that stays up: fit with `ping_counts=(0,)` where there is none.
 
 **What if something goes wrong?** A request the provider refuses after compache changed it is sent again as your app wrote it.
 

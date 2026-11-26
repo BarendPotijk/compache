@@ -1715,14 +1715,18 @@ class OpenAIResponses:
 
         def taken(item) -> bool:
             kind = str(item.get("type", "")) if isinstance(item, dict) else ""
-            return item.get("call_id") in gone and kind.endswith(("_call", "_call_output"))
+            return item.get("call_id") in gone and kind.endswith(
+                ("_call", "_call_output")
+            )
 
         items = [item for item in cls._items(body) if not taken(item)]
         kept = []
         for k, item in enumerate(items):
             if isinstance(item, dict) and item.get("type") == "reasoning":
                 after = items[k + 1] if k + 1 < len(items) else None
-                kind = str(after.get("type", "message")) if isinstance(after, dict) else ""
+                kind = (
+                    str(after.get("type", "message")) if isinstance(after, dict) else ""
+                )
                 leads = kind.endswith("_call") or (
                     kind == "message" and after.get("role") == "assistant"
                 )

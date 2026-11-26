@@ -226,7 +226,9 @@ class LiteLLMTests(unittest.TestCase):
         compache.litellm.uninstall()
         self.assertIsNone(getattr(HTTPHandler().client, "_compache", None))
         self.assertIsNone(getattr(AsyncHTTPHandler().client, "_compache", None))
-        self.assertIsNone(getattr(self.litellm.module_level_client.client, "_compache", None))
+        self.assertIsNone(
+            getattr(self.litellm.module_level_client.client, "_compache", None)
+        )
         self.assertIsNone(self.litellm.client_session)
 
     def test_the_callback_records_without_keeping_any_text(self):

@@ -133,19 +133,27 @@ def _handlers(litellm) -> None:
             "compache: this LiteLLM keeps its HTTP clients elsewhere; only its OpenAI SDK calls carry compache"
         )
         return
-    for kind, asynchronous in ((found.HTTPHandler, False), (found.AsyncHTTPHandler, True)):
+    for kind, asynchronous in (
+        (found.HTTPHandler, False),
+        (found.AsyncHTTPHandler, True),
+    ):
         original = kind.create_client
         if getattr(original, "_compache", False):
             continue
 
-        def create_client(self, *args, _original=original, _asynchronous=asynchronous, **kwargs):
+        def create_client(
+            self, *args, _original=original, _asynchronous=asynchronous, **kwargs
+        ):
             return _carried(_original(self, *args, **kwargs), _asynchronous)
 
         create_client._compache = True
         create_client._compache_original = original
         kind.create_client = create_client
     # Clients that LiteLLM made before, and keeps for the whole process.
-    for name, asynchronous in (("module_level_client", False), ("module_level_aclient", True)):
+    for name, asynchronous in (
+        ("module_level_client", False),
+        ("module_level_aclient", True),
+    ):
         handler = vars(litellm).get(name)
         held = getattr(handler, "_client", None)
         if held is None or getattr(held, "_compache", None) is _installed["live"]:
@@ -153,8 +161,6 @@ def _handlers(litellm) -> None:
         # One that carries another `Live` is handed over: what it was made around goes on.
         inner = getattr(held, "_compache_inner", None)
         handler.client = _carried(held if inner is None else inner, asynchronous)
-
-
 
 
 def _plain(value: Any) -> Any:

@@ -409,7 +409,10 @@ class KeptConnectionTests(unittest.TestCase):
                 request = urllib.request.Request(
                     base + "/v1/chat/completions",
                     body,
-                    {"content-type": "application/json", "authorization": "Bearer sk-proj-x"},
+                    {
+                        "content-type": "application/json",
+                        "authorization": "Bearer sk-proj-x",
+                    },
                 )
                 with urllib.request.urlopen(request, timeout=10) as response:
                     return response.read()
@@ -418,7 +421,9 @@ class KeptConnectionTests(unittest.TestCase):
                 ask(stream=k % 2 == 1)
             self.assertEqual(len(opened), 1)
             # The provider closes it: the next call opens another and goes through.
-            for connection, _ in [c for found in proxy_module._POOL._kept.values() for c in found]:
+            for connection, _ in [
+                c for found in proxy_module._POOL._kept.values() for c in found
+            ]:
                 connection.sock.close()
             ask()
             self.assertEqual(len(opened), 2)

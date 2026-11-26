@@ -294,7 +294,9 @@ class ClaudeMarkTests(unittest.TestCase):
         self.addCleanup(stop)
         middleware = [*before, compache.langchain.middleware(live), *more]
         agent = create_agent(
-            ChatAnthropic(model="claude-sonnet-5-5", api_key="k", base_url=url, max_tokens=64),
+            ChatAnthropic(
+                model="claude-sonnet-5-5", api_key="k", base_url=url, max_tokens=64
+            ),
             [read],
             middleware=middleware,
             checkpointer=InMemorySaver(),
@@ -326,7 +328,9 @@ class ClaudeMarkTests(unittest.TestCase):
         bodies = self.run_agent(compache.Live(policy(rounds=2)))
         self.assertGreater(len(bodies), 5)
         for body in bodies:
-            self.assertEqual(body.get("cache_control"), {"type": "ephemeral", "ttl": "5m"})
+            self.assertEqual(
+                body.get("cache_control"), {"type": "ephemeral", "ttl": "5m"}
+            )
             self.assertLessEqual(len(self.marks(body)), 4)
 
     def test_a_policy_fitted_for_an_hour_asks_for_an_hour(self):
@@ -335,7 +339,9 @@ class ClaudeMarkTests(unittest.TestCase):
         made = compache.Policy({**made.artifact, "standard_spec": SPEC.to_dict()})
         self.assertEqual(made.cache_lifetime, 3600)
         for body in self.run_agent(compache.Live(made)):
-            self.assertEqual(body.get("cache_control"), {"type": "ephemeral", "ttl": "1h"})
+            self.assertEqual(
+                body.get("cache_control"), {"type": "ephemeral", "ttl": "1h"}
+            )
 
     def test_marks_of_the_agent_s_own_are_left_as_they_are(self):
         from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware

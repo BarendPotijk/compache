@@ -27,8 +27,9 @@ All of them run the same code on the JSON that goes over the wire, so a request 
 | Cache | The end of the conversation is marked cacheable where the provider has to be told and the application has not done so. Where the policy was fitted for one-hour entries, every mark of the request asks for them, yours included. Where it counts on five minutes, marks on the conversation ask for that. Keep-warm pings go out when the policy says one pays |
 | Record | Sizes, times and usage of every turn go to a folder, without any text. See [the guide](guide.md#without-past-traces) |
 | Notes | For a sampled share of turns the model is asked, once its reply is in, which earlier parts the reply needed. That request is compache's own, and the application never sees it |
-| A restart | A process that meets a conversation in the middle, as after a deploy, in a function or on the command line, takes the cache to have expired and trims at once. No state has to be kept. Behind a load balancer, keep a conversation on one worker, or each that takes it up trims it again |
-| Anything else | A request shape compache does not know passes through untouched. A request the provider refuses after it was changed, and a reply that cannot go on after something was fetched back, is asked again as the application wrote it. What is wrong then is passed on as the provider says it. Where it refuses one-hour entries, the request goes out under its default and everything after is planned on that |
+| Several processes | Workers behind a load balancer, functions, or a process just restarted: one that meets a conversation whose last turns went out elsewhere weighs how likely its users are back while the cache lives, from the fitted returns, as every process does there. So each reaches the requests the others sent, and nothing has to be shared between them |
+| Warming | A request that only warms the cache (`max_tokens` 0 or 1, or OpenAI's `prewarm`) goes out once, as the conversation would go out now, and counts no turn |
+| Anything else | A request shape compache does not know passes through untouched, as do requests signed over their body (AWS SigV4) and Anthropic's message threads, whose history the provider keeps. A request the provider refuses after it was changed, and a reply that cannot go on after something was fetched back, is asked again as the application wrote it. What is wrong then is passed on as the provider says it. Where it refuses one-hour entries, the request goes out under its default and everything after is planned on that |
 
 ### SDK clients
 
@@ -41,7 +42,7 @@ with compache.thread("conversation-17"):
     client.messages.create(model=MODEL, system=SYSTEM, messages=messages, max_tokens=1024)
 ```
 
-`create`, `parse`, `stream`, tools, structured output and async clients work as before: the client's own HTTP client is wrapped, nothing above it. `client.compache.stats` counts what was done.
+`create`, `parse`, `stream`, tools, structured output and async clients work as before: the client's own HTTP client is wrapped, nothing above it. `client.compache.stats` counts what was done. Clients that sign each request over its body, as `AnthropicAWS` and `AnthropicBedrockMantle` do, are passed on unchanged. Anthropic's beta tool runner keeps its conversation at the provider by default: give it `thread=False` for compache to have anything to trim.
 
 ### Python frameworks
 
@@ -71,7 +72,7 @@ agent = create_agent(model, tools, middleware=[compache.langchain.middleware(liv
 agent.invoke({"messages": [...]}, {"configurable": {"thread_id": "conversation-17"}})
 ```
 
-Any chat model. The graph keeps its messages whole, archived results reach the model as a notice, and the agent gets a `reopen` tool that runs like any other. The thread ID names the conversation. compache makes no request of its own here, so it sends no keep-warm pings and asks no notes.
+Any chat model. The graph keeps its messages whole, archived results reach the model as a notice, and the agent gets a `reopen` tool that runs like any other. The thread ID names the conversation. Claude's requests are marked for the prompt cache, with the lifetime the policy counts on, unless a middleware such as `AnthropicPromptCachingMiddleware` marks them already. compache makes no request of its own here, so it sends no keep-warm pings and asks no notes.
 
 With `ChatOpenAI` it can sit in the HTTP client instead, with pings and notes and fetching back unseen by the graph: `ChatOpenAI(..., **compache.langchain.clients(live))`, and `middleware()` without arguments to name the conversations.
 
@@ -79,12 +80,12 @@ With `ChatOpenAI` it can sit in the HTTP client instead, with pings and notes an
 
 ```python
 live = compache.Live("policy.json")
-compache.litellm.install(live)           # every OpenAI-compatible call LiteLLM makes from now on
+compache.litellm.install(live)           # every call LiteLLM makes for completion and acompletion
 with compache.thread("conversation-17"):
     litellm.completion(model="openrouter/anthropic/claude-haiku-5.5", messages=messages)
 ```
 
-Providers that LiteLLM calls over handlers of its own, such as Anthropic's Messages API, go through `compache proxy` with `api_base="http://127.0.0.1:8787"`. A LiteLLM proxy takes compache in front: `compache proxy --policy policy.json --upstream http://localhost:4000`, whatever providers it routes to.
+That is every provider LiteLLM reaches in Python: through the OpenAI SDK or through HTTP clients of its own. Its native Messages passthrough (`litellm.anthropic.messages`) and requests it signs, as for Bedrock, pass unchanged: run those through `compache proxy` with `api_base="http://127.0.0.1:8787"`. `compache.litellm.uninstall()` takes compache out again. A LiteLLM proxy takes compache in front: `compache proxy --policy policy.json --upstream http://localhost:4000`, whatever providers it routes to.
 
 To learn first, record in a LiteLLM proxy you already run, whatever the provider:
 
@@ -154,15 +155,17 @@ In order: `compache.thread(...)` around the call, the header `x-compache-thread`
 
 | | Checked against |
 |---|---|
-| The four APIs through the OpenAI, Anthropic and Google GenAI SDKs, sync and async, whole and streamed, a LangChain agent, and LiteLLM | The SDKs themselves, on every test run, against a local stand-in for the provider |
+| The four APIs through the OpenAI, Anthropic and Google GenAI SDKs, sync and async, whole and streamed, Gemini's async calls with aiohttp installed, `AnthropicAWS` signing its requests, a cancelled call, a LangChain agent on Claude, and LiteLLM | The SDKs themselves, on every test run, against a local stand-in for the provider |
 | The proxy | Standard-library callers and both SDKs, against the same stand-in |
 | OpenAI Agents SDK 0.26, Pydantic AI 2.74, LlamaIndex 0.14, Agno 3.2, AutoGen 0.7, Strands 1.66, Haystack 3.5, Langfuse 5.2, Instructor 1.17 | A conversation of four turns with a search tool on 2026-11-25, against the stand-in: earlier results were archived from the third turn on. Instructor's has no tool results, so it was recorded only |
 | Claude Agent SDK 0.2, Google ADK 2.15, Microsoft Agent Framework 1.26, Semantic Kernel 1.36, CrewAI 1.15 | An agent in a loop of searches on 2026-11-25, against the stand-in: older results were archived |
 | Vercel AI SDK 7.0 | Anthropic, Chat Completions and Responses through the proxy, whole and streamed, with the proxy restarted in the middle |
-| LiteLLM 1.111 | In process on every test run. Its proxy with the callback, and its Anthropic path through `compache proxy`, by hand |
+| LiteLLM 1.111 | In process on every test run, through OpenAI, OpenRouter, Anthropic and vLLM. On 2026-11-26 every one of 26 providers against a stand-in: 24 pass through compache, and Ollama's and Cohere's own APIs, whose formats compache does not read, pass unchanged. Its proxy with the callback, by hand |
 | Hermes 0.23.4 | The released agent with a local model. The engine, installed with Hermes' own installer: a conversation trimmed once its cache had expired, and a passage fetched back. The proxy, with the settings above |
 | Live providers | Chat Completions whole and streamed, Responses and Messages through the SDKs, the proxy and a LangChain agent, on Claude Haiku 5.5, GPT-6 Luna and Gemini 3.5 Flash Lite through OpenRouter. See [the live runs](../benchmarks/live/README.md) |
 | Gemini's own API | The stand-in only: OpenRouter does not serve it |
+| GPT-6.2 Sol | Cleared tool results left out whole, on 2026-11-26 through OpenRouter: the API's own report of dropped reasoning showed none, against 63 to 87 a run with notices in place, three runs each |
+| Several processes | One, four at random, and a fresh one every turn, simulated on 14-turn chats at Claude Sonnet 5.5 list prices: with a policy fitted on such users the three cost the same |
 | Claude Code 2.1, Codex 0.172 | Started with `compache wrap`, on Claude Haiku 5.5 and GPT-6 Luna: [sessions of real issues](../benchmarks/agents/README.md). Claude Code and the Anthropic SDK on Vertex AI and Foundry, against the stand-in |
 | OpenClaw 2026.11.10, Aider 0.86 | The released harness through the proxy with a local model, with the settings above. OpenClaw names its sessions itself |
 | LangChain 1.5 | An agent on a scripted chat model with the middleware, on every test run: results trimmed, one fetched back, sync and async. Live on Claude Haiku 5.5 with reasoning, in both forms LangChain keeps it, and on GPT-6 Luna |

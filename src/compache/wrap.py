@@ -481,7 +481,9 @@ def _forked() -> None:
         try:
             start_pings(live)
         except Exception:
-            logger.warning("compache: keep-warm pings did not start again", exc_info=True)
+            logger.warning(
+                "compache: keep-warm pings did not start again", exc_info=True
+            )
 
 
 if hasattr(os, "register_at_fork"):

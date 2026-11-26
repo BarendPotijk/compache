@@ -1,6 +1,6 @@
 [project]
 name = "compache"
-version = "0.15.1"
+version = "0.15.2"
 description = "Prompt caching and context compaction for chatbots and coding agents, learned from your own traffic."
 readme = "README.md"
 license = "Apache-2.0"
