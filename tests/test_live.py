@@ -1793,3 +1793,65 @@ class SweepTests(unittest.TestCase):
         self.assertIn("c5", named)
         self.assertNotIn("c0", named)
         self.assertLessEqual(sum(c.size for c in live.conversations()), 30_000 + 12_000)
+
+
+class SharedTests(unittest.TestCase):
+    """Workers behind a load balancer, or functions, take turns of one conversation."""
+
+    @staticmethod
+    def quick(gap=30.0, chats=10, turns=10):
+        """A policy fitted on users who come back within the cache's lifetime."""
+        threads, labels = [], []
+        for c in range(chats):
+            at, runs = 1_700_000_000.0, []
+            for t in range(turns):
+                runs.append(
+                    {
+                        "started_at": at,
+                        "ended_at": at + 6,
+                        "input": f"Chat {c}, question {t}?",
+                        "retrievals": [passage(t)],
+                        "output": "It says the supplier carries the cost.",
+                    }
+                )
+                labels.append({"thread_id": f"t{c}", "run": t + 1, "needs": []})
+                at += 6 + gap
+            threads.append({"thread_id": f"t{c}", "runs": runs})
+        return compache.fit(
+            threads, labels, model="claude-sonnet-5-5", lifetimes=(), ping_counts=(0,)
+        )
+
+    def play(self, policy, workers, gap=30.0, turns=10):
+        clock = Clock(1_970_000_000.0)
+        model = FakeModel(looping, clock=clock)
+        lives = [Live(policy, clock=clock) for _ in range(workers)]
+        apps = [ChatApp(live, model, thread="shared", name="claude-sonnet-5-5") for live in lives]
+        messages = []
+        for n in range(1, turns + 1):
+            app = apps[(n - 1) % workers]
+            app.messages = messages
+            app.turn(f"Question {n}?", passage(n))
+            messages = app.messages
+            clock.at += gap
+        return sum(
+            reply["usage"]["prompt_tokens_details"]["cached_tokens"]
+            for app in apps
+            for reply in app.seen
+        ), model
+
+    def test_workers_that_take_turns_read_what_the_others_left(self):
+        policy = self.quick()
+        alone, _ = self.play(policy, 1)
+        shared, model = self.play(policy, 3)
+        # Each worker reaches the requests the others sent, so the cache is read as with one.
+        self.assertGreaterEqual(shared, 0.98 * alone)
+
+    def test_how_likely_the_cache_is_alive_follows_the_fitted_returns(self):
+        from compache.optimizer.distribution import alive_chance
+
+        for policy, low, high in ((self.quick(), 0.95, 1.0), (fitted(), 0.0, 0.05)):
+            policy.session("x")
+            compiled = policy._compiled
+            found = alive_chance(compiled.forecast, policy.spec, 3)
+            self.assertGreaterEqual(found, low)
+            self.assertLessEqual(found, high)

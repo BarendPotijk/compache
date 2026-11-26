@@ -469,6 +469,13 @@ class _Conversation:
     sent_whole: float | None = None
     # How much text its latest request held, in bytes.
     size: int = 0
+    # Whether turns of it went out from other processes, as workers behind a load balancer or
+    # functions send them, since this process last saw it. When its last request went out is then
+    # not known here: its turn, and the earlier ones walked again, are decided by what is likely,
+    # as every process decides where it does not know, so that each reaches what the others sent.
+    shared: bool = False
+    # How many turns of a conversation of this name this process had seen before this one was made.
+    seen: int = 0
 
 
 @dataclass
@@ -1010,6 +1017,8 @@ class Live:
                 found = self._branch(other, chains[-1], turns, scan, thread)
             if found is None and thread:
                 found = self._resumed(chains, scan)
+            if found is None and thread and done:
+                found = self._continued(thread, chains, turns)
             if found is None:
                 name = record = thread or "c-" + uuid.uuid4().hex[:16]
                 if thread:
@@ -1020,6 +1029,8 @@ class Live:
                         record = thread if done else f"{thread}~{count}"
                 found = _Conversation(name, chains[0], record, thread)
                 earlier = self._latest.get(thread) if thread else None
+                if earlier is not None:
+                    found.seen = earlier.turns
                 if earlier is not None and not earlier.reopens:
                     found.sent_whole = earlier.at
                 self._start(found, name, scan)
@@ -1232,6 +1243,19 @@ class Live:
                 finally:
                     other.lock.release()
         return None
+
+    def _continued(self, thread: str, chains: list[str], turns) -> _Conversation | None:
+        """The conversation of this name that a request goes on with, after turns that went out elsewhere.
+
+        Other processes, as workers behind a load balancer, answered those. It keeps its name,
+        so that what it archives is named as they name it, and the cache they left is read.
+        """
+        found = self._latest.get(thread)
+        if found is None or found.pending is not None or found.agentic:
+            return None
+        if not 0 < found.turns < len(turns) - 1 or chains[found.turns] != found.chain:
+            return None
+        return found
 
     @staticmethod
     def _left_off(other: _Conversation) -> _Conversation:
@@ -2059,18 +2083,30 @@ class Live:
     def _walk(self, conversation, chains, turns, now, scan) -> None:
         """Walk the policy through a conversation that is met in the middle, up to its last question."""
         done = len(turns) - 1
+        # More turns than this process saw: they went out elsewhere.
+        elsewhere = done > max(conversation.turns, conversation.seen)
         conversation.pending, conversation.turns, conversation.stale = None, 0, False
         conversation.inserts, conversation.went = [], []
         conversation.fetched, conversation.wanted = set(), _Wanted()
         conversation.base = conversation.here = conversation.quotes = None
         policy = self._start(conversation, conversation.thread_id, scan)
         if policy is not None:
-            # When it was said is not known, and a process that meets a conversation in the middle
-            # has usually just been started: the provider's cache is taken to have expired. It has
-            # not where this process sent the conversation itself, before a turn was asked again.
-            before = now - policy.spec.cache_ttl_seconds - 60
-            if conversation.sent_whole is not None:
-                before = max(before, min(conversation.sent_whole, now - 1e-3))
+            # When it was said is not known. Taken as long past, the provider's cache has expired,
+            # and the next question weighs how likely its users are back while it lives: a process
+            # that meets it may have just started, or be one of several that take turns. Where this
+            # process sent the conversation itself, before a turn was asked again, that is known.
+            # An agent in the middle of its tools made its last call moments ago.
+            ttl = policy.spec.cache_ttl_seconds
+            before = now - ttl - 60
+            sent = conversation.sent_whole
+            if sent is not None and now - sent < ttl:
+                # It went out from here within the lifetime: whatever else went out since, it is cached.
+                before = min(sent, now - 1e-3)
+            elif policy.agentic and turns[-1].retrievals and turns[-1].retrievals[-1].answers:
+                before = now - 1.0
+            if elsewhere:
+                # The earlier turns are decided again as they were decided there.
+                conversation.shared = True
             for k, segment in enumerate(turns[:done]):
                 at = before - (done - k) * 1e-3
                 # Behind the same instructions and tools as now, or they would look changed.
@@ -2093,16 +2129,19 @@ class Live:
         session, found = conversation.session, segment.retrievals
         if segment.inputs:
             self._thought(conversation, scan, segment.inputs[0].message)
-        ahead = len(found)
-        if conversation.agentic:
-            # What came before the question is there at once. What its tools returned came round by round.
-            ahead = next((i for i, part in enumerate(found) if part.answers), ahead)
+        # What came before the question is there at once. What its tools returned came later: round
+        # by round for an agent, at once for a chat, whose turn was decided before any of it came.
+        ahead = next((i for i, part in enumerate(found) if part.answers), len(found))
+        # A chat that other processes go on with too is decided by what is likely, never by what
+        # only this process saw: each of them then reaches the same requests.
+        uncertain = conversation.shared and not conversation.agentic
         turn = session.prepare(
             segment.question,
             [part.taken for part in found[:ahead]],
             at=at,
             system_prompt=scan.system,
             tools=scan.tools,
+            uncertain=uncertain,
         )
         self._went(conversation, turn)
         return self._extended(conversation, turn, found[ahead:], at, scan)
@@ -2138,6 +2177,8 @@ class Live:
         )
         if session is not None:
             pending.turn = self._shown(conversation, current, now, scan)
+        # From its answer on, this process knows what it sent.
+        conversation.shared = False
         self._heard(conversation, number, current.question, found)
         return pending
 
