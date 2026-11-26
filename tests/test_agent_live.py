@@ -2173,3 +2173,76 @@ class ThreadTests(unittest.TestCase):
             self.assertEqual(len(seen), 1)
             self.assertIs(seen[0], body)
         self.assertEqual(live.stats["passed_through"], 2)
+
+
+class WarmTests(unittest.TestCase):
+    """Requests that only warm the cache, as Anthropic documents and agents send between prompts."""
+
+    def play(self, warm):
+        clock = Clock(1_900_000_000.0)
+        live = compache.Live(policy(rounds=2, ratio=0.0), clock=clock)
+        sent, messages = [], []
+        tools = [{"name": "read", "input_schema": {"type": "object"}}]
+
+        def send(payload):
+            sent.append(payload)
+            limit = payload.get("max_tokens")
+            if limit is not None and limit <= 1:
+                content, stop = [], "max_tokens"
+            elif state["k"] < 5:
+                state["n"] += 1
+                content = [{"type": "tool_use", "id": f"toolu_{state['n']:020d}ab", "name": "read", "input": {}}]
+                stop = "tool_use"
+            else:
+                content, stop = [{"type": "text", "text": "Done."}], "end_turn"
+            return live_module.Result(
+                200,
+                json={
+                    "id": f"msg_{len(sent)}",
+                    "type": "message",
+                    "role": "assistant",
+                    "model": "claude-sonnet-5-5",
+                    "content": content,
+                    "stop_reason": stop,
+                    "usage": {"input_tokens": 100, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0, "output_tokens": 0 if not content else 5},
+                },
+            )
+
+        state = {"k": 0, "n": 0}
+        base = {"model": "claude-sonnet-5-5", "max_tokens": 64, "system": "You read files.", "tools": tools}
+        mark = 0
+        for prompt in range(3):
+            messages.append({"role": "user", "content": f"Prompt {prompt}"})
+            for k in range(6):
+                state["k"] = k
+                body = {**base, "messages": json.loads(json.dumps(messages))}
+                reply = live.exchange("/v1/messages", body, send, thread="warmed").json
+                messages.append({"role": "assistant", "content": reply["content"]})
+                for block in reply["content"]:
+                    if block["type"] == "tool_use":
+                        messages.append(
+                            {"role": "user", "content": [{"type": "tool_result", "tool_use_id": block["id"], "content": result(len(messages))}]}
+                        )
+                clock.at += 5
+            clock.at += 200
+            if warm and prompt < 2:
+                for limit in (0, 1):
+                    mark = len(sent)
+                    again = {**base, "max_tokens": limit, "messages": json.loads(json.dumps(messages[:-1]))}
+                    live.exchange("/v1/messages", again, send, thread="warmed")
+                    # One request each, never asked again as written.
+                    self.assertEqual(len(sent), mark + 1)
+                    clock.at += 30
+        return live, [b for b in sent if b.get("max_tokens", 64) > 1]
+
+    def test_a_warm_request_goes_out_once_and_leaves_no_trace(self):
+        plain, unwarmed = self.play(warm=False)
+        live, warmed = self.play(warm=True)
+        self.assertEqual(live.stats["warmed"], 4)
+        self.assertEqual(live.stats["turns"], plain.stats["turns"])
+        self.assertEqual(live.stats["fell_back"], 0)
+        # What the application's own requests became is the same with and without them.
+        self.assertEqual(
+            [json.dumps(b, sort_keys=True) for b in warmed],
+            [json.dumps(b, sort_keys=True) for b in unwarmed],
+        )

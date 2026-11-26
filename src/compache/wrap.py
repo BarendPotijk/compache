@@ -229,7 +229,10 @@ def http_client(live: Live, *, inner=None, pings: bool = True, **options):
     if isinstance(inner, httpx.Client):
         options.setdefault("timeout", inner.timeout)
         options.setdefault("follow_redirects", inner.follow_redirects)
-    return httpx.Client(transport=Transport(), **options)
+    made = httpx.Client(transport=Transport(), **options)
+    # So that nothing puts compache in its path twice, and another `Live` can take over.
+    made._compache, made._compache_inner = live, inner
+    return made
 
 
 def _let_go(events, close) -> None:
@@ -423,7 +426,9 @@ def async_http_client(live: Live, *, inner=None, pings: bool = True, **options):
     if isinstance(inner, httpx.AsyncClient):
         options.setdefault("timeout", inner.timeout)
         options.setdefault("follow_redirects", inner.follow_redirects)
-    return httpx.AsyncClient(transport=Transport(), **options)
+    made = httpx.AsyncClient(transport=Transport(), **options)
+    made._compache, made._compache_inner = live, inner
+    return made
 
 
 class Pinger:

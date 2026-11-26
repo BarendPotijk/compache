@@ -2,10 +2,10 @@
 
 Two ways in, alone or together.
 
-`install` puts a `Live` in the path of LiteLLM's OpenAI-compatible calls (OpenAI,
-OpenRouter, Azure and every other provider LiteLLM reaches that way), sync and async,
-whole and streamed. The policy is applied, notes are asked and pings go out as with
-`compache.wrap`:
+`install` puts a `Live` in the path of the calls LiteLLM makes for `completion` and
+`acompletion`, whatever the provider: those it sends through the OpenAI SDK and those it
+sends through HTTP clients of its own, sync and async, whole and streamed. The policy is
+applied, notes are asked and pings go out as with `compache.wrap`:
 
     import compache, litellm
     live = compache.Live("policy.json", record="compache-record", sample=0.1)
@@ -22,8 +22,9 @@ that want to learn a policy first. It reads the conversation's name from `metada
 In a LiteLLM proxy, name `compache.litellm.callback` under `litellm_settings.callbacks`
 and set COMPACHE_RECORD to a folder (COMPACHE_SAMPLE and COMPACHE_NOTES are optional).
 
-A provider that LiteLLM calls over its own HTTP handlers, such as Anthropic's Messages
-API, goes through `compache proxy` with `api_base="http://127.0.0.1:8787"`.
+Calls that LiteLLM serves natively, outside Python, such as its Anthropic Messages
+passthrough (`litellm.anthropic.messages`), and requests it signs, as for Bedrock, pass
+unchanged. Run those through `compache proxy` with `api_base="http://127.0.0.1:8787"`.
 """
 
 from __future__ import annotations
@@ -37,7 +38,7 @@ from typing import Any
 from .live import Live, Result
 from .wrap import async_http_client, http_client, per_loop_transport
 
-__all__ = ["Callback", "install"]
+__all__ = ["Callback", "install", "uninstall"]
 
 logger = logging.getLogger(__name__)
 
@@ -45,12 +46,18 @@ _CHAT_CALLS = ("completion", "acompletion", "", None)
 _numbers = itertools.count(1)
 
 
+# The `Live` that LiteLLM's own HTTP clients carry, once `install` has put it there.
+_installed: dict = {}
+
+
 def install(live: Live, *, pings: bool = True) -> Live:
-    """Put `live` in the path of every OpenAI-compatible call that LiteLLM makes from now on.
+    """Put `live` in the path of every model call that LiteLLM makes from now on.
 
     It sets `litellm.client_session` and `litellm.aclient_session`, which LiteLLM gives
-    to the OpenAI SDK, and forgets the clients it made before. `pings` lets a background
-    thread send the policy's keep-warm pings. Returns `live`.
+    to the OpenAI SDK, puts `live` into the HTTP clients LiteLLM makes for every other
+    provider, and forgets the clients it made before. `pings` lets a background thread
+    send the policy's keep-warm pings. Installing again hands over to the new `live`.
+    Returns `live`.
     """
     import httpx
     import litellm
@@ -63,12 +70,91 @@ def install(live: Live, *, pings: bool = True) -> Live:
     litellm.aclient_session = async_http_client(
         live, inner=per_loop_transport(httpx), pings=pings, **options
     )
+    _installed.update(live=live, pings=pings)
+    _handlers(litellm)
     cache = getattr(litellm, "in_memory_llm_clients_cache", None)
     for name in ("flush_cache", "clear"):
         if callable(getattr(cache, name, None)):
             getattr(cache, name)()
             break
     return live
+
+
+def uninstall() -> None:
+    """Take compache out of LiteLLM's path again: its HTTP clients are made as LiteLLM makes them."""
+    import litellm
+
+    try:
+        from litellm.llms.custom_httpx import http_handler as found
+    except ImportError:
+        found = None
+    for kind in (found.HTTPHandler, found.AsyncHTTPHandler) if found else ():
+        original = getattr(kind.create_client, "_compache_original", None)
+        if original is not None:
+            kind.create_client = original
+    for name in ("module_level_client", "module_level_aclient"):
+        handler = vars(litellm).get(name)
+        held = getattr(handler, "_client", None)
+        if getattr(held, "_compache", None) is not None:
+            handler.client = held._compache_inner
+    for name in ("client_session", "aclient_session"):
+        if getattr(getattr(litellm, name, None), "_compache", None) is not None:
+            setattr(litellm, name, None)
+    _installed.clear()
+    cache = getattr(litellm, "in_memory_llm_clients_cache", None)
+    for name in ("flush_cache", "clear"):
+        if callable(getattr(cache, name, None)):
+            getattr(cache, name)()
+            break
+
+
+def _carried(client, asynchronous: bool):
+    """One of LiteLLM's HTTP clients, with the installed `Live` in its path.
+
+    Its headers and cookie jar stay its own: LiteLLM sets the first and keeps the second empty.
+    """
+    live, pings = _installed["live"], _installed["pings"]
+    made = async_http_client if asynchronous else http_client
+    return made(
+        live, inner=client, pings=pings, headers=client.headers, cookies=client.cookies
+    )
+
+
+def _handlers(litellm) -> None:
+    """Every HTTP client that LiteLLM's own handlers make carries the installed `Live`.
+
+    Most providers go that way: OpenRouter, Anthropic, Gemini, Groq, Mistral, vLLM and
+    others that LiteLLM does not send through the OpenAI SDK.
+    """
+    try:
+        from litellm.llms.custom_httpx import http_handler as found
+    except ImportError:
+        logger.warning(
+            "compache: this LiteLLM keeps its HTTP clients elsewhere; only its OpenAI SDK calls carry compache"
+        )
+        return
+    for kind, asynchronous in ((found.HTTPHandler, False), (found.AsyncHTTPHandler, True)):
+        original = kind.create_client
+        if getattr(original, "_compache", False):
+            continue
+
+        def create_client(self, *args, _original=original, _asynchronous=asynchronous, **kwargs):
+            return _carried(_original(self, *args, **kwargs), _asynchronous)
+
+        create_client._compache = True
+        create_client._compache_original = original
+        kind.create_client = create_client
+    # Clients that LiteLLM made before, and keeps for the whole process.
+    for name, asynchronous in (("module_level_client", False), ("module_level_aclient", True)):
+        handler = vars(litellm).get(name)
+        held = getattr(handler, "_client", None)
+        if held is None or getattr(held, "_compache", None) is _installed["live"]:
+            continue
+        # One that carries another `Live` is handed over: what it was made around goes on.
+        inner = getattr(held, "_compache_inner", None)
+        handler.client = _carried(held if inner is None else inner, asynchronous)
+
+
 
 
 def _plain(value: Any) -> Any:

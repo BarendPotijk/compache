@@ -492,6 +492,78 @@ class _Call:
     kept: Any = None
 
 
+# Where a request says how much it may answer, and what says that it only warms the cache.
+_LIMITS = ("max_tokens", "max_completion_tokens", "max_output_tokens")
+
+
+def _warming(body: Any) -> bool:
+    """Whether a request only warms the cache: it asks for no answer, or one token at most.
+
+    Anthropic documents `max_tokens: 0` for that, OpenAI `prompt_cache_options.prewarm`,
+    and agents that keep their own cache warm re-send their last request with a limit of one.
+    """
+    if not isinstance(body, dict):
+        return False
+    options = body.get("prompt_cache_options")
+    if isinstance(options, dict) and options.get("prewarm"):
+        return True
+    config = body.get("generationConfig") or body.get("generation_config")
+    found = [body.get(name) for name in _LIMITS]
+    if isinstance(config, dict):
+        found += [config.get("maxOutputTokens"), config.get("max_output_tokens")]
+    return any(
+        isinstance(limit, int) and not isinstance(limit, bool) and limit <= 1
+        for limit in found
+    )
+
+
+class _Kept:
+    """How a conversation stood, to put it back after a request that must leave no trace."""
+
+    def __init__(self, conversation):
+        self.conversation = conversation
+        self.fields = {
+            name: getattr(conversation, name)
+            for name in conversation.__dataclass_fields__
+            if name != "lock"
+        }
+        self.fields.update(
+            session=conversation.session.copy() if conversation.session else None,
+            inserts=list(conversation.inserts),
+            fetched=set(conversation.fetched),
+            wanted=conversation.wanted.copy(),
+            unbound=set(conversation.unbound),
+            went=list(conversation.went),
+        )
+        pending = conversation.pending
+        self.pending = None
+        if pending is not None:
+            self.pending = (
+                pending,
+                {
+                    **vars(pending),
+                    "seen": list(pending.seen),
+                    "steps": list(pending.steps),
+                    "reopened": list(pending.reopened),
+                },
+            )
+
+    def restore(self, live) -> None:
+        conversation = self.conversation
+        now, before = conversation.chain, self.fields["chain"]
+        for name, value in self.fields.items():
+            setattr(conversation, name, value)
+        if self.pending is not None:
+            pending, fields = self.pending
+            for name, value in fields.items():
+                setattr(pending, name, value)
+            conversation.pending = pending
+        if now != before:
+            # It was indexed where it went on to: back where it stood.
+            conversation.chain = now
+            live._index(conversation, before)
+
+
 class _Unsent(Exception):
     """A request of the application's own could not be sent: what is wrong is for it to hear."""
 
@@ -850,6 +922,7 @@ class Live:
                 "policy_refused",
                 "fell_back",
                 "stood_down",
+                "warmed",
             ),
             0,
         )
@@ -1497,6 +1570,11 @@ class Live:
             # A shape this does not know: the application's request goes out as it is.
             self.stats["passed_through"] += 1
             return send(body)
+        if _warming(body) and at is None:
+            try:
+                return self._only_warm(conversation, chains, dialect, body, scan, turns, send)
+            finally:
+                conversation.lock.release()
         try:
             conversation.when = at[0] if at is not None else None
             try:
@@ -1520,6 +1598,36 @@ class Live:
         finally:
             conversation.when = None
             conversation.lock.release()
+
+    def _only_warm(self, conversation, chains, dialect, body, scan, turns, send) -> Result:
+        """A request that only warms the cache, as an agent sends before it expires.
+
+        It goes out once, as the conversation would go out now, so that it warms what the
+        next request will read. Nothing is asked again, no turn is counted, and the
+        conversation is left as it stood.
+        """
+        kept = _Kept(conversation)
+        try:
+            call = self._prepare(
+                conversation, chains, dialect, body, scan, turns, send, asks=False
+            )
+            outgoing = call.marked
+        except Exception:
+            logger.warning("compache: a request was passed on unchanged", exc_info=True)
+            outgoing = body
+        finally:
+            kept.restore(self)
+        self.stats["warmed"] += 1
+        result = send(outgoing)
+        if result.status in _REFUSED and outgoing is not body:
+            self.stats["retried"] += 1
+            result = send(body)
+        try:
+            if result.json is not None:
+                self._ledger(conversation, "ping", dialect.reply(result.json))
+        except Exception:
+            logger.warning("compache: a reply was not recorded", exc_info=True)
+        return result
 
     def _turns(self, scan) -> list[_Segment]:
         """The turns of a request. What a harness says beside its results is a remark only to an agent."""

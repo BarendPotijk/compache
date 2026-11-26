@@ -15,7 +15,7 @@ from compache.live import Live
 from compache.record import load, load_calls
 from compache.wrap import thread
 from fakes import NOTE_ASKED, FakeModel, noticed, serve
-from test_live import SEARCH, SYSTEM, Clock, fitted, looping, passage
+from test_live import SEARCH, SYSTEM, Clock, claude_looping, fitted, looping, passage
 
 HAS = importlib.util.find_spec("litellm") is not None
 
@@ -39,6 +39,7 @@ class LiteLLMTests(unittest.TestCase):
         )
 
         def restore():
+            compache.litellm.uninstall()
             litellm.client_session, litellm.aclient_session, callbacks = (
                 self.saved[0],
                 self.saved[1],
@@ -75,6 +76,7 @@ class LiteLLMTests(unittest.TestCase):
         asynchronous=False,
         stream=False,
         until=None,
+        model="openai/claude-sonnet-5-5",
         **options,
     ):
         """A conversation whose model searches and then answers: the tool loop LiteLLM users write.
@@ -85,7 +87,7 @@ class LiteLLMTests(unittest.TestCase):
 
         def ask():
             return dict(
-                model="openai/claude-sonnet-5-5",
+                model=model,
                 api_base=url,
                 api_key="key",
                 messages=list(messages),
@@ -182,6 +184,50 @@ class LiteLLMTests(unittest.TestCase):
                 self.assertEqual([len(t["runs"]) for t in threads], [4])
                 # The conversation went under its own name, hashed.
                 self.assertEqual(threads[0]["thread_id"], self.live.recorder.name(name))
+
+    def test_install_reaches_the_providers_litellm_calls_itself(self):
+        """Most providers LiteLLM calls through HTTP clients of its own, not the OpenAI SDK."""
+        for model, path, script in (
+            ("openrouter/anthropic/claude-sonnet-5-5", "/api/v1", looping),
+            ("anthropic/claude-sonnet-5-5", "", claude_looping),
+            ("hosted_vllm/claude-sonnet-5-5", "/v1", looping),
+        ):
+            for asynchronous in (False, True):
+                with self.subTest(model=model, asynchronous=asynchronous):
+                    url = self.provider(script)[: -len("/v1")] + path
+                    self.live = Live(self.policy, clock=self.clock)
+                    compache.litellm.install(self.live)
+                    name = f"{model}-{asynchronous}"
+                    messages = self.chat(
+                        url, name, 4, asynchronous=asynchronous, model=model
+                    )
+                    said = [
+                        m["content"]
+                        for m in messages
+                        if m["role"] == "assistant" and not m.get("tool_calls")
+                    ]
+                    self.assertEqual(said, [f"Answer {n}." for n in range(1, 5)])
+                    sent = [json.dumps(b) for b in self.model.bodies]
+                    self.assertGreaterEqual(sum(map(noticed, sent)), 3)
+                    self.assertFalse(noticed(messages))
+                    self.assertEqual(self.live.stats["turns"], 4)
+
+    def test_installing_again_hands_over_wraps_once_and_comes_out(self):
+        from litellm.llms.custom_httpx.http_handler import AsyncHTTPHandler, HTTPHandler
+
+        first, second = Live(self.policy), Live(self.policy)
+        compache.litellm.install(first)
+        compache.litellm.install(second)
+        made = HTTPHandler().client
+        self.assertIs(made._compache, second)
+        self.assertIsNone(getattr(made._compache_inner, "_compache", None))
+        kept = self.litellm.module_level_client.client
+        self.assertIs(kept._compache, second)
+        compache.litellm.uninstall()
+        self.assertIsNone(getattr(HTTPHandler().client, "_compache", None))
+        self.assertIsNone(getattr(AsyncHTTPHandler().client, "_compache", None))
+        self.assertIsNone(getattr(self.litellm.module_level_client.client, "_compache", None))
+        self.assertIsNone(self.litellm.client_session)
 
     def test_the_callback_records_without_keeping_any_text(self):
         for asynchronous, stream in (
