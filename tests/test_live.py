@@ -1758,3 +1758,38 @@ class NoticeTests(unittest.TestCase):
                     f'[You {seen} this in full. Cleared since: reopen("ctx:'
                 )
             )
+
+
+class SweepTests(unittest.TestCase):
+    """What is kept of conversations stays bounded, in time and in size."""
+
+    def conversation(self, live, name, clock, size=2000):
+        messages = [{"role": "user", "content": f"{name}: " + "word " * size}]
+        live.exchange(
+            "/v1/chat/completions",
+            {"model": "claude-sonnet-5-5", "messages": messages},
+            FakeModel().send(),
+            thread=name,
+        )
+
+    def test_a_conversation_nobody_goes_on_with_is_let_go(self):
+        clock = Clock(1_950_000_000.0)
+        live = Live(fitted(), clock=clock)
+        self.conversation(live, "old", clock)
+        clock.at += 3 * 3600
+        self.conversation(live, "new", clock)
+        named = {c.named for c in live.conversations()}
+        self.assertEqual(named, {"new"})
+        self.assertNotIn("old", live._latest)
+
+    def test_the_oldest_go_first_where_they_hold_too_much(self):
+        clock = Clock(1_960_000_000.0)
+        live = Live(fitted(), clock=clock, max_bytes=30_000)
+        for k in range(6):
+            self.conversation(live, f"c{k}", clock, size=2000)
+            clock.at += 61
+        named = sorted(c.named for c in live.conversations())
+        self.assertLess(len(named), 6)
+        self.assertIn("c5", named)
+        self.assertNotIn("c0", named)
+        self.assertLessEqual(sum(c.size for c in live.conversations()), 30_000 + 12_000)

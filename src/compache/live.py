@@ -182,6 +182,12 @@ _NOTE_TOKENS = 2048
 _GONE = "…"
 # What stands for the text of a result that holds pictures and says nothing.
 _WORDLESS = "(no text)"
+# After how long without a request a conversation is forgotten: twice the longest cache lifetime.
+# Met again, it is met in the middle, and its cache has expired by then.
+_IDLE = 2 * 3600.0
+# How much text the conversations kept here may hold together, in bytes, and how often that is looked at.
+_MOST_BYTES = 256_000_000
+_SWEEP_EVERY = 60.0
 
 
 @dataclass
@@ -461,6 +467,8 @@ class _Conversation:
     when: float | None = None
     # When this process last sent the conversation this one takes up again, whole.
     sent_whole: float | None = None
+    # How much text its latest request held, in bytes.
+    size: int = 0
 
 
 @dataclass
@@ -854,6 +862,7 @@ class Live:
         salt: str = "",
         clock: Callable[[], float] = time.time,
         max_conversations: int = 4096,
+        max_bytes: int = _MOST_BYTES,
     ):
         if learn is not None and not (policy is None and record is None):
             raise ValueError(
@@ -887,6 +896,8 @@ class Live:
                 "what it cited. Give `sample` the rate at which the policy's record was made."
             )
         self._limit = max_conversations
+        self._most_bytes = max_bytes
+        self._swept = float("-inf")
         self._lock = threading.RLock()
         # Those that stand at the same point, the newest last.
         self._by_chain: OrderedDict[str, list[_Conversation]] = OrderedDict()
@@ -1251,6 +1262,45 @@ class Live:
                 found.update((id(c), c) for c in some)
         return list(found.values())
 
+    def _sweep(self) -> None:
+        """Forget conversations nobody has gone on with for long, and the oldest where they hold too much.
+
+        One that comes back after that is met in the middle, as after a restart. Its cache
+        has expired by then.
+        """
+        now = self.clock()
+        if now - self._swept < _SWEEP_EVERY:
+            return
+        self._swept = now
+        with self._lock:
+            known = self.conversations()
+            free = []
+            for conversation in known:
+                pending = conversation.pending
+                busy = pending is not None and pending.in_flight
+                if not busy and id(conversation) not in self._warm:
+                    free.append(conversation)
+            gone = {id(c) for c in free if c.at < now - _IDLE}
+            held = sum(c.size for c in known if id(c) not in gone)
+            for conversation in sorted(free, key=lambda c: c.at):
+                if held <= self._most_bytes:
+                    break
+                if id(conversation) not in gone:
+                    gone.add(id(conversation))
+                    held -= conversation.size
+            if not gone:
+                return
+            for index in (self._by_chain, self._by_call):
+                for key in list(index):
+                    kept = [c for c in index[key] if id(c) not in gone]
+                    if kept:
+                        index[key] = kept
+                    else:
+                        del index[key]
+            for index in (self._by_base, self._latest):
+                for key in [k for k, c in index.items() if id(c) in gone]:
+                    del index[key]
+
     def _now(self, conversation: _Conversation) -> float:
         """The time, and never one this conversation has already passed: a clock can step back."""
         now = self.clock() if conversation.when is None else conversation.when
@@ -1553,6 +1603,10 @@ class Live:
 
     def _exchange(self, path, body, send, thread, at=None, asks=True) -> Result:
         self.stats["calls"] += 1
+        try:
+            self._sweep()
+        except Exception:
+            logger.warning("compache: old conversations were not let go", exc_info=True)
         dialect = wire.dialect_for(path)
         try:
             scan = (
@@ -1640,6 +1694,7 @@ class Live:
         """Bring the conversation up to this request and work out what to send for it."""
         now, number, current = self._now(conversation), len(turns), turns[-1]
         conversation.system_bytes, conversation.tools_bytes = self._opens(scan)
+        conversation.size = wire.volume(body)
         conversation.superseded = False
         plain, kept = body, None
         before = frozenset(conversation.unbound), conversation.sent_as
