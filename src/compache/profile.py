@@ -19,7 +19,7 @@ from urllib.parse import urlencode
 from .errors import ContractError
 from .labels import normalize_label
 from .models import model_spec, pricing
-from .optimizer.contracts import seconds
+from .optimizer.contracts import DEFAULT_MIN_RETENTION, seconds
 from .optimizer.distribution import measure_cache_reads
 from .optimizer.parts import Source, placeholder
 from .record import is_record
@@ -462,7 +462,7 @@ def workload(measured, spec, model, header_tokens, notes=None) -> tuple[str, dic
         "plannedTurns": min(_MAX_TURNS, lengths["median"]),
         "plannedTurnsP95": min(_MAX_TURNS_P95, lengths["p95"]),
         "continuationProbability": 1,
-        "retentionRequirement": 0.8,
+        "retentionRequirement": DEFAULT_MIN_RETENTION,
         "pingOutputTokens": spec.ping_output_tokens,
         "recoveryOutputTokens": spec.expansion_output_tokens,
     }
@@ -631,6 +631,8 @@ def profile(
                 f"the policy is for {loaded.spec.model_id}, the threads are priced as {spec.model_id}"
             )
         scenario["policy"] = _decision(loaded)
+        if loaded.min_retention is not None:
+            scenario["retentionRequirement"] = loaded.min_retention
     source = f"{measured['threads']:,} threads, {measured['turns']:,} turns"
     query = {"v": _LINK_VERSION, "model": preset, **_named(scenario), "source": source}
     return {

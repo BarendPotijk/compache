@@ -67,6 +67,12 @@ def _parser() -> argparse.ArgumentParser:
         "fit", "Fit a policy and say what it saves on these threads", model=True
     )
     sub.add_argument(
+        "--min-retention",
+        type=float,
+        metavar="FRACTION",
+        help="Minimum training retention before recovery, from 0 to 1 (default 0.8)",
+    )
+    sub.add_argument(
         "--observed-until",
         help="When the record was cut, if conversations were still going",
     )
@@ -324,6 +330,7 @@ def _fit(args):
         args.labels,
         model=args.model,
         observed_until=args.observed_until,
+        min_retention=args.min_retention,
         **_header(args),
     )
     policy.save(args.output)
@@ -386,8 +393,21 @@ def _replay(args):
     detail = report.pop("detail", None)
     if args.output:
         _write(args.output, {**report, "detail": detail})
+    comparisons = []
+    if report["min_retention"] is not None:
+        comparisons.append(
+            f"Minimum training retention: {report['min_retention']:.2%}."
+        )
+    if report["training_retention"] is not None:
+        comparisons.append(
+            f"Observed training retention: {report['training_retention']:.2%}."
+        )
+    if report["heldout_retention"] is None:
+        comparisons.append(
+            "Held-out retention is unmeasured because there are no observed dependencies."
+        )
     if "cost_per_1000_calls" in report:
-        return report, _replayed_agent(report)
+        return report, "\n".join([_replayed_agent(report), *comparisons])
     lines = [f"{report['threads']:,} threads, {report['planned_turns']:,} turns."]
     costs = report["cost_per_1000_turns"]
     if report["saving"] is None:
@@ -409,11 +429,11 @@ def _replay(args):
         )
     if report["coverage"] is not None:
         lines.append(
-            f"{report['coverage']:.0%} of the {report['needs_history']:,} labelled needs for earlier "
+            f"On held-out threads, {report['coverage']:.2%} of the {report['needs_history']:,} labelled needs for earlier "
             f"context are in view. {report['tokens_kept']:.0%} of the history tokens are kept."
         )
     lines.append(f"{report['pings']:,} keep-warm pings sent.")
-    return report, "\n".join(lines)
+    return report, "\n".join(lines + comparisons)
 
 
 def _replayed_agent(report) -> str:
@@ -430,7 +450,7 @@ def _replayed_agent(report) -> str:
         )
     if report["coverage"] is not None:
         lines.append(
-            f"{report['coverage']:.0%} of the {report['relying_calls']:,} calls that rely on an earlier "
+            f"On held-out threads, {report['coverage']:.2%} of the {report['relying_calls']:,} calls that rely on an earlier "
             "result find it in view."
         )
     lines.append(f"{report['pings']:,} keep-warm pings sent.")

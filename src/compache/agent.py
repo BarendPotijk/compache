@@ -29,7 +29,14 @@ from dataclasses import asdict, dataclass, replace
 from .errors import ContractError
 from .labels import normalize_label
 from .models import binds_reasoning
-from .optimizer.contracts import ModelSpec, digest, number, seconds
+from .optimizer.contracts import (
+    DEFAULT_MIN_RETENTION,
+    ModelSpec,
+    digest,
+    number,
+    require_held_out,
+    seconds,
+)
 from .optimizer.distribution import _charge
 from .optimizer.parts import NOTICE_BYTES, placeholder
 from .quotes import spoken
@@ -58,11 +65,9 @@ REOPEN_OUTPUT_TOKENS = 32
 # Calls per turn above which a conversation is taken to be an agent's.
 LOOP_CALLS = 4
 # Least share of the calls that rely on an earlier result that find it in view.
-FLOOR = 0.85
-# Where few calls rely on one at all, the most of all calls that may miss one.
-MOST_MISSED = 0.01
-# So many relying calls make the share speak, and so many calls the count of misses.
-_LEAST_RELYING, _LEAST_KNOWN = 40, 200
+FLOOR = DEFAULT_MIN_RETENTION
+# Minimum evidence for searching beyond the starter recipe.
+_LEAST_KNOWN = 200
 # The most rounds of results that stay because the model keeps fetching back.
 _LONGEST = 100
 # How far the provider's count of a text is taken to be from four bytes a token, at most.
@@ -692,11 +697,11 @@ def fit_agent(
     """Fit what an agent's conversations keep, on recorded ones. Returns a policy artifact.
 
     `floor` is the least share of calls that rely on an earlier result and find
-    it in view. Where calls rarely rely on one, the misses are held to a share
-    of all calls instead. They are priced as fetching it back. Every lifetime
+    it in view before recovery. Each miss is priced as fetching it back. Every lifetime
     is priced for the whole request, and the longer ones for its instructions
     and tools alone. `pings=False` leaves keep-warm pings out of it.
     """
+    number(floor, "min_retention", 0, 1)
     conversations = _conversations(threads, spec, header_tokens, labels)
     if sum(map(len, conversations)) < 2:
         raise ContractError("fitting an agent's policy needs recorded calls")
@@ -724,13 +729,9 @@ def fit_agent(
         return result
 
     def allowed(row):
-        # A cut that public runs taught is not held to a floor that these say too little about.
-        if row["recipe"]["rounds"] is None or len(cuts) == 1:
-            return True
-        missed = row["missed_calls"]
-        if relying >= _LEAST_RELYING and row["coverage"] >= floor:
-            return True
-        return (missed + 1) / known <= MOST_MISSED
+        # With no observed dependencies, coverage is unmeasured. For sparse
+        # records, _cuts already restricts the choice to the starter and full history.
+        return row["coverage"] is None or row["coverage"] >= floor
 
     for asked in specs.values():
         price(AgentRecipe(), asked)
@@ -775,7 +776,7 @@ def fit_agent(
     usable = [r for r in rows if allowed(r)]
     if not usable:
         raise ContractError(
-            "no candidate policy fits the context window on these conversations"
+            "no candidate policy fits the context window and retention minimum on these conversations"
         )
     chosen = cheapest(usable)
     whole = [r for r in usable if r["recipe"]["rounds"] is None]
@@ -804,6 +805,7 @@ def fit_agent(
             "relying_calls": relying,
             "known_calls": known,
             "floor": floor,
+            "min_retention": floor,
             "chosen": chosen,
             "keep_everything_cost": keep,
             "caching_alone": cheapest(whole) if whole else None,
@@ -818,6 +820,8 @@ def replay_agent(
     artifact: dict, threads, *, labels=(), header_tokens: int | dict = 0
 ) -> dict:
     """What a policy would have cost on other conversations, next to keeping everything."""
+    threads = list(threads)
+    require_held_out(threads, artifact["training_threads"])
     spec = ModelSpec.from_dict(artifact["model_spec"])
     standard = ModelSpec.from_dict(
         artifact.get("standard_spec", artifact["model_spec"])

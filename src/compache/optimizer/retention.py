@@ -7,7 +7,7 @@ from dataclasses import asdict, dataclass, replace
 from compache.labels import label_index, normalize_label
 from compache.errors import ContractError
 
-from .contracts import ModelSpec, number
+from .contracts import DEFAULT_MIN_RETENTION, ModelSpec, number
 from .edit_accounting import PartMeter
 from .parts import (
     NOTICE_BYTES,
@@ -874,7 +874,7 @@ def fit_recipes(
     spec,
     recipes,
     *,
-    retention_floor=0.95,
+    retention_floor=DEFAULT_MIN_RETENTION,
     tradeoff_floor=None,
     max_unknown_change_rate=None,
     unknowns="excluded",

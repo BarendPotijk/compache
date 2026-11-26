@@ -11,6 +11,18 @@ from datetime import datetime
 from compache.errors import ContractError
 
 
+DEFAULT_MIN_RETENTION = 0.8
+
+
+def require_held_out(threads, training_ids):
+    """Reject a replay cohort containing any conversation used to fit the policy."""
+    if not threads:
+        raise ContractError("held-out evaluation requires at least one thread")
+    seen = set(training_ids)
+    if any(digest(t.thread_id) in seen for t in threads):
+        raise ContractError("held-out evaluation includes a training thread")
+
+
 def canonical(value: object) -> str:
     return json.dumps(
         value,

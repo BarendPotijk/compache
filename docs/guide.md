@@ -10,7 +10,7 @@ pip install compache
 |---|---|---|
 | See it on sample chats | `compache demo` | |
 | Read traces | `compache pull langfuse -o threads.jsonl.gz`, also `mlflow`, `otel`, `claude` and `codex` | `compache.langfuse.pull()` |
-| Or record going forward | `compache proxy --record compache-record --sample 0.1` | `compache.wrap(client, record=..., sample=0.1)` |
+| Or record going forward | `compache proxy --record compache-record` | `compache.wrap(client, record="compache-record")` |
 | Check the data | `compache check threads.jsonl --labels labels.jsonl` | `compache.load_threads(path)` |
 | Fit | `compache fit threads.jsonl --labels labels.jsonl --model claude-sonnet-5-5` | `compache.fit(threads, labels, model=...)` |
 | Price on unseen threads | `compache replay heldout.jsonl --policy policy.json` | `compache.replay(policy, threads, labels)` |
@@ -136,7 +136,7 @@ compache check threads.jsonl --labels labels.jsonl             # validates and s
 Traces can be protected, incomplete or not kept at all. The same fit runs on a record made going forward by compache in the request path. With no policy it changes nothing in your requests.
 
 ```python
-client = compache.wrap(client, record="compache-record", sample=0.1)
+client = compache.wrap(client, record="compache-record")
 ```
 
 ```sh
@@ -148,6 +148,8 @@ compache fit compache-record --model claude-sonnet-5-5    # threads and labels b
 | For every turn | When it started and ended, the size in bytes of its question, of each retrieved text and of its answer, the model, its calls and the provider's usage |
 | For a sampled turn | The labels of the earlier parts its reply named, such as `R3.1` or `A2` |
 | Never | Any text of a conversation. A conversation's ID is kept as a hash |
+
+The default `sample=0` records metadata. With `sample=0.1`, approximately one turn in ten can trigger a billable labeling request to the model provider.
 
 `sample` is the share of turns that are asked. Once a sampled reply is in, compache sends one short request of its own: the conversation, the reply, and the conversation's parts by label and first words, with the request to name the parts the reply needed in one line, `<!-- refs: {R3.1} {A2} -->`. Your application's request and its reply are untouched, whatever their form. On Claude Haiku 5.5 a note cost about half of what a turn does, so one turn in ten adds some 5%.
 
@@ -182,13 +184,15 @@ Fitted on 4 threads, 71 turns (71 labelled) for claude-sonnet-5-5.
 
 Keep questions from the last 4 turns, answers from the last 9 turns and retrieved text from the last turn.
 Send up to 1 keep-warm ping while a user is away.
-82% of what the labelled turns need from earlier turns stays in view. The rest is fetched back, and that call is in the cost.
+Minimum training retention: 80.00%.
+On the training threads, 81.82% of what the labelled turns need from earlier turns stays in view. The rest is fetched back, and that call is in the cost.
 $16.10 per 1,000 turns against $50.25 keeping everything: 68% less.
 Caching alone, at its best, would cost $18.66.
 ```
 
 | Option | Use |
 |---|---|
+| `--min-retention` | Minimum observed training retention before reopening, between 0 and 1 (default 0.80). Python uses `fit(..., min_retention=0.95)`. Chat fits count labeled historical requirements. Agent fits count calls known to rely on earlier results. A cohort with no observed dependencies has no measured percentage |
 | `--model` | A model with a built-in price sheet (`compache models` lists them), or a JSON file of model spec fields for any other. Fields left out take the defaults of `ModelSpec`. It can be left out when the threads record their model, as a file from `compache pull` does |
 | `--system-prompt`, `--tools` | The text and tool definitions sent on every request, when the threads do not carry them |
 | `--observed-until` | When the record was cut, if conversations were still going and the threads do not say. By default every thread is taken to be over |
@@ -202,7 +206,7 @@ In Python, `compache.fit` returns a `Policy`: `policy.describe()` is the text ab
 compache replay heldout.jsonl --labels heldout-labels.jsonl --policy policy.json
 ```
 
-It prices the policy and keeping everything on the same arrivals, including every ping. With labels it also reports how much of what those threads needed stays in view and adds the cost of fetching the rest back. A fit sits near its floor by construction, so this is the number to trust. `--json` adds the same per thread. If a request outgrows the model's context window, the costs are compared on the turns both sides answered.
+Both planners reject conversations identified as part of the fit. Keep stable thread IDs across exports. Replay prices the policy and keeping everything on the same arrivals, including every ping. With labels it also reports how much of what those threads needed stays in view and adds the cost of fetching the rest back. Compare observed training retention to held-out retention to see how the policy generalizes. `--json` adds the same per thread. If a request outgrows the model's context window, the costs are compared on the turns both sides answered.
 
 ## 5. Apply
 
@@ -222,13 +226,14 @@ compache proxy --policy policy.json                    # for anything that lets 
 
 On the way out, the parts the policy archives are replaced by a notice, the end of the conversation is marked cacheable, and the model is given a `reopen` tool whose calls are answered before your application sees the reply. A background thread sends the keep-warm pings. [Integrations](integrations.md) lists every way in: frameworks, LiteLLM, Hermes and agent harnesses included.
 
+- **Count upstream requests.** `live.stats["physical_calls"]` counts each dispatch through the wrapped transport, including reopens, retries, refusals and pings. Token totals in `live.tokens` come from returned usage.
 - **Record and apply together.** `record=` and `sample=` work with a policy too, so the next fit has fresher threads.
 - **No long-lived process.** Pings need one. Where there is none, fit with `ping_counts=(0,)`. Trimming needs no state: a process that meets a conversation in the middle takes the cache to have expired.
 - **Retrieved text pasted into the question.** The request path sees one message, so it can only keep or archive the two together. Fit such an application on a record made going forward, which sees it the same way.
 
-### By hand
+### Your app manages requests
 
-When you assemble prompts yourself, a session gives you the request for each turn:
+When you own prompt assembly, billing, retries or timers, keep one session per active conversation. Run `compache demo -o policy.json` followed by `python examples/quickstart/app_managed.py` from the repository root to exercise the [application-managed example](../examples/quickstart/app_managed.py) without a provider key.
 
 ```python
 policy = compache.Policy.load("policy.json")
