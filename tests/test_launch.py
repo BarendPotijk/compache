@@ -813,25 +813,32 @@ class OwnFilesTests(Told):
             self.told("codex", None, "--oss")
 
     def test_which_key_codex_takes(self):
-        """The one it keeps, whatever is in the environment."""
+        """The one it keeps, whatever is in the environment.
+
+        Where Codex holds the key itself, its own provider stays and only its address changes:
+        a provider of another name would lock its sessions to compache, and compact differently.
+        """
         env = {"OPENAI_API_KEY": "sk-proj-own"}
         stored = {"auth_mode": "apikey", "OPENAI_API_KEY": "key of the gateway"}
         plan = {"auth_mode": "chatgpt", "tokens": {"access_token": "x"}}
         told = 'model_providers.compache.env_key="%s"'
-        for kept, env, words, way in (
-            (stored, env, (), "requires_openai_auth=true"),
-            (stored, {}, (), "requires_openai_auth=true"),
-            ({}, env, (), told % "OPENAI_API_KEY"),
-            ({}, {}, (), "requires_openai_auth=true"),
-            (plan, env, (), "openai_base_url="),
-            (plan, {"CODEX_API_KEY": "k"}, ("exec", "hi"), told % "CODEX_API_KEY"),
-            (plan, {"CODEX_API_KEY": "k"}, (), "openai_base_url="),
+        own, api, chatgpt = "openai_base_url=", "api.openai.com", "chatgpt.com"
+        for kept, env, words, way, host in (
+            (stored, env, (), own, api),
+            (stored, {}, (), own, api),
+            ({}, env, (), told % "OPENAI_API_KEY", api),
+            ({}, {}, (), "requires_openai_auth=true", api),
+            (plan, env, (), own, chatgpt),
+            (plan, {"CODEX_API_KEY": "k"}, ("exec", "hi"), own, api),
+            (plan, {"CODEX_API_KEY": "k"}, (), own, chatgpt),
         ):
             self.put(".codex/auth.json", kept)
             with self.subTest(kept=kept, env=env, words=words):
                 _, ahead, upstreams = self.told("codex", env, *words)
-                self.assertIn(way, " ".join(ahead))
-                host = "chatgpt.com" if "openai_base" in way else "api.openai.com"
+                said = " ".join(ahead)
+                self.assertIn(way, said)
+                if way == own:
+                    self.assertNotIn("model_provider=", said)
                 self.assertEqual(upstreams, {"openai": f"https://{host}"})
 
     def test_what_codex_is_told_for_the_whole_machine(self):
@@ -1308,3 +1315,28 @@ class ProxyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class QuietTests(unittest.TestCase):
+    """While an agent has the terminal, compache's messages go to a file, and are counted after."""
+
+    def test_messages_go_to_a_file_and_not_over_the_agent_s_screen(self):
+        import contextlib
+        import io
+        import logging
+
+        with tempfile.TemporaryDirectory() as tmp:
+            screen = io.StringIO()
+            with contextlib.redirect_stderr(screen):
+                handler, undo = launch._quiet(Path(tmp))
+                try:
+                    logging.getLogger("compache.live").warning("compache: a request was passed on unchanged")
+                finally:
+                    undo()
+            self.assertEqual(screen.getvalue(), "")
+            self.assertEqual(handler.warned, 1)
+            written = (Path(tmp) / "compache.log").read_text("utf-8")
+            self.assertIn("passed on unchanged", written)
+            found = logging.getLogger("compache")
+            self.assertTrue(found.propagate)
+            self.assertNotIn(handler, found.handlers)

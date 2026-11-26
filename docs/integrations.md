@@ -99,7 +99,7 @@ The conversation is named by `metadata: {"session_id": ...}`. In process: `litel
 
 ```sh
 hermes plugins install BarendPotijk/compache/integrations/hermes
-compache default --model claude-sonnet-5-5 -o ~/.hermes/compache.json        # or a policy fitted to your own sessions
+compache default --agent --model claude-sonnet-5-5 -o ~/.hermes/compache.json        # or a policy fitted to your own sessions
 echo "COMPACHE_POLICY=$HOME/.hermes/compache.json" >> ~/.hermes/.env
 ```
 

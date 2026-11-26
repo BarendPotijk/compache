@@ -17,6 +17,7 @@ given the variables that SDKs read.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import shutil
@@ -188,10 +189,12 @@ def _codex(bases: dict, env: dict, given: dict, words: list) -> tuple[dict, list
         )
     given = places.url(settings.get("openai_base_url"))
     key = places.codex_key(env, words)
-    if key == "plan":
-        # A ChatGPT plan is served at a place of its own, under the same API. Its sign-in goes there
-        # and nowhere else, whatever other tools have been told.
-        given = given or "https://chatgpt.com/backend-api/codex"
+    if key in ("plan", "stored", "CODEX_API_KEY"):
+        # Codex holds the key itself, so its own provider stays: its sessions go on with compache
+        # and without, and it compacts as it would. A ChatGPT plan is served at a place of its own,
+        # under the same API, and its sign-in goes there and nowhere else.
+        default = "https://chatgpt.com/backend-api/codex" if key == "plan" else None
+        given = given or default or "https://api.openai.com/v1"
         said.append(f"openai_base_url={json.dumps(origin + _path(given))}")
     else:
         given = given or "https://api.openai.com/v1"
@@ -422,6 +425,40 @@ def prepared(
     return {**changes, **_reached(env)}, ahead, upstreams
 
 
+class _Logged(logging.FileHandler):
+    """compache's own messages while an agent has the terminal: into a file, counted, and said after."""
+
+    def __init__(self, path: Path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        super().__init__(path, encoding="utf-8", delay=True)
+        self.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+        self.warned = 0
+
+    def emit(self, record):
+        if record.levelno >= logging.WARNING:
+            self.warned += 1
+        super().emit(record)
+
+
+def _quiet(folder: Path) -> tuple[_Logged, Callable[[], None]]:
+    """Send compache's messages to a file for as long as the agent runs. Returns the handler and how to undo it."""
+    handler = _Logged(folder / "compache.log")
+    found = logging.getLogger(__package__)
+    before = found.propagate, found.level
+    found.addHandler(handler)
+    found.propagate = False
+    if found.level == logging.NOTSET:
+        found.setLevel(logging.INFO)
+
+    def undo():
+        found.removeHandler(handler)
+        found.propagate, level = before
+        found.setLevel(level)
+        handler.close()
+
+    return handler, undo
+
+
 class _Kept(Recorder):
     """A record that also remembers the calls of this session."""
 
@@ -550,7 +587,17 @@ def main(args) -> int:
         live = Live(learn=Learner(folder))
         live.recorder = kept
     begun = time.monotonic()
-    status = run(agent, words, live, port=args.port or 0, upstream=args.upstream)
+    logged, undo = _quiet(Path(folder))
+    try:
+        status = run(agent, words, live, port=args.port or 0, upstream=args.upstream)
+    finally:
+        undo()
+    if logged.warned and not args.quiet:
+        print(
+            f"compache: {logged.warned} warning{'' if logged.warned == 1 else 's'} while it ran, "
+            f"in {logged.baseFilename}",
+            file=sys.stderr,
+        )
     hint = agent.hint(dict(os.environ)) if status and not kept.calls else None
     if hint and not args.quiet:
         print(f"compache: {hint}", file=sys.stderr)

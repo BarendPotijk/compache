@@ -2109,3 +2109,67 @@ class StreamTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ThreadTests(unittest.TestCase):
+    """Anthropic's message threads keep the conversation at the provider: a request is passed on as it is."""
+
+    def test_create_and_continue_go_out_untouched(self):
+        live = compache.Live(policy(rounds=1))
+        tools = [{"name": "read", "input_schema": {"type": "object"}}]
+        create = {
+            "model": "claude-sonnet-5-5",
+            "max_tokens": 64,
+            "system": "You read files.",
+            "tools": tools,
+            "thread": {"type": "create"},
+            "messages": [
+                {"role": "user", "content": "Read them"},
+                *[
+                    m
+                    for k in range(1, 6)
+                    for m in (
+                        {
+                            "role": "assistant",
+                            "content": [
+                                {"type": "tool_use", "id": f"toolu_{k:020d}ab", "name": "read", "input": {}}
+                            ],
+                        },
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "tool_result", "tool_use_id": f"toolu_{k:020d}ab", "content": result(k)}
+                            ],
+                        },
+                    )
+                ],
+            ],
+        }
+        cont = {
+            "model": "claude-sonnet-5-5",
+            "max_tokens": 64,
+            "thread": {"type": "continue", "previous_message_id": "msg_1"},
+            "messages": [{"role": "user", "content": "And now?"}],
+        }
+        for body in (create, cont):
+            seen = []
+
+            def send(payload):
+                seen.append(payload)
+                return live_module.Result(
+                    200,
+                    json={
+                        "id": "msg_2",
+                        "type": "message",
+                        "role": "assistant",
+                        "model": "claude-sonnet-5-5",
+                        "content": [{"type": "text", "text": "Done."}],
+                        "stop_reason": "end_turn",
+                        "usage": {"input_tokens": 10, "output_tokens": 2},
+                    },
+                )
+
+            live.exchange("/v1/messages", body, send, thread="threaded")
+            self.assertEqual(len(seen), 1)
+            self.assertIs(seen[0], body)
+        self.assertEqual(live.stats["passed_through"], 2)

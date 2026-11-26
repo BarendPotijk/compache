@@ -453,3 +453,16 @@ class HermesTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HermesAgentPolicyTests(unittest.TestCase):
+    def test_an_agent_policy_offers_the_tool_in_an_agent_s_words(self):
+        stand_in()
+        from compache.live import _AGENT_TOOL, _REOPEN_TOOL
+        from test_agent_live import policy
+
+        agentic = hermes.make(Live(policy(rounds=2))).get_tool_schemas()
+        chat = hermes.make(Live(fitted())).get_tool_schemas()
+        self.assertEqual(agentic[0]["description"], _AGENT_TOOL["function"]["description"])
+        self.assertEqual(chat[0]["description"], _REOPEN_TOOL["function"]["description"])
+        self.assertEqual(agentic[0]["name"], "reopen")

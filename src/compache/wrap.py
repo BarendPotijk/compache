@@ -24,6 +24,8 @@ import asyncio
 import contextvars
 import importlib
 import json
+import logging
+import os
 import threading
 import weakref
 from concurrent.futures import ThreadPoolExecutor
@@ -40,10 +42,12 @@ HEADER = "x-compache-thread"
 _thread: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "compache_thread", default=None
 )
+logger = logging.getLogger(__name__)
 # Headers of a response that describe a body this module may have rewritten.
 _BODY_HEADERS = ("content-length", "content-encoding", "transfer-encoding")
-# Async calls do their bookkeeping here, one worker per call in flight.
-_workers = ThreadPoolExecutor(max_workers=128, thread_name_prefix="compache")
+# Async calls do their bookkeeping here, one worker per call in flight and per stream being read.
+_MOST_WORKERS = 2048
+_workers = ThreadPoolExecutor(max_workers=_MOST_WORKERS, thread_name_prefix="compache")
 # The replies that are being streamed.
 _open: dict[int, Any] = {}
 # How long the end of a stream that nobody reads is waited for.
@@ -66,6 +70,22 @@ def current_thread() -> str | None:
 
 def _named(request) -> str | None:
     return _thread.get() or request.headers.get(HEADER)
+
+
+def signed(headers) -> bool:
+    """Whether a request is signed over its body, as AWS signs it: changing it would break the signature."""
+    return str(headers.get("authorization") or "").startswith("AWS4-HMAC-SHA256")
+
+
+def _untouched(live: Live, request) -> bool:
+    """Whether a request has to go out exactly as it came. Says so once."""
+    if not signed(request.headers):
+        return False
+    live.passed(
+        "signed",
+        "requests signed with AWS SigV4 pass unchanged: what is signed cannot be changed",
+    )
+    return True
 
 
 def _headers(response) -> list:
@@ -180,6 +200,8 @@ def http_client(live: Live, *, inner=None, pings: bool = True, **options):
         def handle_request(self, request):
             dialect = wire.dialect_for(request.url.path)
             if request.method != "POST" or dialect is None:
+                return self._forward(request)
+            if _untouched(live, request):
                 return self._forward(request)
             raw = request.read()
             try:
@@ -308,16 +330,24 @@ def async_http_client(live: Live, *, inner=None, pings: bool = True, **options):
             dialect = wire.dialect_for(request.url.path)
             if request.method != "POST" or dialect is None:
                 return await self._forward(request)
+            if _untouched(live, request):
+                return await self._forward(request)
             raw = await request.aread()
             try:
                 body = json.loads(raw)
             except ValueError:
                 return await self._forward(request)
             loop = asyncio.get_running_loop()
+            # What this call has under way on the loop, so that cancelling the call cancels it.
+            under_way: set = set()
 
             def on_loop(coroutine, most=None):
                 made = asyncio.run_coroutine_threadsafe(coroutine, loop)
-                return made.result(most)
+                under_way.add(made)
+                try:
+                    return made.result(most)
+                finally:
+                    under_way.discard(made)
 
             async def fetch(payload):
                 response = await self._forward(
@@ -372,10 +402,18 @@ def async_http_client(live: Live, *, inner=None, pings: bool = True, **options):
                 return _result(response, events(), closing)
 
             named = _named(request)
-            result = await loop.run_in_executor(
-                _workers,
-                lambda: live.exchange(request.url.path, body, perform, thread=named),
-            )
+            try:
+                result = await loop.run_in_executor(
+                    _workers,
+                    lambda: live.exchange(
+                        request.url.path, body, perform, thread=named
+                    ),
+                )
+            except asyncio.CancelledError:
+                # The application gave up on it: so does the provider, as it would without compache.
+                for made in list(under_way):
+                    made.cancel()
+                raise
             return _reply(httpx, request, result, Stream)
 
         async def aclose(self):
@@ -409,6 +447,10 @@ class Pinger:
         self._stop.set()
 
 
+# The `Live`s whose pings a thread sends, to start that thread again in a forked worker.
+_pinging: weakref.WeakSet = weakref.WeakSet()
+
+
 def start_pings(live: Live) -> None:
     """Let a background thread send `live`'s keep-warm pings.
 
@@ -418,8 +460,27 @@ def start_pings(live: Live) -> None:
     if live.learner is None and (live.policy is None or not live.policy.max_pings):
         return
     with live._lock:
-        if live.pinger is None:
+        if live.pinger is None or not live.pinger._thread.is_alive():
             live.pinger = Pinger(live)
+        _pinging.add(live)
+
+
+def _forked() -> None:
+    """In a worker forked from a process that had started them: threads do not survive a fork."""
+    global _workers
+    _workers = ThreadPoolExecutor(
+        max_workers=_MOST_WORKERS, thread_name_prefix="compache"
+    )
+    for live in list(_pinging):
+        live.pinger = None
+        try:
+            start_pings(live)
+        except Exception:
+            logger.warning("compache: keep-warm pings did not start again", exc_info=True)
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_forked)
 
 
 def wrap(
@@ -464,6 +525,10 @@ def wrap(
             api._async_httpx_client = async_http_client(
                 live, inner=api._async_httpx_client, pings=pings
             )
+            options = getattr(api, "_http_options", None)
+            if options is not None and hasattr(options, "httpx_async_client"):
+                # Given as the application's own, it is the one async calls take, and not aiohttp.
+                options.httpx_async_client = api._async_httpx_client
         wrapped = client
     else:
         raise TypeError(

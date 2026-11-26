@@ -1057,6 +1057,10 @@ class Anthropic:
 
     @staticmethod
     def scan(body: dict) -> Scan:
+        if body.get("thread"):
+            # A message thread: the provider keeps the conversation, its tools and its marks, and
+            # a request carries only what is new. Nothing here may be changed.
+            raise ValueError("the conversation is kept by the provider")
         scan = Scan(model=body.get("model"), stream=body.get("stream") is True)
         scan.tools = list(body.get("tools") or ())
         system = [t for _, t in _text_parts(body.get("system"), ("system",))]

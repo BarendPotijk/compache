@@ -828,6 +828,8 @@ class Live:
         # The conversation a name was last seen in, for a host that tells us about it by name.
         self._latest: OrderedDict[str, _Conversation] = OrderedDict()
         self._bad_schemas: set[str] = set()
+        # What the application has been told once, by reason.
+        self._said_once: set[str] = set()
         self._refusals = 0
         self._notes_off = False
         self._apart: list[threading.Thread] = []
@@ -854,6 +856,17 @@ class Live:
         # What the provider counted so far, and what was left out of it, in tokens.
         counted = ("input", "cache_read", "cache_write", "output", "left_out")
         self.tokens = dict.fromkeys(counted, 0)
+
+    def passed(self, reason: str, message: str) -> None:
+        """Count a request that passes unchanged for `reason`, and say why the first time."""
+        self.stats["passed_through"] += 1
+        self.tell(reason, message)
+
+    def tell(self, reason: str, message: str) -> None:
+        """Say something the application should hear, once for each `reason`."""
+        if reason not in self._said_once:
+            self._said_once.add(reason)
+            logger.warning("compache: %s", message)
 
     # -- conversations -------------------------------------------------------
 

@@ -38,7 +38,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from . import _tls, wire
 from .live import Live, Result
-from .wrap import HEADER, start_pings
+from .wrap import HEADER, signed, start_pings
 
 __all__ = ["DEFAULTS", "serve"]
 
@@ -373,7 +373,12 @@ def serve(
             ]
             send = _Upstream(base, self.command, self.path, kept, timeout)
             body = None
-            if (
+            if signed(headers) and wire.dialect_for(self.path) is not None:
+                live.passed(
+                    "signed",
+                    "requests signed with AWS SigV4 pass unchanged: what is signed cannot be changed",
+                )
+            elif (
                 self.command == "POST"
                 and raw
                 and wire.dialect_for(self.path) is not None
