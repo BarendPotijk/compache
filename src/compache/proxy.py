@@ -30,8 +30,11 @@ import json
 import logging
 import os
 import re
+import select
 import ssl
 import sys
+import threading
+import time
 import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -191,6 +194,58 @@ def _thread(headers, body) -> str | None:
     return None
 
 
+# Connections to a provider kept open between calls, as an SDK keeps them: how many, and for how long.
+_POOL_MOST = 8
+_POOL_IDLE = 50.0
+# What a connection that the other side has closed meanwhile raises.
+_STALE = (
+    http.client.RemoteDisconnected,
+    BrokenPipeError,
+    ConnectionResetError,
+    ConnectionAbortedError,
+)
+
+
+def _dropped(connection) -> bool:
+    """Whether the other side has closed an idle connection: it is readable, with nothing asked of it."""
+    sock = getattr(connection, "sock", None)
+    if sock is None:
+        return True
+    try:
+        readable, _, _ = select.select([sock], [], [], 0)
+    except (OSError, ValueError):
+        return True
+    return bool(readable)
+
+
+class _Pool:
+    """Idle connections to providers, by where they lead. Safe to share between threads."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._kept: dict = {}
+
+    def take(self, key):
+        with self._lock:
+            found = self._kept.get(key) or []
+            while found:
+                connection, since = found.pop()
+                if time.monotonic() - since < _POOL_IDLE and not _dropped(connection):
+                    return connection
+                connection.close()
+        return None
+
+    def give(self, key, connection) -> None:
+        with self._lock:
+            found = self._kept.setdefault(key, [])
+            found.append((connection, time.monotonic()))
+            while len(found) > _POOL_MOST:
+                found.pop(0)[0].close()
+
+
+_POOL = _Pool()
+
+
 class _Upstream:
     """One request to a provider, and its response as `Live` reads it."""
 
@@ -200,12 +255,7 @@ class _Upstream:
         self.url = urllib.parse.urlsplit(base.rstrip("/") + path)
         self.method, self.headers, self.timeout = method, headers, timeout
 
-    def _sent(self, body: bytes | None, headers: dict):
-        """A connection to the provider with the request on its way."""
-        target = self.url.path + ("?" + self.url.query if self.url.query else "")
-        host, port, proxy = self.url.hostname, self.url.port, _proxy(self.url)
-        if proxy is not None:
-            host, port = proxy.hostname, proxy.port or 80
+    def _open(self, host, port, proxy):
         if self.url.scheme == "https":
             connection = http.client.HTTPSConnection(
                 host, port, timeout=self.timeout, context=_tls.FOUND["context"]
@@ -214,20 +264,50 @@ class _Upstream:
                 connection.set_tunnel(
                     self.url.hostname, self.url.port, _credentials(proxy)
                 )
-        else:
-            connection = http.client.HTTPConnection(host, port, timeout=self.timeout)
-            if proxy is not None:
+            return connection
+        return http.client.HTTPConnection(host, port, timeout=self.timeout)
+
+    def _sent(self, body: bytes | None, headers: dict):
+        """The provider's response to the request, the connection it came on, and where that leads."""
+        target = self.url.path + ("?" + self.url.query if self.url.query else "")
+        host, port, proxy = self.url.hostname, self.url.port, _proxy(self.url)
+        if proxy is not None:
+            host, port = proxy.hostname, proxy.port or 80
+            if self.url.scheme != "https":
                 target = f"http://{self.url.netloc}{target}"
                 headers = {**headers, "Host": self.url.netloc, **_credentials(proxy)}
-        try:
-            connection.request(self.method, target, body=body, headers=headers)
-        except ssl.SSLError as error:
-            connection.close()
-            # The handshake failed, so nothing was sent: the request can go out again.
-            if _tls.unverified(error) and _tls.fall_back():
-                return self._sent(body, headers)
-            raise
-        return connection
+        key = (
+            self.url.scheme,
+            host,
+            port,
+            self.url.netloc,
+            None if proxy is None else proxy.geturl(),
+            id(_tls.FOUND["context"]),
+        )
+        for attempt in range(2):
+            connection = _POOL.take(key) if attempt == 0 else None
+            reused = connection is not None
+            if connection is None:
+                connection = self._open(host, port, proxy)
+            try:
+                connection.request(self.method, target, body=body, headers=headers)
+                response = connection.getresponse()
+            except ssl.SSLError as error:
+                connection.close()
+                if reused:
+                    continue
+                # The handshake failed, so nothing was sent: the request can go out again.
+                if _tls.unverified(error) and _tls.fall_back():
+                    return self._sent(body, headers)
+                raise
+            except _STALE:
+                connection.close()
+                # One that was kept open had been closed by the other side: it goes out on a new one.
+                if reused:
+                    continue
+                raise
+            return connection, response, key
+        raise AssertionError("not reached")
 
     def __call__(self, payload, raw: bytes | None = None) -> Result:
         body = raw
@@ -237,28 +317,45 @@ class _Upstream:
         headers["Accept-Encoding"] = "identity"
         if body is not None:
             headers["Content-Length"] = str(len(body))
-        connection = self._sent(body, headers)
-        response = connection.getresponse()
+        connection, response, key = self._sent(body, headers)
         kept = [(k, v) for k, v in response.getheaders() if k.lower() not in _BODY]
+        over = {"done": False}
+
+        def finish(whole: bool) -> None:
+            """Keep the connection for the next call once its response is read to the end, else close it."""
+            if over["done"]:
+                return
+            over["done"] = True
+            if whole and getattr(response, "will_close", True) is False:
+                _POOL.give(key, connection)
+            else:
+                connection.close()
+
         if response.status < 400 and "text/event-stream" in (
             response.getheader("Content-Type") or ""
         ):
 
             def events():
+                whole = False
                 try:
                     while True:
                         chunk = response.read1(65536)
                         if not chunk:
+                            whole = True
                             return
                         yield chunk
                 finally:
-                    connection.close()
+                    finish(whole)
 
             return Result(
-                response.status, kept, events=events(), close=connection.close
+                response.status, kept, events=events(), close=lambda: finish(False)
             )
-        data = response.read()
-        connection.close()
+        try:
+            data = response.read()
+        except BaseException:
+            finish(False)
+            raise
+        finish(True)
         result = Result(response.status, kept, raw=data)
         if "json" in (response.getheader("Content-Type") or ""):
             try:
