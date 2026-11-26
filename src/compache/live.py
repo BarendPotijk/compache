@@ -44,7 +44,7 @@ from . import notes as notes_
 from . import wire
 from .api import Policy
 from .learn import Learner
-from .models import binds_reasoning
+from .models import binds_reasoning, drops_reasoning_on_edits
 from .optimizer.parts import explained, notice
 from .optimizer.recovery import REOPEN_TOOL
 from .quotes import Quotes, spoken
@@ -153,6 +153,48 @@ _AGENT_TOOL = {
         },
     },
 }
+# The same where cleared tool results are left out whole, and listed at the end of the request:
+# models whose API drops the reasoning behind an earlier item that was changed.
+_AGENT_TOOL_LISTED = {
+    "type": "function",
+    "function": {
+        **_AGENT_TOOL["function"],
+        "description": (
+            "Old tool results are cleared from this conversation to save space, some steps after "
+            "you read them. A cleared result is taken out together with its call, and listed at "
+            "the end of the conversation with a reference such as ctx:1a2b3c. You did read it in "
+            "full, and what you wrote right after it comes from it: rely on that, and do not "
+            "reopen results to check it. Call this tool with the reference only when you need "
+            "something from a result that you did not write down, rather than running the other "
+            "tool again."
+        ),
+    },
+}
+_REOPEN_TOOL_LISTED = {
+    "type": "function",
+    "function": {
+        **_REOPEN_TOOL["function"],
+        "description": _REOPEN_TOOL["function"]["description"].replace(
+            "A cleared part shows a short notice with a reference such as ctx:1a2b3c in place of "
+            "its text.",
+            "A cleared part shows a short notice with a reference such as ctx:1a2b3c in place of "
+            "its text, or, for a tool result, is taken out with its call and listed at the end of "
+            "the conversation.",
+        ),
+    },
+}
+_REOPEN_HOW_LISTED = _REOPEN_HOW.replace(
+    "and the reopen tool shows the text again.",
+    "and cleared tool results are taken out with their calls and listed at the end of the "
+    "conversation. The reopen tool shows the text again.",
+)
+# What stands at the end of a request whose cleared tool results were left out whole.
+_CLEARED = (
+    "Earlier tool results were cleared from this conversation to save space, each together "
+    "with its call. You read each in full when it came, and what you wrote after it came from "
+    "it: rely on that, and do not reopen results to check it. reopen with its reference shows "
+    "one again when you need something from it that you did not write down:"
+)
 _HANDLE = re.compile(r"ctx:[0-9a-f]{24}")
 _REFUSED = (400, 422)
 # What Claude's cache marks ask for where they name no lifetime.
@@ -2246,6 +2288,9 @@ class Live:
         """The request with every archived part replaced by its notice, and the tool to fetch one back."""
         pending, name = conversation.pending, conversation.thread_id
         turn, out = pending.turn, body
+        # Tool results to leave out whole, with their calls, by call ID: their handles.
+        cleared: dict = {}
+        listed = self._lists(dialect, scan)
         if turn.archived_ids:
             shown = {
                 p.part_id: p.text for p in turn.parts if p.part_id in turn.archived_ids
@@ -2274,6 +2319,14 @@ class Live:
                         shown[part_id] = explained(at.group()) if at else shown[part_id]
                         first = False
                 for part_id, slots in pieces:
+                    if listed and part_id in shown and slots and ":retrieval:" in part_id:
+                        item = body["input"][slots[0].message] if isinstance(body.get("input"), list) else None
+                        call = item.get("call_id") if isinstance(item, dict) else None
+                        handle = _HANDLE.search(shown[part_id])
+                        if call and handle:
+                            # Changed, it would cost the reasoning that came after it.
+                            cleared[call] = handle.group()
+                            continue
                     if part_id in shown and slots and slots[0].whole is not None:
                         out = wire.put(out, slots[0].whole, shown[part_id])
                     elif part_id in shown:
@@ -2317,9 +2370,13 @@ class Live:
             # a chat it comes with the first notice, and stays: the first cut rewrites the request
             # from near its start anyway, and after that the tool never changes what is cached.
             if conversation.agentic:
-                out = dialect.with_tool(out, _AGENT_TOOL)
+                out = dialect.with_tool(out, _AGENT_TOOL_LISTED if listed else _AGENT_TOOL)
+            elif listed:
+                out = dialect.with_tool(out, _REOPEN_TOOL_LISTED, _REOPEN_HOW_LISTED)
             else:
                 out = dialect.with_tool(out, _REOPEN_TOOL, _REOPEN_HOW)
+        if cleared:
+            out = self._without_cleared(dialect, body, out, cleared)
         if self.recorder is not None:
             pending.held = wire.volume(out)
             pending.left = wire.volume(body) - pending.held
@@ -2341,6 +2398,32 @@ class Live:
             for at in places
         )
         return out
+
+    @staticmethod
+    def _lists(dialect, scan) -> bool:
+        """Whether cleared tool results are left out whole and listed at the end, rather than changed.
+
+        So it is where the API drops the reasoning that follows an earlier item that was changed,
+        and not the reasoning behind items that are taken out whole.
+        """
+        return hasattr(dialect, "without_calls") and drops_reasoning_on_edits(scan.model)
+
+    @staticmethod
+    def _without_cleared(dialect, body, out, cleared: dict) -> Any:
+        """The request without the cleared tool calls and their results, and a list of them at its end."""
+        lines = []
+        for item in dialect.said_so_far(body):
+            call = item.get("call_id") if isinstance(item, dict) else None
+            kind = str(item.get("type", "")) if isinstance(item, dict) else ""
+            if call in cleared and kind.endswith("_call"):
+                named = item.get("name") or kind
+                said = item.get("arguments") or item.get("input") or ""
+                said = said if isinstance(said, str) else json.dumps(said, ensure_ascii=False)
+                said = " ".join(said.split())
+                said = said if len(said) <= 80 else said[:79] + "…"
+                lines.append(f"- {cleared[call]}: {named} {said}".rstrip())
+        out = dialect.without_calls(out, cleared)
+        return dialect.with_cleared(out, "\n".join([_CLEARED, *lines]))
 
     @staticmethod
     def _bound(conversation, dialect, messages) -> list:

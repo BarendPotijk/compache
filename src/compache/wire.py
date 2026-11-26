@@ -1704,6 +1704,40 @@ class OpenAIResponses:
         said = cls._items(body)
         return {**body, "input": [*said[:at], *extra, *said[at:]]}
 
+    @classmethod
+    def without_calls(cls, body: dict, call_ids) -> dict:
+        """The request without these tool calls and what they returned, whole items only.
+
+        Reasoning that led to nothing that is left goes with them: the API takes reasoning
+        only with what it led to. Nothing else is changed, so the reasoning after them stays.
+        """
+        gone = set(call_ids)
+
+        def taken(item) -> bool:
+            kind = str(item.get("type", "")) if isinstance(item, dict) else ""
+            return item.get("call_id") in gone and kind.endswith(("_call", "_call_output"))
+
+        items = [item for item in cls._items(body) if not taken(item)]
+        kept = []
+        for k, item in enumerate(items):
+            if isinstance(item, dict) and item.get("type") == "reasoning":
+                after = items[k + 1] if k + 1 < len(items) else None
+                kind = str(after.get("type", "message")) if isinstance(after, dict) else ""
+                leads = kind.endswith("_call") or (
+                    kind == "message" and after.get("role") == "assistant"
+                )
+                if not leads:
+                    continue
+            kept.append(item)
+        return {**body, "input": kept}
+
+    @classmethod
+    def with_cleared(cls, body: dict, text: str) -> dict:
+        """The request with a word at its end on what was left out of it."""
+        said = {"type": "input_text", "text": text}
+        last = {"type": "message", "role": "developer", "content": [said]}
+        return {**body, "input": [*cls._items(body), last]}
+
     @staticmethod
     def with_boundaries(body: dict, places) -> dict:
         return body

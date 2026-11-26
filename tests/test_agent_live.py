@@ -2246,3 +2246,72 @@ class WarmTests(unittest.TestCase):
             [json.dumps(b, sort_keys=True) for b in warmed],
             [json.dumps(b, sort_keys=True) for b in unwarmed],
         )
+
+
+class ListedTests(unittest.TestCase):
+    """GPT-6.2 and later drop the reasoning behind an earlier item that was changed, not behind one taken out."""
+
+    class Sol(Codex):
+        model = "gpt-6.2-sol"
+
+    def run_agent(self, files=10, fetch_at=None):
+        def script(request):
+            items = request["body"]["input"]
+            shown = [i for i in items if i.get("type") == "function_call_output"]
+            listed = [i for i in items if i.get("role") == "developer"]
+            fetched = [i for i in shown if '"handle"' in str(i.get("output"))]
+            seen = len(shown) - len(fetched)
+            if listed:
+                seen += len(NOTICE.findall(listed[0]["content"][0]["text"]))
+            if fetch_at is not None and seen == fetch_at and listed and not fetched:
+                handle = NOTICE.search(listed[0]["content"][0]["text"]).group()
+                return {"text": "", "tool": (REOPEN, {"reference": handle})}
+            if seen < files:
+                return {
+                    "text": f"Reading {seen + 1}.",
+                    "tool": ("read", {"file": seen}),
+                    "reasoning": "thinking",
+                    "thinking": 20,
+                }
+            return {"text": "All done."}
+
+        clock = Clock(1_980_000_000.0)
+        model = FakeModel(script, clock=clock, min_tokens=0)
+        live = compache.Live(policy(rounds=2, ratio=0.0), clock=clock)
+        agent = Agent(live, self.Sol(), model, clock=clock, thread="sol")
+        said = agent.run("Read them all")
+        return said, model, agent
+
+    def test_cleared_results_are_left_out_whole_and_listed_at_the_end(self):
+        said, model, agent = self.run_agent()
+        self.assertEqual(said, "All done.")
+        mine = agent.shape.said
+        cut = [b for b in model.bodies if any(
+            i.get("role") == "developer" for i in b["input"] if isinstance(i, dict)
+        )]
+        self.assertTrue(cut)
+        for body in model.bodies:
+            items = body["input"]
+            listed = [i for i in items if isinstance(i, dict) and i.get("role") == "developer"]
+            kept = [i for i in items if i not in listed]
+            # Nothing that is left was changed: every item is one the application sent, as it sent it.
+            for item in kept:
+                self.assertIn(item, mine)
+            # Every reasoning item that is left still leads to what it said.
+            for k, item in enumerate(kept):
+                if item.get("type") == "reasoning":
+                    self.assertTrue(kept[k + 1].get("type", "").endswith("_call") or kept[k + 1].get("role") == "assistant")
+            if listed:
+                self.assertIs(items[-1], listed[0])
+                handles = NOTICE.findall(listed[0]["content"][0]["text"])
+                self.assertTrue(handles)
+                calls = {i.get("call_id") for i in kept if i.get("type") == "function_call"}
+                outputs = {i.get("call_id") for i in kept if i.get("type") == "function_call_output"}
+                self.assertEqual(calls, outputs)
+        tools = model.bodies[-1]["tools"]
+        self.assertIn("listed at the end", [t for t in tools if t["name"] == REOPEN][0]["description"])
+
+    def test_what_was_cleared_can_be_read_again(self):
+        said, model, agent = self.run_agent(fetch_at=6)
+        self.assertEqual(said, "All done.")
+        self.assertGreaterEqual(agent.live.stats["reopened"], 1)
