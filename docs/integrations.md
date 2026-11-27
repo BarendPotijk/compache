@@ -50,9 +50,9 @@ The same wrapper accepts provider-configured clients. Each row below is a fragme
 
 Use `AsyncOpenAI()` or `AsyncAnthropic()` with `await` inside the same ordinary `with compache.thread(...)` block. With Google use the wrapped client's `client.aio.models`. Streaming, parsing and tool definitions stay on the original SDK methods. Existing Azure OpenAI, Anthropic Vertex AI and Anthropic Foundry clients keep their provider configuration.
 
-To **observe first**, use `compache.wrap(client, record="compache-record")`. To **learn and apply**, use `compache.wrap(client, learn="compache-record")`. An explicit `sample=0.1` enables extra model requests for notes on a sampled share of turns. Keep-warm requests can also incur provider charges when a policy enables them. Use `pings=False` on the wrapper to disable background pings. After a completed model request, check `client.compache.stats["calls"]` and `client.compache.tokens`. `reopened` counts actual recoveries and can remain zero on short conversations.
+To **observe first**, use `compache.wrap(client, record="compache-record")`. To **learn and apply**, use `compache.wrap(client, learn="compache-record")`. An explicit `sample=0.1` enables extra model requests for notes on a sampled share of turns. Keep-warm requests can also incur provider charges when a policy enables them. Use `pings=False` on the wrapper to disable background pings. After a completed model request, check `client.compache.stats["calls"]` and `client.compache.tokens`. The `reopened` counter counts tool invocations, including searches that found no match.
 
-For a complete local example with synthetic messages and a scripted provider, run the [wrapped chatbot](../examples/quickstart/wrapped_chatbot.py).
+Follow the [offline chatbot walkthrough](../examples/README.md#put-a-policy-in-a-chatbot-request) to see the archived fact, the extra provider request and the answer returned to the application.
 
 ### Python frameworks
 

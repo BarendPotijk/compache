@@ -133,9 +133,16 @@ class QuickstartTests(unittest.TestCase):
             self.policy.save("policy.json")
             with contextlib.redirect_stdout(io.StringIO()) as out:
                 runpy.run_path(str(SAMPLE / "wrapped_chatbot.py"), run_name="__main__")
-        self.assertIn("First question in application history: True", out.getvalue())
-        self.assertIn("First question in final provider request: False", out.getvalue())
-        self.assertIn("Recovery tool offered on final request: True", out.getvalue())
+        expected = [
+            "Application history: 12 user turns",
+            "Hinge number in original message: True",
+            "Hinge number in recall request before reopen: False",
+            "Reopen calls: 1",
+            "Provider requests: 13 observed, 13 counted by Compache",
+            "Answer: Ticket PKG-104 needs hinge H-772.",
+        ]
+        self.assertEqual(out.getvalue().splitlines(), expected)
+        self.assertIn(out.getvalue(), (ROOT / "examples" / "README.md").read_text("utf-8"))
 
     def test_the_app_managed_example_runs_without_a_provider(self):
         example = runpy.run_path(str(SAMPLE / "app_managed.py"))

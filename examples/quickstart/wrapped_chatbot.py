@@ -7,9 +7,33 @@ import httpx2
 
 import compache
 
+RECALL = "Which replacement hinge did we record for ticket PKG-104?"
+
+
+def scripted_reply(body):
+    """The fake model can read only the messages and tools in this request."""
+    content = body["messages"][-1]["content"]
+    blocks = [{"type": "text", "text": content}] if isinstance(content, str) else content
+    for block in blocks:
+        if block["type"] == "tool_result" and block["tool_use_id"] == "lookup_ticket":
+            result = json.loads(block["content"])
+            if result["status"] == "ok":
+                return {"type": "text", "text": result["text"].splitlines()[0]}
+            return {"type": "text", "text": "Ticket not found."}
+        if block.get("text") == RECALL:
+            if any(tool["name"] == "reopen" for tool in body.get("tools", [])):
+                return {
+                    "type": "tool_use",
+                    "id": "lookup_ticket",
+                    "name": "reopen",
+                    "input": {"reference": "PKG-104"},
+                }
+            return {"type": "text", "text": "Ticket unavailable."}
+    return {"type": "text", "text": "Ticket recorded."}
+
 
 def main():
-    # Hold a deterministic clock so a two-hour pause takes no wall time.
+    # Advance a local clock so a two-hour pause takes no wall time.
     now = 1_800_000_000
     live = compache.Live("policy.json", clock=lambda: now)
     seen = []
@@ -17,8 +41,7 @@ def main():
     def local_model(request):
         body = json.loads(request.content)
         seen.append(body)
-        # Synthetic receipts use a simple character-based token estimate.
-        input_tokens = len(json.dumps(body["messages"])) // 4
+        reply = scripted_reply(body)
         return httpx2.Response(
             200,
             json={
@@ -26,9 +49,12 @@ def main():
                 "type": "message",
                 "role": "assistant",
                 "model": body["model"],
-                "content": [{"type": "text", "text": "Ticket recorded."}],
-                "stop_reason": "end_turn",
-                "usage": {"input_tokens": input_tokens, "output_tokens": 4},
+                "content": [reply],
+                "stop_reason": "tool_use" if reply["type"] == "tool_use" else "end_turn",
+                "usage": {
+                    "input_tokens": len(json.dumps(body["messages"])) // 4,
+                    "output_tokens": 8,
+                },
             },
         )
 
@@ -39,25 +65,30 @@ def main():
         http_client=httpx2.Client(transport=transport),
         max_retries=0,
     )
+    inspection = "Inspect the packaging. " * 300
+    questions = ["Ticket PKG-104 needs hinge H-772.\n" + inspection]
+    questions.extend(f"Inspection {n}: {inspection}" for n in range(1, 11))
+    questions.append(RECALL)
+
     history = []
-    with compache.wrap(sdk, live=live, pings=False) as client:
+    with sdk, compache.wrap(sdk, live=live, pings=False) as client:
         with compache.thread("ticket-chat"):
-            for n in range(1, 13):
-                question = f"Ticket {n:02}: " + "Inspect the packaging. " * 300
+            for question in questions:
                 history.append({"role": "user", "content": question})
+                first_request = len(seen)
                 reply = client.messages.create(
                     model="claude-sonnet-5-5", max_tokens=64, messages=history
                 )
                 history.append({"role": "assistant", "content": reply.content[0].text})
                 now += 7200
 
-    final_questions = json.dumps(seen[-1]["messages"])
-    final_tools = [tool["name"] for tool in seen[-1].get("tools", [])]
+    recall_messages = seen[first_request]["messages"]
     print(f"Application history: {len(history) // 2} user turns")
-    print(f"Requests received by the in-memory model: {len(seen)}")
-    print(f"First question in application history: {'Ticket 01:' in history[0]['content']}")
-    print(f"First question in final provider request: {'Ticket 01:' in final_questions}")
-    print(f"Recovery tool offered on final request: {'reopen' in final_tools}")
+    print(f"Hinge number in original message: {'H-772' in history[0]['content']}")
+    print(f"Hinge number in recall request before reopen: {'H-772' in json.dumps(recall_messages)}")
+    print(f"Reopen calls: {live.stats['reopened']}")
+    print(f"Provider requests: {len(seen)} observed, {live.stats['physical_calls']} counted by Compache")
+    print(f"Answer: {history[-1]['content']}")
 
 
 if __name__ == "__main__":

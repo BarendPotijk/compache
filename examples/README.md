@@ -22,15 +22,16 @@ python examples/quickstart/wrapped_chatbot.py
 
 ```text
 Application history: 12 user turns
-Requests received by the in-memory model: 12
-First question in application history: True
-First question in final provider request: False
-Recovery tool offered on final request: True
+Hinge number in original message: True
+Hinge number in recall request before reopen: False
+Reopen calls: 1
+Provider requests: 13 observed, 13 counted by Compache
+Answer: Ticket PKG-104 needs hinge H-772.
 ```
 
-The chatbot keeps appending to its ordinary Messages API history. It wraps the client once and uses a stable conversation ID with `compache.thread`. The in-memory endpoint inspects the requests it actually receives. By the final turn, Compache has replaced the oldest question with a reference and added the tool that can reopen it. In your chatbot, supply your configured SDK client and your application's conversation ID. [Wrapped chatbot source](quickstart/wrapped_chatbot.py)
+The first message records the replacement hinge for ticket PKG-104. Ten inspections later, the user asks for the hinge number. The application still holds the first message, but the request reaching the model contains only an archive notice in its place. The scripted model calls `reopen("PKG-104")`. Compache sends the original text back in a tool result, and the model reads the answer from that text. This accounts for the thirteenth request. [Wrapped chatbot source](quickstart/wrapped_chatbot.py)
 
-The example advances a clock two hours between turns and repeats text to make the cut visible. Its endpoint always answers “Ticket recorded.” and estimates input usage at one token per four serialized message characters. Scheduled pings are disabled. The transcript demonstrates request rewriting. A provider integration is needed to measure cache hits, billing and answer quality.
+In your app, wrap the SDK client once, pass your conversation ID with `compache.thread`, and send your usual history. The example uses long inspection notes and a two-hour clock step to trigger a cut. The endpoint scripts tool use and returns synthetic usage. Pings are disabled. Measuring cache hits, billing or answer quality requires a real provider.
 
 ## Fit and check an unseen conversation
 

@@ -18,6 +18,11 @@ Use Python 3.11 or later. The bundled demo fits a policy on four sample conversa
 
 ```sh
 python -m pip install compache
+```
+
+If you're working from a repository checkout, install that revision with `python -m pip install -e .` from the repository root. Then run:
+
+```sh
 compache demo -o policy.json
 ```
 
@@ -35,7 +40,7 @@ $16.10 per 1,000 turns against $50.25 keeping everything: 68% less.
 Caching alone, at its best, would cost $18.66.
 ```
 
-These are training estimates for 71 turns. To run the examples and reproduce the output for this revision, install from the repository root with `python -m pip install -e .`. [Run a held-out comparison](examples/README.md)
+These are training estimates for 71 turns. [Run a held-out comparison](examples/README.md#fit-and-check-an-unseen-conversation)
 
 </details>
 
@@ -69,7 +74,7 @@ compache replay heldout.jsonl --labels heldout-labels.jsonl --policy policy.json
 
 Look at cost per 1,000 turns and dependencies kept **before reopening**. A retention target governs training. Held-out retention shows how the chosen policy generalizes. Grade answers separately if answer quality matters to your rollout. [Fit and interpret a policy](docs/fitting.md)
 
-To apply the saved policy in the wrapped-client integration, start your app with `client = compache.wrap(client, "policy.json")` on its original SDK client. Keep sending the conversation history as usual. Compache handles context notices, reopen calls, and scheduled pings. [Run the application examples](examples/README.md)
+To apply the saved policy in the wrapped-client integration, start your app with `client = compache.wrap(client, "policy.json")` on its original SDK client. Keep sending the conversation history as usual. The [offline chatbot example](examples/README.md#put-a-policy-in-a-chatbot-request) shows what happens when the last question needs a fact from an archived turn.
 
 ## Results
 
