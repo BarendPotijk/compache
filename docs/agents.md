@@ -1,15 +1,32 @@
-# Agents
+# Coding agents
+
+Use `compache wrap` to run an installed coding agent through a local proxy. The agent keeps its conversation history. On each model call, compache uses that history and the policy to decide which earlier tool results to send in full.
+
+## Start a session
+
+Use Python 3.11 or later and an agent that already works with your provider or gateway. To observe a Claude Code session first:
 
 ```sh
-pip install compache
-compache wrap claude
+python -m pip install compache
+compache doctor
+compache wrap --watch claude
 ```
 
-An agent makes dozens of model calls per message, and every call sends every tool result so far. compache goes between the agent and the model, keeps in view what its next steps rely on, and keeps the cache warm while a tool runs. The agent itself is left as it is.
+Complete a task in the launched agent and exit it. Then check that model calls were recorded:
+
+```sh
+compache stats claude --json
+```
+
+Look for your model and a positive `calls` count. The report counts calls with provider usage. It prices those calls and estimates what the same traffic would have cost with the full history under the provider’s default cache lifetime. If the launcher reports that no model calls came through, check the agent's effective endpoint with `compache wrap --print claude` and specify `--upstream` for a custom gateway. For the next session, run `compache wrap claude` to apply the learning policy. To use a fixed policy instead, run `compache wrap --policy policy.json claude`. The agent's own credentials and billing arrangement apply. [Troubleshooting](troubleshooting.md)
 
 ![Cost per 1,000 model calls on Claude Sonnet 5.5 for one task at a stretch, for a few steps with a 4-minute break, and for three tasks with 4-minute breaks: everything, cached at its best, and compache](assets/agents-cost.svg)
 
-| | |
+If you want a coding agent to configure compache in an application, install the [setup skill](../skills/compache-setup/SKILL.md) with `npx skills add BarendPotijk/compache`. In Claude Code, use `/plugin install compache --marketplace BarendPotijk/compache`.
+
+## Launch options
+
+| Command | When to use it |
 |---|---|
 | `compache wrap claude` | Claude Code. Also `codex`, `opencode`, `gemini`, `qwen`, `aider`, `goose`, `crush`, `copilot`, `kilo`, `pi`, `openhands` |
 | `compache wrap codex -- exec "fix the failing test"` | With arguments of its own |
@@ -32,8 +49,8 @@ An agent makes dozens of model calls per message, and every call sends every too
 | The cache has expired | They become a notice at once: everything has to be paid for again anyway |
 | What the model reasoned before | Goes with the results of its time. It is sent again with every call and takes as much room as they do. Claude only takes it back behind what it was made behind, so a cut takes all that stands behind it |
 | The model needs one after all | It calls `reopen`. The agent never sees the call, and what it fetched stays in view until it is old. Once it fetches the same again, or goes round with tools of its own for what it no longer sees, results stay twice as long in this conversation |
-| A tool takes longer than the cache lives | The same request goes out once more with next to no output, which keeps the cache |
-| Somebody is back after a break | The instructions and tools that open every request are read from an entry that lives an hour |
+| A tool takes longer than the cache lives | If the policy schedules a ping, a short-output request attempts to refresh the cached prefix |
+| Somebody is back after a break | Shared instructions and tools can still hit a longer-lived cache entry when the provider supports it and the policy selected that lifetime |
 
 How many rounds of results stay, when a cut pays, how many pings and which lifetimes are learned. A cut leaves a cache mark where the next one will begin, so the provider still reads what comes ahead of it.
 
@@ -42,47 +59,31 @@ How many rounds of results stay, when a cut pays, how many pings and which lifet
 - **It starts from public runs.** The policy for the first session was fitted on 174 coding-agent runs and keeps the newest 8 rounds in full.
 - **It goes on from yours.** After some 200 calls, and again whenever that has grown by half, it is fitted on what is on record in `~/.compache/<agent>`, per model, in the seconds after a session. `compache learn claude --from claude` adds the sessions Claude Code or Codex kept before, so that it need not wait.
 - **No labels.** A reply that repeats a line which only a tool had returned shows which result it relied on. Those lines are held as hashes while the conversation runs, and the record keeps which result it was, never the line.
-- **It stays honest.** A policy that hides results hides that they were needed. So one conversation in ten goes out as the agent wrote it. Those say what replies rely on, and what the others save.
+- **Control conversations.** A policy that hides results hides that they were needed. So one conversation in ten goes out as the agent wrote it. Those say what replies rely on, and what the others save.
 - **No text.** The record holds sizes, times and usage. Conversations go by a hash.
 
 The default fit requires 80% of training calls known to rely on earlier results to find them in view. Set `--min-retention` on `compache fit` to choose another minimum. Each observed miss is priced as fetching the result back.
 
 ## In your own agent
 
-```python
-client = compache.wrap(Anthropic(), learn="compache-record")        # or OpenAI(), genai.Client(), async clients
-```
+Use the same integration as the application that owns the model call:
 
-```python
-live = compache.Live(learn="compache-record")
-agent = create_agent(model, tools, middleware=[compache.langchain.middleware(live)], checkpointer=saver)
-```
+| Your agent | Integration |
+|---|---|
+| Uses an OpenAI, Anthropic or Google GenAI Python client | `compache.wrap(client, learn="compache-record")`. Reuse the returned client. [SDK examples](integrations.md#sdk-clients) |
+| Uses LangChain's `create_agent` or a custom LangGraph node | Configure the [agent middleware or node's HTTP client](integrations.md#langchain-and-langgraph) and propagate the graph thread ID. |
+| Accepts a base URL | Start `compache proxy --learn compache-record` and [configure the harness](integrations.md#the-proxy). |
+| Builds prompts itself | Create a session per task, use `session.prepare` to start a turn, `session.replied` and `session.extend` for tool rounds, and `session.complete` for the final answer. [Session lifecycle](sessions.md) |
 
-```sh
-compache proxy --learn compache-record                              # anything else with a base URL
-```
-
-Every way in of the [integrations](integrations.md) takes `learn`. To decide yourself when a policy changes, record with `record="compache-record"`, fit with `compache fit compache-record -o policy.json` and give the file: an agent's traffic is recognized by its loops, and needs no labels. `compache default --agent --model claude-sonnet-5-5` writes the policy that learning starts from.
-
-With your own prompt assembly, a session decides call by call:
-
-```python
-session = policy.session("task-17")
-turn = session.prepare(question)
-...
-session.replied(turn, reply_text, tool_arguments, usage=response.usage)
-turn = session.extend(turn, tool_results)          # one round of tool calls. turn.archived_ids went out as a notice
-...
-session.complete(turn, answer, usage=response.usage)
-```
+To control when policies change, record with `record="compache-record"`, run `compache fit compache-record -o policy.json`, and give the resulting file to your integration. Tool loops can supply evidence of which results subsequent replies used. To inspect the starting agent policy, run `compache default --agent --model claude-sonnet-5-5`.
 
 ## What it saves
 
 ![Long Claude Code sessions on Claude Haiku 5.5, the bill after the last prompt. One task in 13 prompts: alone $0.33, Headroom $0.40, Kompressor $0.28, compache $0.13. 16 issues in one conversation: alone $0.98, compache $0.15. Alone and compache are averages of two runs](assets/agents-live.svg)
 
-Live, 51% to 85% less on long sessions and 16% less on sessions of some fifty calls, with as many solved. [Agent benchmarks](../benchmarks/agents/README.md): real sessions with Claude Code and Codex next to Headroom and Kompressor, and the numbers below.
+The published live runs measured 51% to 85% less on long sessions and 16% less on sessions of some fifty calls, with as many solved. [Agent benchmarks](../benchmarks/agents/README.md): real sessions with Claude Code and Codex next to Headroom and Kompressor, and the numbers below.
 
-Modeled on the public runs, fitted on half of them and priced on the other half, against sending everything on the provider's default cache:
+The table below reports modeled savings on the public runs, fitted on half of them and priced on the other half, against sending everything on the provider's default cache:
 
 | | Claude Sonnet 5.5 | Claude Haiku 5.5 | GPT-6 Luna |
 |:--|:-:|:-:|:-:|
@@ -93,7 +94,7 @@ Modeled on the public runs, fitted on half of them and priced on the other half,
 | Three tasks in a session, back after 4 minutes | 23% | 80% | 28% |
 | Three tasks in a session, back after 30 minutes | 30% | 81% | 30% |
 
-- **Breaks are where most of it is.** Part of that is caching alone: pings and the right lifetimes save 25% of the 29% in the third row on Sonnet. Trimming is the other part, and grows with the length of a session.
+- **Breaks are where most of it is.** In the eight-call-per-prompt Sonnet scenario with four-minute breaks, optimizing caching alone saves about 25% against the default cache. Adding compaction brings the total saving to 29% against the same baseline.
 - **Long sessions on Haiku** pass 100,000 tokens, where its list price is five times higher. A cut keeps them below.
-- **Short sessions save nothing.** A task that is done in ten calls has nothing to trim, and compache's tool costs it 1%.
-- **About 1 call in 85** fetches something back.
+- In the ten-call benchmark, the recovery tool added about 1% to cost and the session ended before compaction helped.
+- In the public-run replay, about one call in 85 needed an archived result.

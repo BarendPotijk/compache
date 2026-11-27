@@ -1,63 +1,28 @@
 ---
 name: compache-setup
-description: "Put compache into a codebase or around a coding agent, so that long conversations and agent loops cost less: find where model calls leave, choose the way in, check that it works and say what it saves. Use when asked to lower LLM cost, trim context, keep a prompt cache warm, or add compache."
+description: Integrate Compache into a chatbot or coding agent, fit a policy on its conversations, and verify request routing and usage.
 ---
 
-# Put compache into an application
+# Integrate Compache into an application
 
-compache goes in where model calls leave the process. It sends less of a long conversation, at the moments when that is cheap, and keeps the provider's cache warm while that pays. It learns both from the traffic itself. There is nothing to configure, so do not add thresholds or settings.
+Locate the code that constructs the model client, the conversation ID and the history passed on each call. Identify any existing gateway, compaction, retry loop and scheduler. Use one integration point per request path and retain the application's original conversation history for recovery.
 
-## 1. Find where the model calls leave
+## Choose the integration
 
-Look for SDK clients (`OpenAI(`, `Anthropic(`, `genai.Client(`, their async forms), chat models of a framework, `litellm.completion`, and base URLs in settings. One client may be made in one place and used in many: put compache in where it is made.
+- **Existing provider SDK.** Reuse the application’s configured OpenAI, Anthropic or Google GenAI client. Wrap it where it is created and use the returned client throughout the app. Bind the application conversation ID with `compache.thread(id)`.
+- **Framework.** For LangChain `create_agent`, use the middleware with a stable graph thread ID. For a custom LangGraph node, inject the wrapped transport into the node that calls the model. For other frameworks, follow the [integration guide](https://github.com/BarendPotijk/compache/blob/main/docs/integrations.md) for their actual extension point.
+- **Gateway or configurable base URL.** Point the application at `compache proxy`. Preserve the existing final destination by explicitly setting the intended upstream when a gateway or cloud deployment is in use.
+- **Application-owned prompt and sends.** Create one `policy.session(thread_id)` per active conversation. The host supplies usage receipts and handles the reopen tool and scheduled pings. [Session lifecycle](https://github.com/BarendPotijk/compache/blob/main/docs/sessions.md)
+- **Coding agent CLI.** Use `compache wrap --watch <agent>` to observe, or `compache wrap <agent>` for the learning integration. `compache wrap --print <agent>` shows the harness-specific routing settings.
 
-## 2. Choose the way in
+## Select the data and policy
 
-| What the code has | What to change |
-|---|---|
-| A client of the OpenAI, Anthropic or Google GenAI SDK | `client = compache.wrap(client, learn="compache-record")` where it is made |
-| A LangChain or LangGraph agent | `middleware=[compache.langchain.middleware(compache.Live(learn="compache-record"))]` in `create_agent`, and a checkpointer with a `thread_id` |
-| OpenAI Agents SDK, Claude Agent SDK, Google ADK, Pydantic AI, LlamaIndex, Microsoft Agent Framework, Semantic Kernel, Agno, AutoGen, Strands, Haystack, Instructor | Hand the framework the wrapped client, or point it at the proxy. One line each in `docs/integrations.md` |
-| LiteLLM in process | `compache.litellm.install(compache.Live(learn="compache-record"))` |
-| A LiteLLM proxy or another gateway | `compache proxy --learn compache-record --upstream <the gateway>` in front of it |
-| Anything else with a base URL, in any language | `compache proxy --learn compache-record`, and the base URL set to `http://127.0.0.1:8787/v1` (Anthropic: without `/v1`) |
-| A coding agent on the command line | `compache wrap claude`, `codex`, `opencode`, `gemini`, `qwen`, `copilot`, `aider`, `goose`, `crush`, `kilo`, `pi`, `openhands`, or `compache wrap -- <command>` |
+Apply an existing policy with `compache.wrap(client, policy)`. If starting with observation, explicitly enable local recording with `compache.wrap(client, record="compache-record")`. Keep that directory out of version control. The default record holds sizes, timing, usage and identifiers for observed dependencies. Exported traces and generated labeling packets may contain full text.
 
-Then:
+Chat fitting on metadata alone tunes caching and preserves history. To fit chat compaction, use existing dependency labels, or sampled labeling when the user has opted into sending conversation text to their configured provider in additional billable requests. For tool-loop agents, quote-based dependency evidence can be inferred during recording. Keep training and evaluation conversations disjoint and preserve their original IDs.
 
-- Add `compache` to the dependencies (`pip install compache`, Python 3.11 or later, no dependencies of its own).
-- Add the record folder to `.gitignore`. It holds sizes, times and usage, and no text.
-- Name each conversation where the application has a name for it: `with compache.thread(conversation_id):` around the call, or the header `x-compache-thread`. Without a name compache recognizes a conversation by what it has said and by its tool calls.
-- Keep sending the whole conversation. If the application cuts its own history (a sliding window, dropped tool results, a summary at a threshold), say so to the user before removing it: both at once defeat each other.
+## Verify the application's path
 
-## 3. Check it
+Use the project’s existing tests or an in-memory provider. Confirm a completed turn appears in the record or increases the live call counter. For multi-turn changes, inspect the actual outgoing request and verify the original application history remains available. An application that sends only server-side references or an already-truncated history gives Compache less context to manage.
 
-```sh
-compache doctor                       # a request goes through, and what is installed here
-python your_app.py                    # a conversation of several turns or tool calls
-compache stats compache-record        # what it cost, and what it would have
-```
-
-Short conversations save nothing, and that is right: a first cut comes when old results outweigh what follows them, or when a user returns to an expired cache.
-
-## 4. Chats with retrieved text
-
-An agent's policy needs nothing but the traffic. A chat that retrieves text once per message is fitted on labels, which the model can give on a sample of turns:
-
-```python
-client = compache.wrap(client, record="compache-record", sample=0.1)   # some 600 messages
-```
-
-```sh
-compache fit compache-record -o policy.json
-```
-
-```python
-client = compache.wrap(client, "policy.json")
-```
-
-Past traces in Langfuse, MLflow or an OpenTelemetry export do as well: `compache pull langfuse -o threads.jsonl.gz`, then `compache fit threads.jsonl.gz`. The skill `compache-label-dependencies` writes labels for those.
-
-## 5. Report
-
-Tell the user which call sites changed, what `compache stats` or `compache fit` says in dollars, and what is not covered: calls that go around the changed client, and conversations that another part of the application trims.
+Report the integration point, policy source, and what was verified. State whether a cost is a modeled replay estimate, a usage-based estimate or a provider charge. For evaluated workloads, include cost units, the baseline and observed held-out retention. [Offline examples](https://github.com/BarendPotijk/compache/blob/main/examples/README.md) · [Diagnostics](https://github.com/BarendPotijk/compache/blob/main/docs/troubleshooting.md)

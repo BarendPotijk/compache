@@ -1,6 +1,7 @@
 """The README's quickstart, the sample it runs on, the figures drawn from committed data, and the links between pages."""
 
 import contextlib
+import importlib.metadata
 import io
 import json
 import os
@@ -111,6 +112,37 @@ class QuickstartTests(unittest.TestCase):
         sent, full, archived = (int(x.replace(",", "")) for x in rows[-1].split()[1:4])
         self.assertLess(sent, full / 3)
         self.assertGreater(archived, 0)
+
+    def test_the_held_out_example_reports_cost_and_retention(self):
+        with tempfile.TemporaryDirectory() as tmp, contextlib.chdir(tmp):
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                runpy.run_path(str(SAMPLE / "fit_replay.py"), run_name="__main__")
+        guide = (ROOT / "examples" / "README.md").read_text("utf-8")
+        for line in out.getvalue().splitlines():
+            self.assertIn(line, guide)
+        self.assertIn("Historical requirements retained: 5/8", out.getvalue())
+
+    def test_the_wrapped_example_changes_the_outgoing_request(self):
+        try:
+            version = importlib.metadata.version("anthropic")
+        except importlib.metadata.PackageNotFoundError:
+            self.skipTest("install the example's anthropic SDK")
+        if version.split(".")[0] != "1":
+            self.skipTest("this example uses the 1.x SDK and its httpx2 transport")
+        with tempfile.TemporaryDirectory() as tmp, contextlib.chdir(tmp):
+            self.policy.save("policy.json")
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                runpy.run_path(str(SAMPLE / "wrapped_chatbot.py"), run_name="__main__")
+        expected = [
+            "Application history: 12 user turns",
+            "Hinge number in original message: True",
+            "Hinge number in recall request before reopen: False",
+            "Reopen calls: 1",
+            "Provider requests: 13 observed, 13 counted by Compache",
+            "Answer: Ticket PKG-104 needs hinge H-772.",
+        ]
+        self.assertEqual(out.getvalue().splitlines(), expected)
+        self.assertIn(out.getvalue(), (ROOT / "examples" / "README.md").read_text("utf-8"))
 
     def test_the_app_managed_example_runs_without_a_provider(self):
         example = runpy.run_path(str(SAMPLE / "app_managed.py"))
