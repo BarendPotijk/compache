@@ -1,7 +1,7 @@
 import {BINS, DEFAULTS, DRAWN, WINDOW, configure, describePolicy, drawnStats, longAvailable, lawWeights, needLaw, warmReturnShare} from './engine.mjs';
 import {RULES, comparisons, configureRules} from './baselines.mjs';
 import {presets, applyPreset} from './models.mjs';
-import {contextSeries, coverage} from './charts.mjs';
+import {contextSeries, coverage, ticks} from './charts.mjs';
 import {EXPORT_SCHEMA, LINK_VERSION, parseLink, parseFile, resolveScenario, shareHash} from './scenario.mjs';
 import {STARTS} from './starts.mjs';
 import {isLabel, isThread, measure, parseRows} from './traces.mjs';
@@ -27,7 +27,7 @@ const esc = text => String(text).replace(/[&<>"]/g, ch => ({'&': '&amp;', '<': '
 const plural = (n, word) => `${num(n)} ${word}${n === 1 ? '' : 's'}`;
 const minutes = m => m < 1 ? `${num(m * 60)} s` : m < 90 ? `${num(m)} min` : m < 2880 ? `${num(m / 60)} h` : `${num(m / 1440)} d`;
 
-let current = null, baseConfig = DEFAULTS, latest = 0, timer, worker = null;
+let current = null, baseConfig = DEFAULTS, latest = 0, timer, worker = null, running = false;
 let priorTokens = 0, priorLength = 0, retrievalSpread = 1.8;
 // Where the scenario came from, whether it was changed since, and a load failure that stays on screen until the next edit.
 let source = '', edited = false, loadError = '', startId = '';
@@ -114,37 +114,50 @@ function invalidate(message) {
   $('baselineNote').textContent = '';
   $('export').disabled = true; $('share').disabled = true;
 }
+// An idle worker holds the fit for the current workload. Interrupt only an unfinished calculation.
+function cancelCalculation() {
+  latest++;
+  if (running) { worker.terminate(); worker = null; running = false; }
+}
 function update() {
-  clearTimeout(timer); worker?.terminate(); latest++; labels();
+  clearTimeout(timer); cancelCalculation(); labels();
   if (!form.checkValidity()) {
     const bad = Array.from(form.elements).find(e => e.validity && !e.validity.valid); bad?.closest('details')?.setAttribute('open', '');
     invalidate(`${labelOf(bad?.dataset.model ? `model.${bad.dataset.model}` : bad?.dataset.rule ? `app.${bad.dataset.rule}` : bad?.name || '') || 'Input'}: ${bad?.validationMessage || 'check this value'}`);
     return;
   }
   current = null; $('errors').textContent = loadError; $('errors').hidden = !loadError;
-  $('status').textContent = 'Fitting…'; busy('true'); $('export').disabled = true; $('share').disabled = true;
-  const c = readForm();
-  worker = new Worker(new URL('./worker.mjs', import.meta.url), {type: 'module'});
-  worker.onmessage = ({data}) => { if (data.id !== latest) return; if (data.error) { invalidate(readable(data.error)); return; } render(data.result); };
-  worker.onerror = () => invalidate('Could not load the calculator. Serve this folder over HTTP and reload.');
-  worker.postMessage({id: latest, config: c});
+  $('status').textContent = 'Calculating…'; busy('true'); $('export').disabled = true; $('share').disabled = true;
+  const id = latest;
+  function workerFailed() {
+    if (id !== latest) return;
+    worker?.terminate(); worker = null; running = false;
+    invalidate('The calculator could not start its background worker. Reload the page to try again.');
+    $('status').textContent = 'Calculation unavailable';
+  }
+  try {
+    worker ??= new Worker(new URL('./worker.mjs', import.meta.url), {type: 'module'});
+    worker.onmessage = ({data}) => {
+      if (data.id !== latest) return;
+      if (data.candidate) { $('status').textContent = `Fitting policy ${data.candidate} of ${data.total}…`; return; }
+      running = false;
+      if (data.error) { invalidate(readable(data.error)); return; }
+      render(data.result);
+    };
+    worker.onerror = workerFailed;
+    worker.onmessageerror = workerFailed;
+    running = true;
+    worker.postMessage({id, config: readForm(), reportProgress: true});
+  } catch { workerFailed(); }
 }
 const changed = () => { if (source) edited = true; startId = ''; };
 function soon() {
-  loadError = ''; labels(); worker?.terminate(); latest++; current = null; $('export').disabled = true; $('share').disabled = true; busy('true');
+  loadError = ''; labels(); cancelCalculation(); current = null; $('export').disabled = true; $('share').disabled = true; busy('true');
   try { renderInputs(configure(readForm())); } catch { /* an unfinished entry: the check in update() reports it */ }
   clearTimeout(timer); timer = setTimeout(update, 250);
 }
 
 // Chart pieces. Every colour is a class that resolves to a design token in style.css.
-// Clean axis values from lo to at least hi, about `count` steps apart.
-function ticks(lo, hi, count = 4) {
-  const raw = (hi - lo || 1) / count, mag = 10 ** Math.floor(Math.log10(raw)), norm = raw / mag;
-  const step = (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 2.5 ? 2.5 : norm <= 5 ? 5 : 10) * mag, first = Math.floor(lo / step + 1e-9), values = [];
-  for (let i = first; ; i++) { const v = tidy(i * step); values.push(v); if (v >= hi - step * 1e-9) break; }
-  let digits = 0; while (digits < 6 && Math.abs(step * 10 ** digits - Math.round(step * 10 ** digits)) > 1e-9) digits++;
-  return {step, values, digits};
-}
 // A bar from the baseline y0 to the value y1, rounded at the data end only.
 function bar(x, w, y0, y1) {
   const r = Math.min(4, w / 2, Math.abs(y1 - y0)), toward = y1 < y0 ? -1 : 1;
@@ -367,6 +380,11 @@ function renderTurn(d, list) {
   const p = d.planner, box = $('pingChart'), W2 = Math.max(220, box.clientWidth), H = box.clientHeight || 160, L2 = 50, R = 8, T = 10, B = 34, data = p.rows.map(r => ({...r, net: 1000 * r.net, cost: 1000 * r.expectedCost, gain: 1000 * r.expectedGain}));
   $('pingExplanation').textContent = p.chosen ? `Up to ${plural(p.chosen, 'ping')}, every ${num(p.interval)} min. ${d.actualPings < p.chosen ? `${d.actualPings || 'None'} sent before the user was back` : 'All sent'}.` : WHY_NO_PING[p.reason] ?? p.reason;
   if (data.length < 2) { box.innerHTML = ''; return; }
+  if (data.some(row => !Number.isFinite(row.net))) {
+    $('pingExplanation').textContent = 'The projected requests exceed the context window. A keep-warm saving is unavailable for this turn.';
+    box.replaceChildren();
+    return;
+  }
   const ys = ticks(Math.min(0, ...data.map(r => r.net)), Math.max(1e-9, ...data.map(r => r.net)), 3), lo = ys.values[0], hi = ys.values.at(-1), y = v => T + (hi - v) / (hi - lo || 1) * (H - T - B), slot = (W2 - L2 - R) / data.length;
   svg = `<svg viewBox="0 0 ${W2} ${H}" role="img" aria-label="Expected net saving of 0 to ${data.length - 1} pings, per 1,000 such waits">`;
   for (const v of ys.values) svg += `<line class="${v ? 'g-grid' : 'g-axis'}" x1="${L2}" x2="${W2 - R}" y1="${y(v)}" y2="${y(v)}"/><text x="${L2 - 6}" y="${y(v) + 4}" text-anchor="end">${usd(v, ys.digits)}</text>`;

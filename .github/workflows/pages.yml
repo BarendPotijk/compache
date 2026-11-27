@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'site/**'
+      - 'scripts/build_calculator_fit.mjs'
       - 'src/compache/models.json'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
@@ -30,7 +31,9 @@ jobs:
       - name: Test calculator
         run: node --test site/*.test.mjs
       - name: Prepare website files
-        run: rsync -a --exclude '*.test.mjs' site/ _site/
+        run: |
+          rsync -a --exclude '*.test.mjs' site/ _site/
+          node scripts/build_calculator_fit.mjs _site/starter-fit.mjs
       - name: Upload website
         uses: actions/upload-pages-artifact@v4
         with:

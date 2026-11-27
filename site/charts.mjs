@@ -1,5 +1,22 @@
 import {WINDOW,configure,needLaw,theoreticalSurvival} from './engine.mjs';
 
+// Rounded tick values covering the plotted range. Bound the loop even for an unpriceable forecast.
+export function ticks(lo, hi, count = 4) {
+  if (!Number.isFinite(lo) || !Number.isFinite(hi)) return {step: 1, values: [0, 1], digits: 0};
+  if (hi === lo) hi = lo + 1;
+  const raw = (hi - lo) / count, mag = 10 ** Math.floor(Math.log10(raw)), norm = raw / mag;
+  const step = (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 2.5 ? 2.5 : norm <= 5 ? 5 : 10) * mag;
+  const first = Math.floor(lo / step + 1e-9), values = [];
+  for (let offset = 0; offset <= count + 2; offset++) {
+    const value = Number(((first + offset) * step).toPrecision(12));
+    values.push(value);
+    if (value >= hi - step * 1e-9) break;
+  }
+  let digits = 0;
+  while (digits < 6 && Math.abs(step * 10 ** digits - Math.round(step * 10 ** digits)) > 1e-9) digits++;
+  return {step, values, digits};
+}
+
 // Plot the same surviving cohort in both arms at each turn. Ended or failed
 // threads are not padded with zero tokens, and late-turn sample sizes are exposed.
 export function contextSeries(result,threadId='average') {
