@@ -132,7 +132,7 @@ class CommandTests(unittest.TestCase):
             out,
         )
         self.assertIn(
-            "https://barendpotijk.github.io/compache/#v=7&model=sonnet&inputTokens=",
+            "https://barendpotijk.github.io/compache/#v=8&model=sonnet&inputTokens=",
             out,
         )
         saved = json.loads((self.base / "profile.json").read_text())

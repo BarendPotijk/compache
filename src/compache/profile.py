@@ -30,7 +30,7 @@ __all__ = ["CALCULATOR_URL", "history_resent", "profile", "workload"]
 
 CALCULATOR_URL = "https://barendpotijk.github.io/compache/"
 _KINDS = ("input", "retrieval", "output")
-_LINK_VERSION = "7"
+_LINK_VERSION = "8"
 # Turns after the first by which an effect of position is halfway to its long-thread value.
 _HALF_TURNS = (0.5, 1, 2, 3, 5, 8, 13, 21, 34)
 _Z95 = 1.6448536269514722

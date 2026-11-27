@@ -122,8 +122,13 @@ test('what is compared: a named comparison, your app, or a cost you measured', (
   const base = {...STARTS[0].scenario, threads: 8}, run = o => simulate(applyPreset({...base, ...o}, 'sonnet'));
   const app = run({compare: 'app', app: {keepTurns: 3}}); assert.equal(app.selected.id, 'app'); assert.equal(app.baseline.rules.keepTurns, 3); assert.deepEqual(app.config.app, {keepTurns: 3});
   const paid = run({compare: 'measured', measuredCost: 100}); assert.equal(paid.selected.id, 'measured'); assert.equal(paid.savings.range, null); near(paid.savings.percent, 100 - 1000 * paid.compache.totals.cost / paid.workload.totalRuns, 1e-9); assert.equal(paid.baseline.id, 'app');
-  // A comparison the model does not have falls back to sending everything.
-  assert.equal(simulate(applyPreset({...base, compare: 'compaction'}, 'luna')).selected.id, 'everything'); assert.throws(() => configure({compare: 'nope'}), /not a comparison/);
+  // The headline, ledger and shared config must agree even after a baseline becomes unavailable.
+  for (const result of [run({}), run({compare: 'measured', measuredCost: 0}), simulate(applyPreset({...base, compare: 'compaction'}, 'luna'))]) {
+    assert.equal(result.selected.id, 'openclaw');
+    assert.equal(result.baseline.id, result.selected.id);
+    assert.equal(result.config.compare, result.selected.id);
+  }
+  assert.throws(() => configure({compare: 'nope'}), /not a comparison/);
 });
 test('a side that does not fit the model has no cost and no saving', () => {
   const r = simulate({threads: 2, maxTurns: 3, plannedTurns: 3, plannedTurnsP95: 3, lengthDistribution: 'fixed', tokenMedian: 400, tokenP95: 400, systemTokens: 100, safetyReserve: 0, keepWarm: false, cacheMinTokens: 1, model: {context: 1200, maxInput: 1200}, outputTokens: 20, inputTokens: 10, compare: 'everything'});

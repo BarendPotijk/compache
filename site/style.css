@@ -149,25 +149,25 @@ details[open] > summary::before { content: '−'; }
 .starts .own { border-style: dashed; border-color: var(--axis); }
 .starts .source { margin-left: auto; }
 
-/* The saving and every side */
+/* Savings and the selected baseline */
 .lead { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 8fr); gap: 16px; }
 .lead > .panel { margin: 0; }
 .saving h2, .sides h2 { font-size: 13px; font-weight: 500; color: var(--ink-2); }
-.saving h2 b { font-weight: 650; color: var(--ink); }
 .saving .hero { font-size: 56px; letter-spacing: -2px; margin: 10px 0 0; }
 .saving .delta { font-size: 15px; }
 .saving dl { margin: 16px 0 0; font-size: 13px; }
 .saving dl div { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-top: 1px solid var(--grid); }
 .saving dt { color: var(--ink-2); } .saving dd { margin: 0; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.sides .panel-head { margin-bottom: 4px; } .sides .panel-head .caption { margin: 0; }
-.side { display: grid; grid-template-columns: minmax(0, 11fr) minmax(60px, 12fr) 92px 58px; align-items: center; gap: 12px; width: 100%; padding: 5px 8px; border: 0; border-radius: 6px; background: none; text-align: left; font-size: 13px; color: var(--ink); }
-button.side:hover { background: var(--wash); }
-.side[aria-checked=true] { background: var(--wash); font-weight: 650; }
-.side.head { padding-bottom: 2px; font-size: 11px; color: var(--muted); } .side.head span { text-align: right; }
-.side .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .side.us .name { font-weight: 650; }
-.side .name i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 6px; background: var(--compache); }
-.side .track i { display: block; height: 10px; border-radius: 0 4px 4px 0; background: var(--neutral); } .side .track i.compache { background: var(--compache); } .side .track i.picked { background: var(--baseline); }
-.side .value { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; } .side .value.muted { color: var(--muted); } .side .value.bad { color: var(--bad); }
+.sides .panel-head { align-items: center; flex-wrap: wrap; gap: 8px 16px; }
+.baseline-picker { display: flex; align-items: center; gap: 8px; margin: 0; }
+.baseline-picker select { width: auto; max-width: 100%; margin: 0; }
+.cost-bars { margin: 20px 0 16px; }
+.cost-bars > div { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; margin-top: 16px; }
+.cost-bars dt { font-size: 14px; }
+.cost-bars dd { display: contents; font-weight: 650; font-variant-numeric: tabular-nums; }
+.cost-track { grid-column: 1 / -1; height: 10px; border-radius: 3px; background: var(--wash); overflow: hidden; }
+.cost-track i { display: block; height: 100%; background: var(--baseline); }
+.cost-bars > div:last-child .cost-track i { background: var(--compache); }
 
 /* Inputs you can draw */
 .trio { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
@@ -304,7 +304,8 @@ footer { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8p
   .actions button { padding: 6px 9px; font-size: 12px; }
   .title-row { flex-direction: column; align-items: flex-start; gap: 6px; margin: 22px 0 16px; }
   h1 { font-size: 26px; }
-  .side { grid-template-columns: minmax(0, 9fr) minmax(24px, 4fr) 76px 46px; gap: 8px; padding: 6px 4px; font-size: 12px; }
+  .sides .panel-head { align-items: flex-start; }
+  .baseline-picker { max-width: 100%; }
   .starts .source { margin-left: 0; width: 100%; }
   #policyTabs { flex-wrap: wrap; }
   .hero { font-size: 40px; }

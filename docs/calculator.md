@@ -1,13 +1,13 @@
 # Calculator
 
-The [calculator](https://barendpotijk.github.io/compache/) estimates cost per 1,000 user turns under a compache policy, your own rules and selected configurations of other tools. It runs in the browser from `site/`, with no keys and no provider requests.
+The [calculator](https://barendpotijk.github.io/compache/) estimates cost per 1,000 user turns for Compache and one baseline you choose. It runs in the browser from `site/`, with no keys and no provider requests.
 
 ## What it needs, and the easiest way to give it
 
 | It needs | Least effort first |
 |---|---|
 | What a turn adds, how long threads run, how long users are away, what later turns need | A starting point · drop a chat log, with labels if you have them · drop a `policy.json` · the link `compache profile` prints · draw the distributions · type a median and a 95th percentile |
-| What you do today | Send everything, unless you say otherwise · pick a tool's defaults · edit the rules under *Your app today* · enter what you pay per 1,000 turns |
+| What you do today | OpenClaw is the default baseline. Choose another preset in **Baseline**, edit the rules under *Your app today*, or enter what you pay per 1,000 turns |
 | Model and prices | A preset, or your own prices |
 
 A file is read in the browser and sent nowhere. A chat log is measured as `compache profile` measures it, with the observed distributions instead of a fitted curve.
@@ -23,14 +23,14 @@ prints a link with the workload and the policy filled in. `compache fit` also wr
 The address bar always holds the scenario on screen, and **Share** copies the result with its link. A link names only what it changes, so it can be written by hand:
 
 ```text
-https://barendpotijk.github.io/compache/#v=7&model=haiku&start=documents&gapMedianMinutes=30&app.keepTurns=10&compare=app
+https://barendpotijk.github.io/compache/#v=8&model=haiku&start=documents&gapMedianMinutes=30&app.keepTurns=10&compare=app
 ```
 
 ## What it shows
 
 | Part | Shows |
 |---|---|
-| Cost per 1,000 turns | Estimated spend by configuration, with the share of sampled dependencies still missing after any modeled recovery. Click one to compare with it |
+| Cost per 1,000 turns | Two bars show Compache and the selected baseline for the same workload. The headline saving is relative to that baseline |
 | The policy | What stays of questions, answers and retrieved text, over where later turns need it. The one fitted here, the one in your `policy.json`, or your own: drag a window to price it. Every candidate, by cost and needed text in view |
 | One conversation | What each turn sends, when the cache expired, what was trimmed, fetched back and pinged. Click a turn for the expected cost of both choices and of each number of pings |
 

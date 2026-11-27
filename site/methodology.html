@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<meta name="description" content="How the Compache cost calculator prices a workload: the workload model, prices and cache rules, the fitted policy and the OpenClaw baseline.">
+<meta name="description" content="How the Compache cost calculator prices a workload: the workload model, prices and cache rules, the fitted policy and your chosen baseline.">
 <title>Methodology · Compache</title>
 <link rel="icon" type="image/svg+xml" href="./mark.svg">
 <link rel="stylesheet" href="./style.css">
@@ -14,17 +14,17 @@
 <header class="top"><a class="brand" href="./"><i></i>compache</a><a href="./">Calculator</a></header>
 
 <h1>How the calculator works</h1>
-<p>The calculator prices one chat workload from token counts and list prices: under a Compache policy fitted to it, under your own rules, and under the documented defaults of other tools. It runs in the browser from <code>site/</code>, with no dependencies, keys, telemetry or provider requests.</p>
+<p>The calculator prices one chat workload from token counts and list prices: under a fitted Compache policy and a baseline you select. The default baseline is OpenClaw. It runs in the browser from <code>site/</code>, with no dependencies, keys, telemetry or provider requests.</p>
 <p>It is a model. No model is called, no product is executed and answer quality is not measured. The <a href="https://github.com/BarendPotijk/compache/tree/main/benchmarks/docchat">DocChat benchmark</a> runs the package itself.</p>
 
 <h2>Run it</h2>
 <pre><code>python3 -m http.server 8765 --bind 127.0.0.1 --directory site   # then open http://127.0.0.1:8765/
 node --test site/*.test.mjs</code></pre>
 <ul>
-<li><strong>Share</strong> copies a link that carries every setting. Links made by earlier versions still open, with a note that their numbers were computed differently.</li>
+<li><strong>Share</strong> copies a link that carries every setting. Earlier links retain their saved settings. Version 7 links with no baseline specified use the original full-history baseline.</li>
 <li><strong>Export</strong> downloads the settings, the sampled threads, every priced call, every candidate policy and the limits below.</li>
 <li><strong>Your data</strong> opens a chat log, its labels, a <code>policy.json</code>, a profile or a file exported here, several at once if you like. You can also drop them on the page. They are read in the browser and sent nowhere.</li>
-<li>A setting that is unknown or out of range is reported on the page. Nothing falls back to a default unnoticed.</li>
+<li>A setting that is unknown or out of range is reported on the page. If a model change makes the selected baseline unavailable, the selector returns to OpenClaw.</li>
 </ul>
 
 <h2>From your traces</h2>
@@ -108,7 +108,7 @@ cache alive with n pings = F(n × interval + lifetime - d)</pre>
 <h2>The comparisons</h2>
 <p>Every comparison is a set of the same rules, and any of them can be copied into <em>Your app today</em> and edited: the cache lifetime (standard, long or none), the earlier turns sent, retrieved text dropped after some turns or shrunk on arrival, old tool results cleared, older turns summarized, and pings after every answer.</p>
 <ul>
-<li>Dropped and cleared text is fetched again with one extra call only where the tool would do so. Otherwise a turn that needs it goes without: the “missing” column. A summary may still carry a fact. That is not evaluated, so summarized text counts as missing.</li>
+<li>Dropped and cleared text is fetched again with one extra call only where the tool would do so. Otherwise the baseline counts it as missing. A summary may still carry a fact. That is not evaluated, so summarized text counts as missing.</li>
 <li>A summary call reads the request from the cache, or a bounded digest of the older turns. OpenClaw's uses a digest of at most 40,000 tokens with 500 per tool result, writes 4,000 tokens after a 256-token flush and appends a 1,500-token record.</li>
 <li>OpenClaw follows its documented defaults at revision <code>c49b553</code>. opencode, Anthropic's context editing and compaction, and Headroom follow their documentation, read on 24 November 2026. The sources and what is assumed are listed under <a href="https://github.com/BarendPotijk/compache/blob/main/docs/comparisons.md">other tools compared</a>.</li>
 <li>OpenAI's compaction has no documented default threshold and is not modeled. OpenClaw's own default for OpenAI models calls it. The client-side summary stands in.</li>

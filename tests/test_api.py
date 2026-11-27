@@ -765,7 +765,7 @@ class ProfileTests(unittest.TestCase):
         )
         self.assertEqual(result["calculator"]["model"], "sonnet")
         query = parse_qs(urlsplit(result["link"]).fragment)
-        self.assertEqual(query["v"], ["7"])
+        self.assertEqual(query["v"], ["8"])
         self.assertEqual(query["model"], ["sonnet"])
         self.assertEqual(query["source"], ["4 threads, 24 turns"])
         # Every measured setting by name, and nothing else.
