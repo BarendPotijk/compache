@@ -2,7 +2,7 @@
 export const STARTS = Object.freeze([
   {id: 'documents', name: 'Chat with documents', from: 'Measured on DocChat, users back after 4 minutes', scenario: {inputTokens: 36, outputTokens: 140, tokenMedian: 3706, tokenP95: 4236, systemTokens: 14, plannedTurns: 27, plannedTurnsP95: 87, continuationProbability: 1, answerSeconds: 3, archivedTokens: 168, gapMedianMinutes: 4, gapP95Minutes: 22,
     inputDependencyProbability: 0.164, inputDependencyTurnsBack: 1, inputDependencyTurnsBackP95: 23, retrievalDependencyProbability: 0.132, retrievalDependencyTurnsBack: 2, retrievalDependencyTurnsBackP95: 29, outputDependencyProbability: 0.182, outputDependencyTurnsBack: 1, outputDependencyTurnsBackP95: 40}},
-  {id: 'heavy', name: 'Heavy retrieval', from: '25k retrieved tokens a turn, an assumption', compare: 'openclaw', scenario: {}},
+  {id: 'heavy', name: 'Heavy retrieval', from: '25k retrieved tokens a turn, an assumption', scenario: {}},
   {id: 'assistant', name: 'Assistant, no retrieval', from: 'Long answers and no retrieval, an assumption', scenario: {tokenMedian: 0, tokenP95: 0, inputTokens: 120, outputTokens: 1200, systemTokens: 1500, plannedTurns: 20, plannedTurnsP95: 70, gapMedianMinutes: 2, gapP95Minutes: 60, inputDependencyProbability: 0.2, outputDependencyProbability: 0.25}},
   {id: 'agent', name: 'Agent with tools', from: 'Six model calls a turn over tool results, an assumption', scenario: {tokenMedian: 9000, tokenP95: 40000, inputTokens: 150, outputTokens: 700, systemTokens: 12000, callsPerTurn: 6, answerSeconds: 60, plannedTurns: 10, plannedTurnsP95: 35, gapMedianMinutes: 3, gapP95Minutes: 45, sharedPrefixWarm: 0.5, retrievalDependencyProbability: 0.3, retrievalDependencyTurnsBack: 2, retrievalDependencyTurnsBackP95: 15}}
 ]);

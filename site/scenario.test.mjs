@@ -74,40 +74,50 @@ const V7 = {
   recoveryOutputTokens: 32, safetyReserve: 32000, archivedTokens: 28, policy: null, compare: 'everything', app: {}, measuredCost: 0,
   model: {context: 1050000, maxInput: 922000, inputRate: 0.1, cachedRate: 0.01, outputRate: 0.5, writeMultiplier: 1.25, longThreshold: 272000, longInputMultiplier: 2, longOutputMultiplier: 1.5}};
 const V7_STARTS = '80729d006b86cf64';
+test('version 7 links and exports keep the original baseline and settings', () => {
+  const {config} = resolveScenario(parseLink('#v=7&model=luna'));
+  assert.deepEqual(config, configure(V7));
+  const old = resolveScenario(parseLink('#v=7&model=sonnet&compare=window&maxPings=1'));
+  assert.equal(old.config.compare, 'window');
+  assert.equal(old.config.maxPings, 1);
+  const file = parseFile({schemaVersion: 'compache-cost-explorer-v7', modelPreset: 'sonnet', config: {compare: 'app', app: {keepTurns: 4}}});
+  assert.equal(resolveScenario(file).config.app.keepTurns, 4);
+});
+
 test('a share link names only what it changes', () => {
-  assert.equal(LINK_VERSION, 7); assert.deepEqual(JSON.parse(JSON.stringify(DEFAULTS)), V7);
-  assert.equal(shareHash(configure(applyPreset({}, 'sonnet')), 'sonnet'), 'v=7&model=sonnet');
+  assert.equal(LINK_VERSION, 8); assert.deepEqual(JSON.parse(JSON.stringify(DEFAULTS)), {...V7, compare: 'openclaw'});
+  assert.equal(shareHash(configure(applyPreset({}, 'sonnet')), 'sonnet'), 'v=8&model=sonnet');
   const config = configure(applyPreset({gapMedianMinutes: 30, gapP95Minutes: 240, keepWarm: false}, 'haiku'));
-  assert.equal(shareHash(config, 'haiku'), 'v=7&model=haiku&gapMedianMinutes=30&gapP95Minutes=240&keepWarm=false');
-  assert.deepEqual(resolveScenario(parseLink('#v=7&model=claude-haiku-5-5&gapMedianMinutes=30&gapP95Minutes=240&keepWarm=false')), {preset: 'haiku', config, source: '', legacy: false});
+  assert.equal(shareHash(config, 'haiku'), 'v=8&model=haiku&gapMedianMinutes=30&gapP95Minutes=240&keepWarm=false');
+  assert.deepEqual(resolveScenario(parseLink('#v=8&model=claude-haiku-5-5&gapMedianMinutes=30&gapP95Minutes=240&keepWarm=false')), {preset: 'haiku', config, source: '', legacy: false});
   // From a starting point, only what differs from it. Its numbers are part of what a link counts on, as the defaults are.
   assert.equal(createHash('sha256').update(JSON.stringify(STARTS.map(s => [s.id, s.scenario]))).digest('hex').slice(0, 16), V7_STARTS);
   const chat = configure(applyPreset({...STARTS[0].scenario, gapMedianMinutes: 30, gapP95Minutes: 240}, 'sonnet'));
-  assert.equal(shareHash(chat, 'sonnet', '', 'documents'), 'v=7&model=sonnet&start=documents&gapMedianMinutes=30&gapP95Minutes=240');
-  assert.deepEqual(resolveScenario(parseLink('#v=7&model=sonnet&start=documents&gapMedianMinutes=30&gapP95Minutes=240')).config, chat);
-  assert.throws(() => parseLink('#v=7&model=sonnet&start=somewhere'), /somewhere is not a starting point/);
+  assert.equal(shareHash(chat, 'sonnet', '', 'documents'), 'v=8&model=sonnet&start=documents&gapMedianMinutes=30&gapP95Minutes=240');
+  assert.deepEqual(resolveScenario(parseLink('#v=8&model=sonnet&start=documents&gapMedianMinutes=30&gapP95Minutes=240')).config, chat);
+  assert.throws(() => parseLink('#v=8&model=sonnet&start=somewhere'), /somewhere is not a starting point/);
   // Your own rules, a policy and a drawn distribution, each by name.
   const own = configure(applyPreset({app: {keepTurns: 6, cache: 'long', clear: true}, compare: 'app', policy: {questions: 4, retrieved: 1}, gapDrawn: [0, 0, 2, 1, ...new Array(10).fill(0)]}, 'sonnet'));
-  assert.equal(shareHash(own, 'sonnet'), 'v=7&model=sonnet&gapDrawn=0,0,2,1,0,0,0,0,0,0,0,0,0,0&compare=app&app.cache=long&app.keepTurns=6&app.clear=true&policy.questions=4&policy.retrieved=1&policy.maxPings=0');
+  assert.equal(shareHash(own, 'sonnet'), 'v=8&model=sonnet&gapDrawn=0,0,2,1,0,0,0,0,0,0,0,0,0,0&compare=app&app.cache=long&app.keepTurns=6&app.clear=true&policy.questions=4&policy.retrieved=1&policy.maxPings=0');
   assert.deepEqual(resolveScenario(parseLink(`#${shareHash(own, 'sonnet')}`)).config, own);
   // A policy that keeps everything is still a policy, and a window without an end can be written out.
   const all = configure(applyPreset({policy: {}}, 'sonnet'));
-  assert.equal(shareHash(all, 'sonnet'), 'v=7&model=sonnet&policy.maxPings=0');
-  assert.deepEqual(resolveScenario(parseLink('#v=7&model=sonnet&policy.maxPings=0&policy.answers=all')).config, all);
+  assert.equal(shareHash(all, 'sonnet'), 'v=8&model=sonnet&policy.maxPings=0');
+  assert.deepEqual(resolveScenario(parseLink('#v=8&model=sonnet&policy.maxPings=0&policy.answers=all')).config, all);
   // Custom prices travel whole.
   const prices = configure({ttlMinutes: 60, model: {context: 400000, maxInput: 380000, inputRate: 3, cachedRate: 0.3, outputRate: 15, writeMultiplier: 2, longThreshold: 0, longInputMultiplier: 1, longOutputMultiplier: 1}});
   assert.deepEqual(resolveScenario(parseLink(`#${shareHash(prices, 'custom')}`)).config, prices);
   // What cannot be read is named.
-  assert.throws(() => parseLink('#v=7&model=sonnet&tokenMedian=lots'), /tokenMedian must be a number/);
-  assert.throws(() => parseLink('#v=7&model=sonnet&tokenMedian='), /tokenMedian must be a number/);
-  assert.throws(() => parseLink('#v=7&model=sonnet&gapDrawn=1,,2'), /gapDrawn must be a number/);
-  assert.throws(() => parseLink('#v=7&model=sonnet&keepWarm=maybe'), /keepWarm must be true or false/);
-  assert.throws(() => parseLink('#v=7&model=custom&model.inputRate=cheap'), /model.inputRate must be a number/);
-  assert.throws(() => resolveScenario(parseLink('#v=7&model=sonnet&tokenMedain=1')), /tokenMedain is not a setting/);
-  assert.throws(() => resolveScenario(parseLink('#v=7&model=sonnet&app.keepTurn=1')), /app.keepTurn is not a rule/);
-  assert.throws(() => resolveScenario(parseLink('#v=7&model=sonnet&policy.question=1')), /policy.question is not part of a policy/);
+  assert.throws(() => parseLink('#v=8&model=sonnet&tokenMedian=lots'), /tokenMedian must be a number/);
+  assert.throws(() => parseLink('#v=8&model=sonnet&tokenMedian='), /tokenMedian must be a number/);
+  assert.throws(() => parseLink('#v=8&model=sonnet&gapDrawn=1,,2'), /gapDrawn must be a number/);
+  assert.throws(() => parseLink('#v=8&model=sonnet&keepWarm=maybe'), /keepWarm must be true or false/);
+  assert.throws(() => parseLink('#v=8&model=custom&model.inputRate=cheap'), /model.inputRate must be a number/);
+  assert.throws(() => resolveScenario(parseLink('#v=8&model=sonnet&tokenMedain=1')), /tokenMedain is not a setting/);
+  assert.throws(() => resolveScenario(parseLink('#v=8&model=sonnet&app.keepTurn=1')), /app.keepTurn is not a rule/);
+  assert.throws(() => resolveScenario(parseLink('#v=8&model=sonnet&policy.question=1')), /policy.question is not part of a policy/);
   assert.throws(() => resolveScenario(parseLink('#model=sonnet&tokenMedian=4000&tokenP95=9000')), /version is missing/);
-  assert.throws(() => resolveScenario(parseLink('#v=8&model=sonnet&somethingNew=1')), /newer version/);
+  assert.throws(() => resolveScenario(parseLink('#v=9&model=sonnet&somethingNew=1')), /newer version/);
 });
 test('a link written by hand may name a median alone, and the spread goes with it', () => {
   const at = hash => resolveScenario(parseLink(hash)).config, pair = c => [c.gapMedianMinutes, c.gapP95Minutes];

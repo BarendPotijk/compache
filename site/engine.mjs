@@ -40,7 +40,7 @@ export const DEFAULTS = Object.freeze({
   // A policy to price instead of the fitted one: {questions, answers, retrieved} in turns, null for all, with {maxPings, keepUnder, long}.
   policy: null,
   // What Compache is compared with, the rules of your own application, and what it really costs per 1,000 turns when you know (0 when not).
-  compare: 'everything', app: Object.freeze({}), measuredCost: 0,
+  compare: 'openclaw', app: Object.freeze({}), measuredCost: 0,
   model: Object.freeze({context: 1050000, maxInput: 922000, inputRate: 0.1,
     cachedRate: 0.01, outputRate: 0.5, writeMultiplier: 1.25,
     longThreshold: 272000, longInputMultiplier: 2, longOutputMultiplier: 1.5})
@@ -646,16 +646,19 @@ export function simulate(overrides={}) {
   const compache=runArm(workload,config,{kind:'compache',policy}), fittedHere=config.policy && fit.chosen?runArm(workload,config,{kind:'compache',policy:fit.chosen.policy},{collectDecisions:false,collectLedger:false}):null;
   const per=cost=>1000*cost/workload.totalRuns, fetches=arm=>(arm.byRole.recovery?.calls ?? 0)/workload.totalRuns;
   // Every comparison, and the calls of the one on screen. A measured cost has no calls of its own: your app's rules stand in for them.
-  const list=comparisons(config), shown=config.compare==='measured' || !list.some(b=>b.id===config.compare)?(config.compare==='measured'?'app':'everything'):config.compare;
+  const list=comparisons(config);
+  const measured=config.compare==='measured' && config.measuredCost>0;
+  if(!measured && !list.some(b=>b.id===config.compare)) config.compare=DEFAULTS.compare;
+  const shown=measured?'app':config.compare;
   let baseline=null; const sides=list.map(b=>{
     const arm=runArm(workload,config,{kind:'rules',rules:b.rules},{collectDecisions:false,collectLedger:b.id===shown});
     if(b.id===shown)baseline={id:b.id,name:b.name,rules:b.rules,arm};
     return {id:b.id,name:b.name,note:b.note,url:b.url,checked:b.checked,rules:b.rules,complete:arm.complete,per1000:arm.complete?per(arm.totals.cost):null,inView:arm.retention.observed,missing:arm.dependencyCoverage===null?null:1-arm.dependencyCoverage,fetches:fetches(arm),saving:arm.complete && compache.complete && arm.totals.cost?1-compache.totals.cost/arm.totals.cost:null};
   });
   if(config.measuredCost>0)sides.unshift({id:'measured',name:'What you pay now',note:'The cost you entered. Not modeled.',rules:null,complete:true,per1000:config.measuredCost,inView:null,missing:null,fetches:null,saving:compache.complete?1-per(compache.totals.cost)/config.measuredCost:null});
-  const selected=sides.find(s=>s.id===config.compare) ?? sides.find(s=>s.id==='everything'), both=compache.complete && selected.complete;
+  const selected=sides.find(s=>s.id===config.compare), both=compache.complete && selected.complete;
   const savings=both && (fit.chosen || config.policy)?{absolute:selected.per1000-per(compache.totals.cost),percent:selected.per1000?100*(1-per(compache.totals.cost)/selected.per1000):null,range:selected.id==='measured' || !baseline.arm.complete || !selected.per1000?null:savingRange(compache.threadCosts,baseline.arm.threadCosts,config.seed)}:null;
-  const warnings=['A model of token counts and list prices: no product or provider is run, and answer quality is not measured.','The policy is the cheapest of the priced candidates on the fitting threads. Costs are reported on a second set of threads drawn with the next seed.','A needed part that Compache archived costs one extra call. A comparison whose rules drop text for good does not pay for it and does not have it.','Comparisons follow documented defaults read on the dates given. None of the products is run.','Decisions look three turns ahead in expectation, as the package does, with the configured returns and the mean size of a turn. Query matching and cited sources are not modeled.'];
+  const warnings=['A model of token counts and list prices: no product or provider is run, and answer quality is not measured.','The policy is the cheapest of the priced candidates on the fitting threads. Costs are reported on a second set of threads drawn with the next seed.','A needed part that Compache archived costs one extra call. A comparison whose rules drop text for good does not pay for it and does not have it.','Comparisons follow documented defaults as listed in the methodology. None of the products is run.','Decisions look three turns ahead in expectation, as the package does, with the configured returns and the mean size of a turn. Query matching and cited sources are not modeled.'];
   return {config,workload:{threads:workload.threads,totalRuns:workload.totalRuns,plannedLengths:workload.plannedLengths,realizedLengths:workload.realizedLengths,gaps:workload.gaps},
     compache,baseline,sides,selected,savings,policy,
     fit:{candidates:fit.candidates,chosen:fit.chosen,threads:fitted.threads.length,turns:fitted.totalRuns,fittedHere:fittedHere && fittedHere.complete?per(fittedHere.totals.cost):null,pinned:config.policy!==null},warnings};
