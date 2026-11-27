@@ -78,15 +78,15 @@ To apply the saved policy in the wrapped-client integration, start your app with
 
 ## Results
 
-| Workload | Provider-billed saving | Modeled saving |
-|---|---:|---:|
-| Document chats on Claude, five-minute cache | 42–49% | 43–89% |
-| Document chats already using a one-hour cache | 18% | 30–79% |
-| Long coding-agent sessions | 51–85% | — |
-| Coding-agent sessions of about 50 calls | 16% | — |
-| 174 public coding-agent runs | — | 5–43% |
+| Workload on Claude Haiku 5.5 | Provider-billed cost in USD (without → with Compache) |
+|---|---:|
+| Document chat, five-minute cache baseline | $2.68 → $1.45 per 1,000 turns |
+| Document chat, one-hour cache baseline | $1.80 → $1.48 per 1,000 turns |
+| Claude Code, one task in 13 prompts | $0.33 → $0.13 per task |
+| Claude Code, 16 issues in one conversation | $0.98 → $0.15 through issue 16 |
+| Claude Code, five or six issues per session | $0.059 → $0.050 per session |
 
-The billed Claude runs used Haiku 5.5. The modeled ranges use Sonnet 5.5 and depend on return times. The benchmark reports give the baseline, workload, model and available quality measurements for each comparison. [Chat evaluations](benchmarks/README.md) · [Agent evaluations](benchmarks/agents/README.md) · [Comparisons with other tools](docs/comparisons.md)
+The chat rates scale the bills from five held-out conversations to 1,000 turns. The five-minute row averages four integrations. The one-hour row uses the Anthropic proxy. The two long Claude Code rows average two runs per configuration. [Chat results](benchmarks/live/README.md) · [One-hour comparison](benchmarks/compare/README.md#live) · [Coding tasks and scores](benchmarks/agents/README.md#live)
 
 ## Documentation
 
