@@ -586,7 +586,9 @@ class RecipeTests(unittest.TestCase):
         with self.assertRaises(ContractError):
             recipe_grid(7, extra_windows={"summary": (3,)})
         grid = recipe_grid(len(subject.runs))
-        strict = fit_recipes([subject], rows, self.spec, grid, select="cheapest")
+        strict = fit_recipes(
+            [subject], rows, self.spec, grid, select="cheapest", retention_floor=0.95
+        )
         scored = strict[grid.index(recent)]
         self.assertEqual(
             (scored["historical_retained"], scored["historical_required"]), (5, 6)
@@ -594,7 +596,13 @@ class RecipeTests(unittest.TestCase):
         self.assertEqual(scored["admission"], "below_retention_floor")
         self.assertFalse(any(s["eligible"] for s in strict))
         traded = fit_recipes(
-            [subject], rows, self.spec, grid, select="cheapest", tradeoff_floor=0.8
+            [subject],
+            rows,
+            self.spec,
+            grid,
+            select="cheapest",
+            retention_floor=0.95,
+            tradeoff_floor=0.8,
         )
         chosen = traded[grid.index(recent)]
         # One lost requirement costs one more request and the document it reopens.

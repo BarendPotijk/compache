@@ -6,7 +6,7 @@ from dataclasses import dataclass, replace
 from compache.errors import ContractError
 
 from .cache_breaks import CacheBreakChecker, CacheScope
-from .contracts import ModelSpec, digest, number
+from .contracts import DEFAULT_MIN_RETENTION, ModelSpec, digest, number
 from .distribution import (
     fit_distribution,
     freeze_distribution,
@@ -39,7 +39,7 @@ def fit_workload(
     *,
     observation_end,
     recipes=None,
-    retention_floor=0.95,
+    retention_floor=DEFAULT_MIN_RETENTION,
     tradeoff_floor=None,
     max_unknown_change_rate=None,
     unknowns="excluded",

@@ -40,6 +40,8 @@ class QuickstartTests(unittest.TestCase):
             (4, 71, 71),
         )
         self.assertEqual(summary["keep"]["retrieved"], 1)
+        self.assertEqual(self.policy.min_retention, 0.8)
+        self.assertGreaterEqual(summary["coverage"], self.policy.min_retention)
 
     def test_a_policy_carries_the_workload_for_the_calculator(self):
         profiled = compache.profile(
@@ -109,6 +111,19 @@ class QuickstartTests(unittest.TestCase):
         sent, full, archived = (int(x.replace(",", "")) for x in rows[-1].split()[1:4])
         self.assertLess(sent, full / 3)
         self.assertGreater(archived, 0)
+
+    def test_the_app_managed_example_runs_without_a_provider(self):
+        example = runpy.run_path(str(SAMPLE / "app_managed.py"))
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            contextlib.chdir(tmp),
+            contextlib.redirect_stdout(io.StringIO()) as out,
+        ):
+            self.policy.save("policy.json")
+            example["main"]()
+        self.assertIn("It ships Friday.", out.getvalue())
+        self.assertIn("Changes close Thursday.", out.getvalue())
+        self.assertRegex(out.getvalue(), r"[4-9] physical calls recorded")
 
 
 class FigureTests(unittest.TestCase):

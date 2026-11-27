@@ -833,6 +833,9 @@ class PolicyTests(unittest.TestCase):
                     answer = app.turn("Question 3?", passage(3))
                     self.assertTrue(answer.endswith("."), answer)
                     self.assertEqual(self.live.stats["reopened"], 1)
+                    self.assertEqual(
+                        self.live.stats["physical_calls"], len(self.model.bodies)
+                    )
                     # The provider was asked once more, with the original text as the tool's result.
                     first, second = self.model.bodies[before:]
                     self.assertNotIn("Clause 001 of the agreement", json.dumps(first))
@@ -1050,6 +1053,7 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(self.live.stats["policy_refused"], 1)
         # One refusal, and from then on this conversation is only recorded.
         self.assertEqual(len(self.model.bodies), 7)
+        self.assertEqual(self.live.stats["physical_calls"], 7)
         self.assertEqual(self.model.bodies[-1]["messages"], app.messages[:-1])
         self.assertEqual(len(load(self.tmp.name)[0][0]["runs"]), 3)
 
@@ -1116,6 +1120,7 @@ class PingTests(unittest.TestCase):
                 first = [c for c in load_calls(tmp) if c["turn"] == 2][0]
                 self.assertGreater(first["usage"]["cache_read"], 1000)
                 self.assertEqual(live.stats["pings"], 1)
+                self.assertEqual(live.stats["physical_calls"], len(model.bodies))
         # One thread sends a Live's pings, however many clients share it.
         shared = Live(policy)
         start_pings(shared)

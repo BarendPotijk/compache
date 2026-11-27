@@ -31,24 +31,27 @@ pip install compache
 compache wrap claude
 ```
 
-**Your own chatbot.** Record for a while, fit, then apply:
+**Your own chatbot.** Start with metadata-only recording. This collects sizes, timing and token usage without making a labeling request.
 
 ```python
 import compache
 from anthropic import Anthropic
 
-client = compache.wrap(Anthropic(), record="compache-record", sample=0.1)   # changes nothing yet
+client = compache.wrap(Anthropic(), record="compache-record")
 ```
+
+To fit which parts of a chat to keep, supply dependency labels or opt in to `sample=0.1` when recording. Each sampled turn can send the conversation and answer to your model provider in an additional, billable request. The local record keeps sizes and labels. With metadata alone, the chat fit tunes caching and keeps the history. [Recording guide](docs/guide.md#without-past-traces)
 
 ```sh
-compache fit compache-record --model claude-haiku-5-5    # prints what you would save
+compache fit compache-record --model claude-haiku-5-5 -o policy.json
 ```
 
-```python
-client = compache.wrap(Anthropic(), "policy.json")       # saves it
-```
+| Who sends model requests? | How to apply the fitted policy |
+|---|---|
+| **Compache manages requests** | Use `client = compache.wrap(Anthropic(), "policy.json")`. Compache handles reopen calls, fallback requests and keep-warm pings. [SDK guide](docs/guide.md#5-apply) |
+| **Your app manages requests** | Use `policy.session(conversation_id)`. Your app sends each call, records its usage, supplies source citations and owns the timer. [Runnable example](examples/quickstart/app_managed.py) |
 
-The record holds sizes, times and token usage, never text. Recording adds about 5% to the bill, and some 600 messages were enough in our runs. [Already have chat logs?](docs/guide.md)
+New fits require 80% training retention by default. Set `--min-retention 0.95` for a 95% minimum. Check the fit on other conversations with `compache replay heldout.jsonl --labels heldout-labels.jsonl --policy policy.json`. The training target and held-out retention are reported separately.
 
 **Or try it first**, on four sample chats, without an API key:
 
@@ -61,7 +64,8 @@ Fitted on 4 sample threads, 71 turns (71 labelled) for claude-sonnet-5-5.
 
 Keep questions from the last 4 turns, answers from the last 9 turns and retrieved text from the last turn.
 Send up to 1 keep-warm ping while a user is away.
-82% of what the labelled turns need from earlier turns stays in view. The rest is fetched back, and that call is in the cost.
+Minimum training retention: 80.00%.
+On the training threads, 81.82% of what the labelled turns need from earlier turns stays in view. The rest is fetched back, and that call is in the cost.
 $16.10 per 1,000 turns against $50.25 keeping everything: 68% less.
 Caching alone, at its best, would cost $18.66.
 ```

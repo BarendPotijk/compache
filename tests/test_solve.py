@@ -5,6 +5,7 @@ from dataclasses import replace
 
 from helpers import END, labels_for, thread
 
+from compache import Policy, replay
 from compache.optimizer import solve_workload
 from compache.optimizer.contracts import ModelSpec
 from compache.optimizer.session import WorkloadPolicy
@@ -142,6 +143,15 @@ class WorkloadSolveTests(unittest.TestCase):
         self.assertEqual(policy, self.solve(sample, labels))
         self.assertEqual(len(policy["training_threads"]), 4)
 
+    def test_replay_rejects_threads_used_only_to_choose_the_cut(self):
+        demand = threads(3630)
+        evidence = thread(tid="separate-evidence", n=6, gap=3630)
+        artifact = self.solve(
+            demand, labels_for(evidence), retention_threads=lambda: iter([evidence])
+        )
+        with self.assertRaisesRegex(ContractError, "training thread"):
+            replay(Policy(artifact), [evidence])
+
     def test_a_cut_must_beat_what_recovery_costs(self):
         sample = threads(3630, n=7)
         labels = []
@@ -164,8 +174,8 @@ class WorkloadSolveTests(unittest.TestCase):
         self.assertEqual(
             chosen["expected_cost"], chosen["replayed_cost"] + chosen["recovery_cost"]
         )
-        # Without the band no cut loses evidence, and the solver falls back to one that keeps it all.
-        strict = self.solve(sample, labels, tradeoff_floor=None)["solve"]["chosen"]
+        # Raising the minimum excludes this cheaper cut.
+        strict = self.solve(sample, labels, retention_floor=0.95)["solve"]["chosen"]
         self.assertTrue(strict["recipe"] is None or strict["coverage"] >= 0.95)
 
     def test_independent_labels_allow_a_cut_but_missing_labels_do_not(self):

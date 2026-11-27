@@ -40,6 +40,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
+from ._call_ledger import CallLedger
 from . import notes as notes_
 from . import wire
 from .api import Policy
@@ -48,11 +49,10 @@ from .models import binds_reasoning
 from .optimizer.parts import explained, notice
 from .optimizer.recovery import REOPEN_TOOL
 from .quotes import Quotes, spoken
-from .record import Recorder, left_out
+from .record import Recorder
 from .threads import (
     cache_read_reported,
     canonical_usage,
-    long_writes,
     reasoning_tokens,
     tagged,
 )
@@ -729,14 +729,6 @@ def _for_model(found: dict) -> dict:
     return shown
 
 
-def _position(part_id: str) -> tuple:
-    """Where a part sits in its conversation: its turn, then question, retrieved text, answer."""
-    head, _, tail = part_id.rpartition(":")
-    if tail.isdigit():
-        return int(head.rsplit(":", 2)[-2]), 1, int(tail)
-    return int(head.rsplit(":", 1)[-1]), 0 if tail == "input" else 2, 0
-
-
 def _digest(value) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
 
@@ -837,6 +829,7 @@ class Live:
         self.stats = dict.fromkeys(
             (
                 "calls",
+                "physical_calls",
                 "passed_through",
                 "turns",
                 "asked",
@@ -852,8 +845,13 @@ class Live:
             0,
         )
         # What the provider counted so far, and what was left out of it, in tokens.
-        counted = ("input", "cache_read", "cache_write", "output", "left_out")
-        self.tokens = dict.fromkeys(counted, 0)
+        self._calls = CallLedger(self.stats)
+        self.tokens = self._calls.tokens
+
+    def _receipt(self, conversation, kind, source, turn=None, pending=None):
+        self._calls.receipt(
+            self.recorder, self.clock, conversation, kind, source, turn, pending
+        )
 
     # -- conversations -------------------------------------------------------
 
@@ -1202,7 +1200,7 @@ class Live:
         the conversation. Without a name the conversation is recognized by what
         it has said so far.
         """
-        return self._exchange(path, body, send, thread)
+        return self._exchange(path, body, partial(self._calls.send, send), thread)
 
     def observe(
         self,
@@ -1230,7 +1228,7 @@ class Live:
         def send(payload):
             if payload is body:
                 return Result(200, json=reply)
-            return ask(payload) if ask is not None else Result(501)
+            return self._calls.send(ask, payload) if ask is not None else Result(501)
 
         self._exchange(path, body, send, thread, at, ask is not None)
 
@@ -1313,7 +1311,7 @@ class Live:
             pending.calls += 1
             pending.answered = True
             try:
-                self._ledger(
+                self._receipt(
                     conversation, "answer", wire.Reply(usage=usage, model=model)
                 )
                 self._step(conversation, pending, said, calls)
@@ -2302,7 +2300,7 @@ class Live:
         written = False
         try:
             reply = dialect.reply(data)
-            self._ledger(conversation, kind, reply, pending=call.pending)
+            self._receipt(conversation, kind, reply, pending=call.pending)
             self._reasoned(call, reply)
             while (
                 conversation.session is not None
@@ -2323,7 +2321,7 @@ class Live:
                 result, data = again, again.json
                 reply = dialect.reply(data)
                 how = "retry" if written else "reopen"
-                self._ledger(conversation, how, reply, pending=call.pending)
+                self._receipt(conversation, how, reply, pending=call.pending)
                 self._reasoned(call, reply)
                 if written:
                     break
@@ -2340,7 +2338,7 @@ class Live:
                     return again
                 result, data = again, again.json
                 reply = dialect.reply(data)
-                self._ledger(conversation, "retry", reply, pending=call.pending)
+                self._receipt(conversation, "retry", reply, pending=call.pending)
                 self._reasoned(call, reply)
             ours = [c for c in reply.calls if c["name"] == _REOPEN]
             if ours and _REOPEN not in dialect.tool_names(call.body):
@@ -2438,7 +2436,7 @@ class Live:
                 pending.in_flight -= 1
                 try:
                     if not counted:
-                        self._ledger(conversation, kind, editor, pending=pending)
+                        self._receipt(conversation, kind, editor, pending=pending)
                         self._reasoned(call, editor)
                     if editor.finished:
                         if editor.ours and editor.calls:
@@ -2460,7 +2458,7 @@ class Live:
                     break
                 rounds += 1
                 with conversation.lock:
-                    self._ledger(conversation, kind, editor, pending=pending)
+                    self._receipt(conversation, kind, editor, pending=pending)
                     self._reasoned(call, editor)
                     # The round that is over is in the books, whatever comes next.
                     counted = True
@@ -2784,7 +2782,7 @@ class Live:
                 return
             _, found = notes_.read(reply.text)
             with conversation.lock:
-                self._ledger(conversation, "note", reply, pending.index)
+                self._receipt(conversation, "note", reply, pending.index)
                 if found is None:
                     return
                 pending.asked = True
@@ -2897,51 +2895,6 @@ class Live:
         fetched = notes_.labels_of(notes_.Note(needs=tuple(pending.reopened)))
         return list(dict.fromkeys([*pending.refs, *fetched]))
 
-    def _ledger(self, conversation, kind, source, turn=None, pending=None) -> None:
-        """Count one model call. `source` has the `usage`, `cost` and `model` of its reply."""
-        pending = pending or conversation.pending
-        conversation.answered = source.model or conversation.answered
-        if pending is not None and kind in ("answer", "reopen", "retry"):
-            if pending.first_usage is None:
-                pending.first_usage = source.usage
-            pending.last_usage = source.usage
-            pending.model = source.model or pending.model
-        used = canonical_usage(source.usage)
-        for name, count in (used or {}).items():
-            self.tokens[name] += count
-        if used and pending is not None and pending.held and kind == "answer":
-            out = left_out(pending.left, pending.held, used["input"], pending.media)
-            self.tokens["left_out"] += max(0, out + pending.left_more)
-        if self.recorder is None:
-            return
-        archived, left = None, None
-        if turn is None:
-            turn = pending.index if pending is not None else conversation.turns
-            if pending is not None and pending.turn is not None and kind != "ping":
-                if not conversation.agentic:
-                    gone = sorted(pending.turn.archived_ids, key=_position)
-                    archived = notes_.labels_of(notes_.Note(needs=tuple(gone)))
-                if pending.held and kind == "answer":
-                    left = (pending.left, pending.held)
-        self.recorder.call(
-            conversation.record_id,
-            turn,
-            kind,
-            at=self.clock() if conversation.when is None else conversation.when,
-            model=source.model,
-            requested=conversation.requested,
-            usage=used,
-            cost=source.cost,
-            archived=archived,
-            left=left,
-            media=left is not None and pending.media,
-            left_more=pending.left_more if left is not None else 0,
-            lifetime=conversation.lifetime,
-            header_lifetime=conversation.header_lifetime,
-            long_write=long_writes(source.usage),
-            left_alone=conversation.left_alone,
-        )
-
     # -- pings ---------------------------------------------------------------
 
     def next_ping_at(self) -> float | None:
@@ -3009,7 +2962,7 @@ class Live:
         )
         if reply is not None:
             usage = reply.usage
-            self._ledger(conversation, "ping", reply)
+            self._receipt(conversation, "ping", reply)
         else:
             conversation.pings_off = True
         session.ping_sent(at=now, usage=usage, completed_at=max(now, self.clock()))

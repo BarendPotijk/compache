@@ -21,7 +21,7 @@ A cut is three windows: how many turns of questions, of answers and of retrieved
 - Windows follow 1, 2, 5, 10 and so on, plus the look-backs that cover 80% to 100% of the labelled needs of each kind.
 - Every cut is scored without a replay: an applied cut archives a part once it leaves its window, so how much of what turns needed is still in view follows from how far back that evidence lies.
 - Where every turn is labelled and none needs an earlier turn, a cut is admitted on that evidence. One turn whose need is unknown rules it out.
-- The cuts worth pricing are those on the frontier: each keeps at least one point more in view than every smaller one, down to 80%. Up to six of them, plus keeping everything, are each paired with 0, 1 and 3 pings, and with each cache lifetime the model can be asked for. Claude keeps an entry for five minutes, or for an hour at 2× the input price for a write instead of 1.25×.
+- The cuts worth pricing are those on the frontier: each keeps at least one point more in view than every smaller one, down to the requested training minimum (80% by default). Up to six of them, plus keeping everything, are each paired with 0, 1 and 3 pings, and with each cache lifetime the model can be asked for. Claude keeps an entry for five minutes, or for an hour at 2× the input price for a write instead of 1.25×.
 
 ## The price of a candidate
 
@@ -65,7 +65,7 @@ A turn of an agent is a loop of many calls, so there the unit is the call. `comp
 |---|---|
 | What is decided | The newest rounds of tool results stay in full. Older ones become a notice, and the reasoning of finished turns goes with them, at the next call where that is cheaper at once (the cache has expired, or a long request is billed dearer), or where what goes is so many times as large as what would be written again behind it |
 | What is fitted | How many rounds, how many times, keep-warm pings while a tool runs and while a user is away, the cache lifetime, and whether instructions and tools get a longer one. Some 250 candidates, each priced on every recorded call by the provider's cache rules |
-| What has to stay | At least 85% of the calls that rely on an earlier result find it in view, or no more than 1% of all calls miss one. A call relies on a result where its reply repeats a line that only this tool returned. A call that does not find it is priced as fetching it back: one more call, and the result again |
+| What has to stay | The requested share of observed calls that rely on earlier results must find them in view (80% by default). A call relies on a result where its reply repeats a line that only this tool returned. A call that does not find it is priced as fetching it back: one more call, and the result again |
 | Reasoning | Claude takes its reasoning back only behind what stood ahead of it when it was made. Where that has changed, the provider drops it or refuses the request. So a cut takes out all reasoning behind it, and what is reasoned after it stays. With other models the reasoning of the turn that goes on stays, whatever is cut |
 | Sizes | The provider's own count. What a request grew by belongs to the results that joined it, so text that is dense in tokens counts as dense. A result with a picture goes as a whole, and comes back with it |
 | Shared instructions | A conversation that begins while another has the same instructions and tools in the cache reads them |

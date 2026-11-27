@@ -45,7 +45,7 @@ How many rounds of results stay, when a cut pays, how many pings and which lifet
 - **It stays honest.** A policy that hides results hides that they were needed. So one conversation in ten goes out as the agent wrote it. Those say what replies rely on, and what the others save.
 - **No text.** The record holds sizes, times and usage. Conversations go by a hash.
 
-At least 85% of the calls that rely on an earlier result find it in view, or no more than 1 call in 100 misses one. Those are priced as fetching it back.
+The default fit requires 80% of training calls known to rely on earlier results to find them in view. Set `--min-retention` on `compache fit` to choose another minimum. Each observed miss is priced as fetching the result back.
 
 ## In your own agent
 
