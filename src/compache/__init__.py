@@ -7,8 +7,11 @@ with compache.thread("conversation-17"):
 
 Without past traces to fit on, record going forward and fit on the record:
 
-client = compache.wrap(client, record="compache-record", sample=0.1)
-policy = compache.fit("compache-record")
+client = compache.wrap(client, record="compache-record")
+policy = compache.fit("compache-record", model="claude-sonnet-5-5")
+
+Metadata-only chat records can fit caching. Supply dependency labels to fit chat
+compaction, or opt into sampled labeling requests to the provider with sample=0.1.
 """
 
 __version__ = "0.15.1"

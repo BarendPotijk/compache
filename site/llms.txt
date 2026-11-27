@@ -1,24 +1,24 @@
-# compache
+# Compache
 
-> A Python package that lowers what long LLM conversations and agent loops cost. It sits between an application and the model API, learns from the traffic which earlier parts still matter and when users come back, then sends less and caches better. Compaction and cache are decided together: trimming waits for the moments when the provider's prompt cache has expired or a cut pays for itself, and keep-warm pings go out only where they cost less than losing the cache. What is trimmed leaves a notice, and the model can fetch it back. No dependencies, Apache-2.0.
+> A Python package that fits context compaction and prompt-cache policies to multi-turn chat and tool-call traces. The policy chooses what history remains visible, when a keep-warm request is worth sending, and which cache lifetime to request where supported.
 
-Install: `pip install compache` (Python 3.11 or later).
+Python 3.11+. Install with `python -m pip install compache`. `compache demo -o policy.json` fits a bundled sample locally without an API key. The repository documentation tracks its checkout. Use the documentation at the matching Git tag for an installed release.
 
-- Around a coding agent: `compache wrap claude` (also codex, opencode, gemini, qwen, copilot, aider, goose, crush, kilo, pi, openhands, or `compache wrap -- <command>`). `compache stats` says what was saved, `compache doctor` checks the setup.
-- In Python: `client = compache.wrap(Anthropic(), learn="compache-record")`, for clients of the OpenAI, Anthropic and Google GenAI SDKs, sync and async.
-- LangChain and LangGraph: `create_agent(model, tools, middleware=[compache.langchain.middleware(compache.Live(learn="compache-record"))])`.
-- Any other stack: `compache proxy --learn compache-record`, with the base URL set to it.
-- Chats with retrieved text: record with `compache.wrap(client, record="compache-record", sample=0.1)`, then `compache fit compache-record`, then `compache.wrap(client, "policy.json")`.
-- The record holds sizes, times, usage and labels, never text.
+## Integrate
 
-## Docs
+- [Developer guide](https://github.com/BarendPotijk/compache/blob/main/docs/guide.md) – start with a local demo, then fit, evaluate and apply.
+- [Examples](https://github.com/BarendPotijk/compache/blob/main/examples/README.md) – run a wrapped chatbot against an in-memory provider or reproduce a held-out replay.
+- [Integration guide](https://github.com/BarendPotijk/compache/blob/main/docs/integrations.md) – choose an SDK wrapper, middleware, model-node transport or proxy. Keep the conversation's full history and pass a stable thread ID.
+- [Application-managed sessions](https://github.com/BarendPotijk/compache/blob/main/docs/sessions.md) – own prompt assembly, model calls, receipts, reopens and timers.
+- [Coding agents](https://github.com/BarendPotijk/compache/blob/main/docs/agents.md) – run a CLI through the proxy with `compache wrap` or observe with `--watch`.
+- [Setup skill](https://github.com/BarendPotijk/compache/blob/main/skills/compache-setup/SKILL.md) – instructions for coding agents adding Compache to a project.
 
-- [README](https://github.com/BarendPotijk/compache/blob/main/README.md): what it does and what it saves
-- [Agents](https://github.com/BarendPotijk/compache/blob/main/docs/agents.md): coding agents and tool loops
-- [Guide](https://github.com/BarendPotijk/compache/blob/main/docs/guide.md): thread and label formats, fit, replay, apply
-- [Integrations](https://github.com/BarendPotijk/compache/blob/main/docs/integrations.md): every way in, one line each
-- [How it works](https://github.com/BarendPotijk/compache/blob/main/docs/how-it-works.md): what is learned and what is decided when
-- [Other tools compared](https://github.com/BarendPotijk/compache/blob/main/docs/comparisons.md): measured next to compressors and cache tools
-- [Benchmarks](https://github.com/BarendPotijk/compache/blob/main/benchmarks/README.md): what the fit chose and what it saved
-- [Setup skill](https://github.com/BarendPotijk/compache/blob/main/skills/compache-setup/SKILL.md): instructions for a coding agent that puts compache into a codebase. `/plugin install compache --marketplace BarendPotijk/compache` in Claude Code, `npx skills add BarendPotijk/compache` elsewhere
-- [Cost calculator](https://barendpotijk.github.io/compache/): the bill for a workload, in the browser
+## Fit and verify
+
+- [Trace inputs](https://github.com/BarendPotijk/compache/blob/main/docs/traces.md) – explicit metadata-only recording, chat logs, trace imports and sampled labeling. Sampling can send conversation text to the model provider and incur charges.
+- [Fitting and held-out evaluation](https://github.com/BarendPotijk/compache/blob/main/docs/fitting.md) – train on whole conversations and replay on different threads. Measure dependencies before reopening and grade generated answers separately.
+- [Reference](https://github.com/BarendPotijk/compache/blob/main/docs/reference.md) – public CLI and Python entry points, return values and units.
+- [Troubleshooting](https://github.com/BarendPotijk/compache/blob/main/docs/troubleshooting.md) – verify routing, diagnose retention and reconcile provider usage.
+- [How the policy works](https://github.com/BarendPotijk/compache/blob/main/docs/how-it-works.md) – cost calculation, cache assumptions and limits.
+- [Benchmarks](https://github.com/BarendPotijk/compache/blob/main/benchmarks/README.md) – held-out estimates, live provider billing and answer quality.
+- [Cost calculator](https://barendpotijk.github.io/compache/) – explore return-time, token and dependency assumptions in the browser.

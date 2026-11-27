@@ -1,6 +1,8 @@
 # How it works
 
-compache answers three questions from your recorded threads: what must stay in the request, when a keep-warm ping pays and how long the cache should live. It answers them together, because each changes what the others are worth. A cut rewrites the cached prefix, a ping costs in proportion to the prefix it keeps warm, and a longer lifetime saves pings but makes every write dearer.
+compache fits a policy for which parts of a conversation to send, when to keep the prefix warm, and which cache lifetime to request. These decisions affect each other. Trimming can invalidate a cached prefix, a ping costs more on a longer prefix, and a longer lifetime can trade more expensive writes for fewer misses.
+
+The fit and replay estimate cost from trace data and a model price sheet. To measure a deployment, compare billed usage and grade answers on comparable conversations. [Fitting and replay](fitting.md) · [Live benchmark](../benchmarks/live/README.md)
 
 ![Record threads, fit a policy, apply it on every request](assets/workflow.svg)
 
@@ -10,9 +12,11 @@ compache answers three questions from your recorded threads: what must stay in t
 |---|---|
 | Timestamps | For each turn position: whether the user came back, after how long, and how long the answer took. A second turn and a twentieth are measured apart, so a thread that has come far can be more likely to go on, and sooner. A wait that the record cuts short is treated as unfinished, not as a user who left |
 | Text sizes | How much each turn adds: its question, its retrieved text, its answer |
-| Calls | How many model calls a turn made, when the record says. A call after the first reads the turn's request from the cache |
+| Calls | How many model calls a turn made, when the record says. Chat replay models later calls as repeat sends of the initial view within the cache lifetime. It does not reconstruct tool-loop suffix growth |
 | Usage | Where the provider's usage is recorded: how much of a request still in the cache the next turn actually read. A record that shows no cache reads or writes at all says nothing, and the provider's rules are assumed |
 | Labels | For each kind of part, how far back the evidence a turn needed lies |
+
+**Chat retention** counts labelled needs for earlier context. A need counts as retained if every part of at least one acceptable source set is present before recovery. One turn can contribute multiple needs. Unlabelled turns and needs confined to the current turn are outside the denominator. With no observed historical needs the metric is unmeasured. The default 80% floor applies during training. Held-out retention and answer correctness are measured separately.
 
 ## The candidates
 
@@ -29,7 +33,7 @@ Token counts cannot rank policies, because what a cut or a ping is worth depends
 
 - Each candidate runs through the runtime session against the provider's cache rules: lifetime, smallest cacheable prefix, write and read prices and any long-request surcharge. Requests and pings fall at the threads' own timestamps.
 - A thread is priced with a model of returns fitted on the other threads, in three folds. The same threads say how much of a live cache entry is read: the cached tokens of each return inside the lifetime, as a share of the request before it. Every request and ping of every candidate is priced at that share.
-- A cut pays for what it loses. Every labelled need that is missing from the request as sent costs one more request, which reads the cached view, writes the reopened parts and emits a tool call. That rate carries from the labelled turns to all turns.
+- A cut pays for what it loses. Each missing labelled need incurs a modeled recovery request. Replay prices the smallest missing source set that would satisfy that need, including the cached view, reopened text and tool-call overhead. That rate carries from the labelled turns to all turns.
 - The cheapest candidate wins. Ties go to more in view, then to the shorter lifetime, then to fewer pings.
 
 The winner is the cheapest policy the fit priced on your threads. Keeping everything, with and without pings and under each lifetime, is always among those, so the fit also says what caching alone would cost at its best. `compache replay` prices it on threads it has not seen.
@@ -71,9 +75,9 @@ A turn of an agent is a loop of many calls, so there the unit is the call. `comp
 | Shared instructions | A conversation that begins while another has the same instructions and tools in the cache reads them |
 | Too little data | Under 200 calls, only the cut that public runs taught is priced, with every lifetime and number of pings |
 
-`Flow`, what a conversation holds and what the provider has cached of it, is one class that the fit, the replay and the runtime share, so what was priced is what happens.
+`Flow`, what a conversation holds and what the provider has cached of it, is one class that the fit, the replay and the runtime share, so all three use the same cut logic. Actual cache hits, reopen requests and provider charges depend on the live run.
 
-In the request path a loop is recognized by the IDs of its tool calls, where these are found once, and by what was said. Conversations that share a name, as a main agent, those it starts and several that go on from one, are kept apart by what they were asked and what their tools returned, and a request that branches off, as a host's suggestion of what to say next, leaves the main line as it stood. What the model fetched back is put into the later requests at its place, and goes with the cut it would go with. Where an application rewrites what its tools had returned, the policy starts over from what it says now. A model that is switched away from and back goes on where it left off. Where one fetches the same back again, results stay for twice as long, while there is room.
+The runtime uses tool-call IDs and conversation history to distinguish loops and branches, including agents sharing a conversation name. A model switch preserves each model's state. If the host rewrites a tool result, the runtime rebuilds its view from that history. Reopened results return at their original positions. Repeated reopens extend the retention window when space allows. [Agent integration](agents.md)
 
 ## Notes from the model
 
@@ -82,7 +86,7 @@ Labels normally come from reading past conversations. Where those cannot be read
 - **What is asked.** Once the reply is in, one short request continues the conversation: the reply, a list of the conversation's parts with a label and the first words of each, and the request to name the parts the reply needed. A part is needed if a fact came from it, or if the user's message only makes sense with it. The application's own request and reply are not touched.
 - **What comes back.** One line of labels, such as `R3.1` for the first text retrieved in turn 3 or `A2` for the answer of turn 2. No text.
 - **What they become.** For that turn, a label that it needed those earlier parts. A part the model fetched back while answering counts too.
-- **What it costs.** Everything before the reply is read from the cache. On Claude Haiku 5.5 a note cost about half of what a turn does, most of it the model thinking before it writes the line.
+- **What it costs.** The note request can reuse the prefix cached by the answer request. On Claude Haiku 5.5 a note cost about half of what a turn does, most of it the model thinking before it writes the line.
 
 A model names what helped as readily as what the turn could not do without, so notes are looser than a measurement. [The live runs](../benchmarks/live/README.md#the-models-notes) compare both on the same conversations, and the policies fitted on each.
 

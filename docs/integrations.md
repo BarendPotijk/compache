@@ -1,51 +1,64 @@
 # Integrations
 
-compache goes in at two places: where your model calls leave, and where your traces are kept.
+Choose the place where your application sends its **full conversation history**. Keep the original messages in your application so later requests can be prepared again and archived material can be recovered.
 
 ## Where the model calls leave
 
-| Your stack | compache goes in with |
+| If you control… | Use |
 |---|---|
-| Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code, Copilot CLI, Aider, Goose, Crush, Kilo, pi, OpenHands, or any other agent on the command line | `compache wrap claude`, see [Agents](agents.md) |
-| OpenAI SDK (Chat Completions, Responses, also on Azure), Anthropic SDK (also on Vertex AI and Foundry), Google GenAI SDK, sync or async | `client = compache.wrap(client, "policy.json")` |
-| A Python framework on one of these SDKs: OpenAI Agents SDK, Claude Agent SDK, Google ADK, Pydantic AI, LlamaIndex, Microsoft Agent Framework, Semantic Kernel, Agno, AutoGen, Strands, Haystack, Instructor, Langfuse's OpenAI drop-in | The wrapped client, an HTTP client or the proxy: [one line each](#python-frameworks) |
-| LangChain and LangGraph, any chat model | `create_agent(..., middleware=[compache.langchain.middleware(live)])` |
-| LiteLLM, and what is built on it | `compache.litellm.install(live)`, or a [callback](#litellm) that records in your LiteLLM proxy |
-| Hermes Agent | Its [context engine](#hermes): `context.engine: compache` |
-| A LiteLLM proxy or another gateway | `compache proxy --policy policy.json --upstream http://localhost:4000` in front of it |
-| Anything else with a base URL: the Vercel AI SDK, OpenClaw, CrewAI, Cline | `compache proxy --policy policy.json`, and the base URL set to it |
-| Your own HTTP client | `compache.Live(...).exchange(path, body, send)` |
-| Your own prompt assembly | `policy.session(thread_id)`, see the [guide](guide.md#5-apply) |
+| An OpenAI, Anthropic or Google GenAI Python client | [Wrap the SDK client](#sdk-clients) once at startup. |
+| A framework that accepts a provider client or an HTTP client | [Inject that client](#python-frameworks) into the framework. |
+| A LangChain `create_agent` agent | [Install middleware](#langchain-and-langgraph) and pass the graph thread ID. |
+| A custom LangGraph graph | [Wrap the model in its node](#custom-langgraph-node). |
+| A LiteLLM application or gateway | [Install its adapter, configure its recording callback or front the gateway](#litellm). |
+| A CLI or editor agent | [Launch the harness](agents.md) or [configure an always-on proxy](#the-proxy). Hermes also offers a [context engine](#hermes). |
+| A service in another language, or a configurable base URL | [Run the HTTP proxy](#the-proxy). |
+| Your own HTTP transport | Call `live.exchange(path, body, send, thread=thread_id)`. Your `send(body)` performs the request and returns a `compache.live.Result`. |
+| Your own prompt assembly | Create one `policy.session(thread_id)` per conversation. See the [session lifecycle](sessions.md). |
 
-A coding agent can put it in for you: `/plugin install compache --marketplace BarendPotijk/compache` in Claude Code, or `npx skills add BarendPotijk/compache` for any other, gives it the [skill](../skills/compache-setup/SKILL.md) for that.
+Install `compache` alongside your application's existing provider or framework packages. Use a fixed policy to control rollouts, a record to observe traffic, or a learning directory to update the policy from traffic. SDK examples below assume a configured provider account, a model available to that account and a policy file for that model. For example:
 
-All of them run the same code on the JSON that goes over the wire, so a request leaves the same whichever way compache went in. Wherever a policy file can be given, `learn="compache-record"` (`--learn`) can be given instead: the policy then [follows from your traffic](agents.md#how-it-learns).
-
-| On every model call | |
-|---|---|
-| Policy | Archived parts go out as a notice with a handle. The model gets a `reopen` tool for them, and its calls are answered before the application sees the reply |
-| Cache | The end of the conversation is marked cacheable where the provider has to be told and the application has not done so. Where the policy was fitted for one-hour entries, every mark of the request asks for them, yours included. Where it counts on five minutes, marks on the conversation ask for that. Keep-warm pings go out when the policy says one pays |
-| Record | Sizes, times and usage of every turn go to a folder, without any text. See [the guide](guide.md#without-past-traces) |
-| Notes | For a sampled share of turns the model is asked, once its reply is in, which earlier parts the reply needed. That request is compache's own, and the application never sees it |
-| A restart | A process that meets a conversation in the middle, as after a deploy, in a function or on the command line, takes the cache to have expired and trims at once. No state has to be kept. Behind a load balancer, keep a conversation on one worker, or each that takes it up trims it again |
-| Anything else | A request shape compache does not know passes through untouched. A request the provider refuses after it was changed, and a reply that cannot go on after something was fetched back, is asked again as the application wrote it. What is wrong then is passed on as the provider says it. Where it refuses one-hour entries, the request goes out under its default and everything after is planned on that |
+```sh
+python -m pip install compache
+compache default --model claude-sonnet-5-5 -o policy.json
+```
 
 ### SDK clients
+
+Wrap the client at construction and reuse it across requests. Pass your application's stable conversation ID around each turn. For example, in an Anthropic application whose `messages` contain the conversation:
 
 ```python
 import compache
 from anthropic import Anthropic
 
-client = compache.wrap(Anthropic(), "policy.json", record="compache-record", sample=0.1)
+client = compache.wrap(Anthropic(), "policy.json")
 with compache.thread("conversation-17"):
-    client.messages.create(model=MODEL, system=SYSTEM, messages=messages, max_tokens=1024)
+    response = client.messages.create(
+        model="claude-sonnet-5-5", messages=messages, max_tokens=1024
+    )
+print(client.compache.stats["calls"])
 ```
 
-`create`, `parse`, `stream`, tools, structured output and async clients work as before: the client's own HTTP client is wrapped, nothing above it. `client.compache.stats` counts what was done.
+The same wrapper accepts provider-configured clients. Each row below is a fragment using the application's existing model, history and imports.
+
+| API | Construct once | Call inside the thread block |
+|---|---|---|
+| OpenAI Chat Completions | `client = compache.wrap(OpenAI(), "policy.json")` | `client.chat.completions.create(model=model, messages=messages)` |
+| OpenAI Responses | Same OpenAI client | `client.responses.create(model=model, input=history, store=False)`; send the full input items on each turn. |
+| Anthropic Messages | `client = compache.wrap(Anthropic(), "policy.json")` | `client.messages.create(model=model, messages=messages, max_tokens=1024)` |
+| Google GenAI | `client = compache.wrap(genai.Client(), "policy.json")` | `client.models.generate_content(model=model, contents=contents)` |
+
+Use `AsyncOpenAI()` or `AsyncAnthropic()` with `await` inside the same ordinary `with compache.thread(...)` block. With Google use the wrapped client's `client.aio.models`. Streaming, parsing and tool definitions stay on the original SDK methods. Existing Azure OpenAI, Anthropic Vertex AI and Anthropic Foundry clients keep their provider configuration.
+
+To **observe first**, use `compache.wrap(client, record="compache-record")`. To **learn and apply**, use `compache.wrap(client, learn="compache-record")`. An explicit `sample=0.1` enables extra model requests for notes on a sampled share of turns. Keep-warm requests can also incur provider charges when a policy enables them. Use `pings=False` on the wrapper to disable background pings. After a completed model request, check `client.compache.stats["calls"]` and `client.compache.tokens`. `reopened` counts actual recoveries and can remain zero on short conversations.
+
+For a complete local example with synthetic messages and a scripted provider, run the [wrapped chatbot](../examples/quickstart/wrapped_chatbot.py).
 
 ### Python frameworks
 
-| Framework | One line |
+These are constructor fragments for an existing application with its framework and model configured. Create the client once, then pass it where the framework constructs its model.
+
+| Framework | Integration point |
 |---|---|
 | OpenAI Agents SDK | `set_default_openai_client(compache.wrap(AsyncOpenAI(), "policy.json"))` |
 | Claude Agent SDK | `ClaudeAgentOptions(env={"ANTHROPIC_BASE_URL": "http://127.0.0.1:8787", "ENABLE_TOOL_SEARCH": "true"})`, with `compache proxy` running |
@@ -65,19 +78,53 @@ with compache.thread("conversation-17"):
 
 ### LangChain and LangGraph
 
+For a LangChain agent created with `create_agent`, middleware can prepare the messages for any compatible tool-calling chat model. The checkpointer keeps the original graph messages. The agent can call the middleware's `reopen` tool to recover an archived result. This route makes no independent requests for notes or keep-warm pings.
+
+In your existing application, with its `model`, `tools` and `saver` already configured:
+
 ```python
-live = compache.Live(learn="compache-record")          # or a policy file
-agent = create_agent(model, tools, middleware=[compache.langchain.middleware(live)], checkpointer=saver)
-agent.invoke({"messages": [...]}, {"configurable": {"thread_id": "conversation-17"}})
+import compache
+from langchain.agents import create_agent
+
+live = compache.Live("policy.json")
+agent = create_agent(
+    model, tools, middleware=[compache.langchain.middleware(live)], checkpointer=saver
+)
+config = {"configurable": {"thread_id": "conversation-17"}}
+agent.invoke({"messages": [{"role": "user", "content": "Find the return window."}]}, config)
 ```
 
-Any chat model. The graph keeps its messages whole, archived results reach the model as a notice, and the agent gets a `reopen` tool that runs like any other. The thread ID names the conversation. compache makes no request of its own here, so it sends no keep-warm pings and asks no notes.
+Reuse the same ID on subsequent invocations. Without it, the middleware forwards the model call unchanged. To put compache in a `ChatOpenAI` transport instead, construct `ChatOpenAI(model=model_name, **compache.langchain.clients(live))` and use `middleware=[compache.langchain.middleware()]` solely to propagate the thread ID. That transport supports provider-level cache controls, keep-warm pings and sampled notes. Use one policy application point per request. [LangChain middleware](https://docs.langchain.com/oss/python/langchain/middleware/overview)
 
-With `ChatOpenAI` it can sit in the HTTP client instead, with pings and notes and fetching back unseen by the graph: `ChatOpenAI(..., **compache.langchain.clients(live))`, and `middleware()` without arguments to name the conversations.
+#### Custom LangGraph node
+
+For a hand-built `StateGraph`, configure the model called by the node. The following node fragment uses the application's existing `model_name` and policy, and assumes the graph uses `MessagesState`:
+
+```python
+import compache
+from langchain_core.runnables import RunnableConfig
+from langchain_openai import ChatOpenAI
+from langgraph.graph import MessagesState
+
+live = compache.Live("policy.json")
+model = ChatOpenAI(model=model_name, **compache.langchain.clients(live))
+
+def call_model(state: MessagesState, config: RunnableConfig):
+    with compache.thread(str(config["configurable"]["thread_id"])):
+        reply = model.invoke(state["messages"], config=config)
+    return {"messages": [reply]}
+```
+
+Register `call_model` as the graph's model node. Invoke your compiled graph with the same `configurable.thread_id` as above and pass the complete message history to the model inside the node. After invoking, inspect `live.stats["calls"]`. [LangGraph nodes and configuration](https://docs.langchain.com/oss/python/langgraph/graph-api)
 
 ### LiteLLM
 
+For an existing LiteLLM application with a model route, credentials and `messages` configured:
+
 ```python
+import compache
+import litellm
+
 live = compache.Live("policy.json")
 compache.litellm.install(live)           # every OpenAI-compatible call LiteLLM makes from now on
 with compache.thread("conversation-17"):
@@ -86,14 +133,18 @@ with compache.thread("conversation-17"):
 
 Providers that LiteLLM calls over handlers of its own, such as Anthropic's Messages API, go through `compache proxy` with `api_base="http://127.0.0.1:8787"`. A LiteLLM proxy takes compache in front: `compache proxy --policy policy.json --upstream http://localhost:4000`, whatever providers it routes to.
 
-To learn first, record in a LiteLLM proxy you already run, whatever the provider:
+To record traffic in an existing LiteLLM proxy, set the record directory in the environment of the LiteLLM process, then register the callback in its configuration:
+
+```sh
+export COMPACHE_RECORD=./compache-record
+```
 
 ```yaml
 litellm_settings:
-  callbacks: ["compache.litellm.callback"]     # COMPACHE_RECORD=/data/compache-record COMPACHE_SAMPLE=0.1
+  callbacks: ["compache.litellm.callback"]
 ```
 
-The conversation is named by `metadata: {"session_id": ...}`. In process: `litellm.callbacks = [compache.litellm.Callback(record="compache-record", sample=0.1)]`.
+Supply the conversation ID as `metadata={"session_id": conversation_id}`. For an in-process callback, use `compache.litellm.Callback(record="compache-record")` alongside your existing callbacks. These configurations record metadata. Enabling `COMPACHE_SAMPLE=0.1` on the proxy opts into model-assisted labels for sampled turns and can send conversation text to the provider in an additional paid request.
 
 ### Hermes
 
@@ -118,12 +169,23 @@ Hermes sends the requests, so the engine sends no keep-warm pings and asks no no
 ### The proxy
 
 ```sh
-compache proxy --policy policy.json --record compache-record --sample 0.1 --port 8787
+compache proxy --policy policy.json --record compache-record --port 8787
 ```
+
+Point the worker or SDK at the proxy, keeping its normal credentials. OpenAI-compatible SDKs typically expect `http://127.0.0.1:8787/v1`; Anthropic's Python client expects `http://127.0.0.1:8787`. Verify the listener before sending traffic, then inspect counters after one application call:
+
+```sh
+curl -fsS http://127.0.0.1:8787/compache/health
+curl -fsS http://127.0.0.1:8787/compache/stats
+```
+
+Health returns `"status": "ok"`. A supported model call increments `calls`; a health probe alone leaves it unchanged. For multiple workers, route each conversation to the same worker. A new process that first sees a conversation midstream assumes the cache expired and may trim immediately. Store records and learned policy files on a persistent volume. Per-process counters start again after restart.
 
 As a container that is always on, it learns in a volume: `docker build -t compache . && docker run -d --restart unless-stopped -p 127.0.0.1:8787:8787 -v compache:/data compache`. Arguments of its own replace that, such as `--policy`.
 
-It serves `/v1/chat/completions`, `/v1/responses`, `/v1/messages` and Gemini's `:generateContent` on the provider's own paths, Azure's and Vertex AI's included, forwards the caller's credentials, and passes everything else through. What Bedrock takes is signed, so nothing can be changed in it. `--upstream URL` sends all of it to one gateway. With `--careful` a provider's own address gets only keys that look like its own. `/compache/stats` says what it has done, `/compache/metrics` the same for Prometheus.
+**Set the upstream before sending a credentialed request.** By default, the standalone proxy forwards to the public OpenAI, Anthropic or Google endpoint selected by request format. For a gateway, Azure, Vertex AI or Foundry deployment, supply its intended origin with `--upstream URL`, or set `--openai-url`, `--anthropic-url` or `--gemini-url` per provider. The proxy appends the incoming request path to the configured base URL. Include each path prefix once. It forwards the client's provider credentials. The optional `--careful` flag checks for unfamiliar key formats before sending them to public endpoints.
+
+Compache recognizes Chat Completions, Responses, Messages and Gemini generation requests on supported paths. Other HTTP requests pass through. Bedrock signs the request body, which prevents rewriting it in transit. Keep the listener on its default loopback address or restrict access at your service boundary. The proxy exposes its health, stats and Prometheus counters (`/compache/metrics`) without authentication.
 
 | Harness | Setting |
 |---|---|
@@ -135,9 +197,11 @@ It serves `/v1/chat/completions`, `/v1/responses`, `/v1/messages` and Gemini's `
 | Vercel AI SDK | `createAnthropic({baseURL: "http://127.0.0.1:8787/v1"})`, `createOpenAI(...)` the same. The conversation's name goes in `headers: {"x-compache-thread": id}`. OpenAI's Responses API needs `store: false`: with it on, the SDK sends earlier answers as references, which nothing can trim |
 | `ChatAnthropic` | `anthropic_api_url="http://127.0.0.1:8787"` |
 
+The HTTP adapter can answer an internal `reopen` before the application receives the final reply. If the provider rejects a modified request, compache can retry the original body. Use `retried` and `policy_refused` to investigate these cases. [Troubleshooting](troubleshooting.md)
+
 ### Naming a conversation
 
-In order: `compache.thread(...)` around the call, the header `x-compache-thread`, a session header a harness already sends (`x-session-affinity`, `session_id`, `session-id`, `x-session-id`, `x-claude-code-session-id`, `x-opencode-session-id`, `agent-session-id`), the body's `prompt_cache_key`. Without any of them a conversation is recognized by its tool calls, and by what it has said so far from its second turn on. Agents that share a name, such as a main agent and the ones it starts, are kept apart.
+For the SDK wrapper, set `with compache.thread(conversation_id):` around the outgoing call or send the `x-compache-thread` header. The block takes precedence. The proxy first checks `x-compache-thread` and the supported [session headers](../src/compache/proxy.py), then the request body's `prompt_cache_key` or `session_id`. Without an explicit ID the runtime uses conversation history and tool calls to recognize continuations. Use a stable application conversation ID when available.
 
 ## Where the traces are kept
 
@@ -151,6 +215,8 @@ In order: `compache.thread(...)` around the call, the header `x-compache-thread`
 | Nowhere you can read | A record made going forward: `compache fit compache-record` |
 
 ## What was run
+
+The following table summarizes the project’s published integration checks. Optional SDK tests require their corresponding packages. The scripted coverage for [SDK wrappers](../tests/test_wrap.py), [LangChain middleware](../tests/test_langchain.py), [the launcher](../tests/test_launch.py) and [Hermes](../tests/test_hermes.py) runs locally.
 
 | | Checked against |
 |---|---|
