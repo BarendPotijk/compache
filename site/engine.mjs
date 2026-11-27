@@ -614,9 +614,12 @@ export function candidateCuts(workload,config,limit=6) {
 export const longAvailable=c=>c.anthropic && c.longTtlMinutes>c.ttlMinutes;
 export const pingCounts=c=>c.keepWarm?[...new Set([0,1,3,c.maxPings])].filter(n=>n<=c.maxPings).sort((a,b)=>a-b):[0];
 // The cheapest candidate on these threads. Keeping everything, with and without pings, is always one of them.
-export function fitPolicy(workload,config) {
+export function fitPolicy(workload,config,onProgress) {
   const c=configure(config), counts=pingCounts(c), cuts=candidateCuts(workload,c), candidates=[];
-  for(const long of longAvailable(c)?[false,true]:[false]) for(const row of [{policy:{},kept:1,coverage:null,everything:true},...cuts]) for(const maxPings of counts) {
+  const lifetimes=longAvailable(c)?[false,true]:[false], windows=[{policy:{},kept:1,coverage:null,everything:true},...cuts];
+  const total=lifetimes.length*windows.length*counts.length;
+  for(const long of lifetimes) for(const row of windows) for(const maxPings of counts) {
+    onProgress?.(candidates.length+1,total);
     const policy=configurePolicy({...row.policy,maxPings,long}), result=runArm(workload,c,{kind:'compache',policy},{collectDecisions:false,collectLedger:false});
     candidates.push({policy,everything:!!row.everything,kept:row.kept,coverage:row.everything?1:row.coverage,retention:result.retention.expected,cost:result.totals.cost,requestTokens:(result.byRole.answer?.inputTokens??0)/Math.max(1,result.byRole.answer?.calls??0),complete:result.complete});
   }
@@ -637,10 +640,32 @@ function savingRange(ours,theirs,seed) {
   for(let k=0;k<400;k++){let a=0,b=0;for(let i=0;i<n;i++){const j=Math.floor(random()*n);a+=ours[j];b+=theirs[j];}draws.push(b?1-a/b:0);}
   draws.sort((x,y)=>x-y); return {low:quantile(draws,.05),high:quantile(draws,.95)};
 }
-export function simulate(overrides={}) {
+// Baseline selection, app rules, a measured bill and a pinned policy affect the replay only.
+function fitKey(config) {
+  const {compare,app,measuredCost,policy,...trainingInputs}=config;
+  return JSON.stringify(trainingInputs);
+}
+
+export function fitScenario(config,onProgress) {
+  const training=generateWorkload(config);
+  return {...fitPolicy(training,config,onProgress),threads:training.threads.length,turns:training.totalRuns,key:fitKey(config)};
+}
+
+// Keep just the last custom fit in memory. The published starter comes from this same engine at build time.
+export function createFitCache(starter=null) {
+  let previous;
+  return (config,onProgress)=>{
+    const key=fitKey(config);
+    if(starter?.key===key)return starter;
+    if(previous?.key!==key)previous=fitScenario(config,onProgress);
+    return previous;
+  };
+}
+
+export function simulate(overrides={},getFit=fitScenario) {
   // The policy is fitted on one set of threads and every side is costed on a second set drawn the same way.
-  const config=configure(overrides), fitted=generateWorkload(config), workload=generateWorkload({...config,seed:(config.seed+1)>>>0});
-  const fit=fitPolicy(fitted,config), asked=config.policy ?? fit.chosen?.policy ?? configurePolicy({});
+  const config=configure(overrides), fit=getFit(config), workload=generateWorkload({...config,seed:(config.seed+1)>>>0});
+  const asked=config.policy ?? fit.chosen?.policy ?? configurePolicy({});
   // A policy made for a model with a long cache asks for none where there is none.
   const policy=asked.long && !longAvailable(config)?configurePolicy({...asked,long:false}):asked;
   const compache=runArm(workload,config,{kind:'compache',policy}), fittedHere=config.policy && fit.chosen?runArm(workload,config,{kind:'compache',policy:fit.chosen.policy},{collectDecisions:false,collectLedger:false}):null;
@@ -661,5 +686,5 @@ export function simulate(overrides={}) {
   const warnings=['A model of token counts and list prices: no product or provider is run, and answer quality is not measured.','The policy is the cheapest of the priced candidates on the fitting threads. Costs are reported on a second set of threads drawn with the next seed.','A needed part that Compache archived costs one extra call. A comparison whose rules drop text for good does not pay for it and does not have it.','Comparisons follow documented defaults as listed in the methodology. None of the products is run.','Decisions look three turns ahead in expectation, as the package does, with the configured returns and the mean size of a turn. Query matching and cited sources are not modeled.'];
   return {config,workload:{threads:workload.threads,totalRuns:workload.totalRuns,plannedLengths:workload.plannedLengths,realizedLengths:workload.realizedLengths,gaps:workload.gaps},
     compache,baseline,sides,selected,savings,policy,
-    fit:{candidates:fit.candidates,chosen:fit.chosen,threads:fitted.threads.length,turns:fitted.totalRuns,fittedHere:fittedHere && fittedHere.complete?per(fittedHere.totals.cost):null,pinned:config.policy!==null},warnings};
+    fit:{candidates:fit.candidates,chosen:fit.chosen,threads:fit.threads,turns:fit.turns,fittedHere:fittedHere && fittedHere.complete?per(fittedHere.totals.cost):null,pinned:config.policy!==null},warnings};
 }

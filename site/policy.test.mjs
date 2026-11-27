@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {gunzipSync} from 'node:zlib';
-import {DEFAULTS, candidateCuts, configure, describePolicy, fitPolicy, generateWorkload, pingCounts, runArm, simulate, theoreticalSurvival, continueChance, warmReturnShare, longAvailable} from './engine.mjs';
+import {DEFAULTS, candidateCuts, configure, createFitCache, describePolicy, fitPolicy, fitScenario, generateWorkload, pingCounts, runArm, simulate, theoreticalSurvival, continueChance, warmReturnShare, longAvailable} from './engine.mjs';
 import {comparisons} from './baselines.mjs';
 import {applyPreset, presets} from './models.mjs';
 import {measure, parseRows, readThread} from './traces.mjs';
@@ -16,6 +16,31 @@ const ours = (w, c, policy) => runArm(w, c, {kind: 'compache', policy});
 const rules = (w, c, r) => runArm(w, c, {kind: 'rules', rules: r});
 const answers = r => r.ledger.filter(x => x.role === 'answer');
 const near = (a, b, tolerance) => assert.ok(Math.abs(a - b) <= tolerance, `${a} is not within ${tolerance} of ${b}`);
+
+test('a saved fit prices new baselines and pinned policies exactly like a fresh fit', () => {
+  const base = config({threads: 3}), published = JSON.parse(JSON.stringify(fitScenario(base)));
+  const cached = createFitCache(published);
+  for (const edits of [{}, {compare: 'uncached'}, {compare: 'app', app: {keepTurns: 2}},
+    {compare: 'measured', measuredCost: 12}, {policy: {retrieved: 1}}]) {
+    const c = configure({...base, ...edits});
+    assert.strictEqual(cached(c, () => assert.fail('unexpected refit')), published);
+    assert.deepEqual(simulate(c, cached), simulate(c));
+  }
+});
+
+test('workload, model and planner changes invalidate the fit; repeated uses do no fitting work', () => {
+  const base = config({threads: 2}), starter = fitScenario(base), cached = createFitCache(starter);
+  for (const edits of [{seed: 25}, {inputTokens: 44}, {gapMedianMinutes: 1},
+    {inputDependencyProbability: .1}, {retentionRequirement: .95}, {model: {...base.model, cachedRate: 2}}]) {
+    const c = configure({...base, ...edits}), progress = [];
+    const fitted = cached(c, (index, total) => progress.push([index, total]));
+    assert.notStrictEqual(fitted, starter);
+    assert.deepEqual(progress, fitted.candidates.map((_, i) => [i + 1, fitted.candidates.length]));
+    assert.deepEqual(fitted, fitScenario(c));
+    assert.strictEqual(cached(configure({...c, compare: 'uncached'})), fitted);
+  }
+  assert.strictEqual(cached(base), starter);
+});
 
 test('a cut keeps each kind for its own number of turns and waits for a cold cache', () => {
   const c = config({}), w = load([turn(0, 0), turn(1, 2), turn(2, 4), turn(3, 60), turn(4, 62)]), r = ours(w, c, {questions: 2, answers: 1, retrieved: 1});
