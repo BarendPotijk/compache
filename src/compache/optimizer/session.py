@@ -479,8 +479,14 @@ class WorkloadSession:
         tools,
         shared_prefix_upper_bound=None,
         dynamic_tools=None,
+        warm_chance=None,
     ):
-        """Pass the actual provider-visible system and tool prefixes, in wire order."""
+        """Pass the actual provider-visible system and tool prefixes, in wire order.
+
+        `warm_chance` is how likely the provider still holds the request before, where
+        that is not known, as for a conversation first met in the middle: every view is
+        priced both ways and weighed by it.
+        """
         if (
             request.thread_id != self.scope.thread_id
             or request.model != self.scope.model
@@ -558,25 +564,49 @@ class WorkloadSession:
             ambient_hit_probability=ambient_rate,
         )
 
-        def forecast():
+        if warm_chance is not None:
+            number(warm_chance, "warm_chance", 0, 1)
+
+        def forecast(hot):
             return plan_distribution(
                 self.policy.forecast,
                 spec,
                 run_index=request.run_index,
                 candidates=candidates,
-                warm=warm,
+                warm=hot,
                 current_arrival_tokens=arrival,
                 ping_allowed=self.checker.can_ping(self.scope),
                 **options,
             )
 
-        decision = forecast()
+        def decide():
+            if warm_chance is None:
+                return forecast(warm)
+            hot, cold = forecast(True), forecast(False)
+            weighed = {}
+            for name, cost in hot["costs"].items():
+                other = cold["costs"].get(name)
+                if cost is not None and other is not None:
+                    weighed[name] = warm_chance * cost + (1 - warm_chance) * other
+            made = dict(hot if warm_chance >= 0.5 else cold)
+            if weighed:
+                # Ties go to the first view, which keeps the conversation as it is.
+                best = min(weighed, key=weighed.get)
+                made.update(
+                    action=best, expected_cost=weighed[best], costs=weighed, status="ok"
+                )
+            made["warm_chance"] = warm_chance
+            return made
+
+        decision = decide()
         if decision["action"] is None and options["lookahead"] > 1:
             # A hypothetical later arrival should not deny a feasible request today.
             fallback_reason = decision["status"]
             options["lookahead"] = 1
-            decision = forecast()
+            decision = decide()
             decision["fallback"] = fallback_reason
+        if warm_chance is not None:
+            warm = warm_chance >= 0.5
         name = decision["action"]
         if name not in views:
             raise WorkloadAdmissionError(

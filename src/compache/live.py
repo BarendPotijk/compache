@@ -45,7 +45,7 @@ from . import notes as notes_
 from . import wire
 from .api import Policy
 from .learn import Learner
-from .models import binds_reasoning
+from .models import binds_reasoning, drops_reasoning_on_edits
 from .optimizer.parts import explained, notice
 from .optimizer.recovery import REOPEN_TOOL
 from .quotes import Quotes, spoken
@@ -153,6 +153,48 @@ _AGENT_TOOL = {
         },
     },
 }
+# The same where cleared tool results are left out whole, and listed at the end of the request:
+# models whose API drops the reasoning behind an earlier item that was changed.
+_AGENT_TOOL_LISTED = {
+    "type": "function",
+    "function": {
+        **_AGENT_TOOL["function"],
+        "description": (
+            "Old tool results are cleared from this conversation to save space, some steps after "
+            "you read them. A cleared result is taken out together with its call, and listed at "
+            "the end of the conversation with a reference such as ctx:1a2b3c. You did read it in "
+            "full, and what you wrote right after it comes from it: rely on that, and do not "
+            "reopen results to check it. Call this tool with the reference only when you need "
+            "something from a result that you did not write down, rather than running the other "
+            "tool again."
+        ),
+    },
+}
+_REOPEN_TOOL_LISTED = {
+    "type": "function",
+    "function": {
+        **_REOPEN_TOOL["function"],
+        "description": _REOPEN_TOOL["function"]["description"].replace(
+            "A cleared part shows a short notice with a reference such as ctx:1a2b3c in place of "
+            "its text.",
+            "A cleared part shows a short notice with a reference such as ctx:1a2b3c in place of "
+            "its text, or, for a tool result, is taken out with its call and listed at the end of "
+            "the conversation.",
+        ),
+    },
+}
+_REOPEN_HOW_LISTED = _REOPEN_HOW.replace(
+    "and the reopen tool shows the text again.",
+    "and cleared tool results are taken out with their calls and listed at the end of the "
+    "conversation. The reopen tool shows the text again.",
+)
+# What stands at the end of a request whose cleared tool results were left out whole.
+_CLEARED = (
+    "Earlier tool results were cleared from this conversation to save space, each together "
+    "with its call. You read each in full when it came, and what you wrote after it came from "
+    "it: rely on that, and do not reopen results to check it. reopen with its reference shows "
+    "one again when you need something from it that you did not write down:"
+)
 _HANDLE = re.compile(r"ctx:[0-9a-f]{24}")
 _REFUSED = (400, 422)
 # What Claude's cache marks ask for where they name no lifetime.
@@ -182,6 +224,12 @@ _NOTE_TOKENS = 2048
 _GONE = "…"
 # What stands for the text of a result that holds pictures and says nothing.
 _WORDLESS = "(no text)"
+# After how long without a request a conversation is forgotten: twice the longest cache lifetime.
+# Met again, it is met in the middle, and its cache has expired by then.
+_IDLE = 2 * 3600.0
+# How much text the conversations kept here may hold together, in bytes, and how often that is looked at.
+_MOST_BYTES = 256_000_000
+_SWEEP_EVERY = 60.0
 
 
 @dataclass
@@ -461,6 +509,15 @@ class _Conversation:
     when: float | None = None
     # When this process last sent the conversation this one takes up again, whole.
     sent_whole: float | None = None
+    # How much text its latest request held, in bytes.
+    size: int = 0
+    # Whether turns of it went out from other processes, as workers behind a load balancer or
+    # functions send them, since this process last saw it. When its last request went out is then
+    # not known here: its turn, and the earlier ones walked again, are decided by what is likely,
+    # as every process decides where it does not know, so that each reaches what the others sent.
+    shared: bool = False
+    # How many turns of a conversation of this name this process had seen before this one was made.
+    seen: int = 0
 
 
 @dataclass
@@ -490,6 +547,78 @@ class _Call:
     # gave up more for it.
     before: tuple = (frozenset(), None)
     kept: Any = None
+
+
+# Where a request says how much it may answer, and what says that it only warms the cache.
+_LIMITS = ("max_tokens", "max_completion_tokens", "max_output_tokens")
+
+
+def _warming(body: Any) -> bool:
+    """Whether a request only warms the cache: it asks for no answer, or one token at most.
+
+    Anthropic documents `max_tokens: 0` for that, OpenAI `prompt_cache_options.prewarm`,
+    and agents that keep their own cache warm re-send their last request with a limit of one.
+    """
+    if not isinstance(body, dict):
+        return False
+    options = body.get("prompt_cache_options")
+    if isinstance(options, dict) and options.get("prewarm"):
+        return True
+    config = body.get("generationConfig") or body.get("generation_config")
+    found = [body.get(name) for name in _LIMITS]
+    if isinstance(config, dict):
+        found += [config.get("maxOutputTokens"), config.get("max_output_tokens")]
+    return any(
+        isinstance(limit, int) and not isinstance(limit, bool) and limit <= 1
+        for limit in found
+    )
+
+
+class _Kept:
+    """How a conversation stood, to put it back after a request that must leave no trace."""
+
+    def __init__(self, conversation):
+        self.conversation = conversation
+        self.fields = {
+            name: getattr(conversation, name)
+            for name in conversation.__dataclass_fields__
+            if name != "lock"
+        }
+        self.fields.update(
+            session=conversation.session.copy() if conversation.session else None,
+            inserts=list(conversation.inserts),
+            fetched=set(conversation.fetched),
+            wanted=conversation.wanted.copy(),
+            unbound=set(conversation.unbound),
+            went=list(conversation.went),
+        )
+        pending = conversation.pending
+        self.pending = None
+        if pending is not None:
+            self.pending = (
+                pending,
+                {
+                    **vars(pending),
+                    "seen": list(pending.seen),
+                    "steps": list(pending.steps),
+                    "reopened": list(pending.reopened),
+                },
+            )
+
+    def restore(self, live) -> None:
+        conversation = self.conversation
+        now, before = conversation.chain, self.fields["chain"]
+        for name, value in self.fields.items():
+            setattr(conversation, name, value)
+        if self.pending is not None:
+            pending, fields = self.pending
+            for name, value in fields.items():
+                setattr(pending, name, value)
+            conversation.pending = pending
+        if now != before:
+            # It was indexed where it went on to: back where it stood.
+            conversation.chain = now
+            live._index(conversation, before)
 
 
 class _Unsent(Exception):
@@ -774,6 +903,7 @@ class Live:
         salt: str = "",
         clock: Callable[[], float] = time.time,
         max_conversations: int = 4096,
+        max_bytes: int = _MOST_BYTES,
     ):
         if learn is not None and not (policy is None and record is None):
             raise ValueError(
@@ -807,6 +937,8 @@ class Live:
                 "what it cited. Give `sample` the rate at which the policy's record was made."
             )
         self._limit = max_conversations
+        self._most_bytes = max_bytes
+        self._swept = float("-inf")
         self._lock = threading.RLock()
         # Those that stand at the same point, the newest last.
         self._by_chain: OrderedDict[str, list[_Conversation]] = OrderedDict()
@@ -820,6 +952,8 @@ class Live:
         # The conversation a name was last seen in, for a host that tells us about it by name.
         self._latest: OrderedDict[str, _Conversation] = OrderedDict()
         self._bad_schemas: set[str] = set()
+        # What the application has been told once, by reason.
+        self._said_once: set[str] = set()
         self._refusals = 0
         self._notes_off = False
         self._apart: list[threading.Thread] = []
@@ -841,6 +975,7 @@ class Live:
                 "policy_refused",
                 "fell_back",
                 "stood_down",
+                "warmed",
             ),
             0,
         )
@@ -852,6 +987,17 @@ class Live:
         self._calls.receipt(
             self.recorder, self.clock, conversation, kind, source, turn, pending
         )
+
+    def passed(self, reason: str, message: str) -> None:
+        """Count a request that passes unchanged for `reason`, and say why the first time."""
+        self.stats["passed_through"] += 1
+        self.tell(reason, message)
+
+    def tell(self, reason: str, message: str) -> None:
+        """Say something the application should hear, once for each `reason`."""
+        if reason not in self._said_once:
+            self._said_once.add(reason)
+            logger.warning("compache: %s", message)
 
     # -- conversations -------------------------------------------------------
 
@@ -911,6 +1057,8 @@ class Live:
                 found = self._branch(other, chains[-1], turns, scan, thread)
             if found is None and thread:
                 found = self._resumed(chains, scan)
+            if found is None and thread and done:
+                found = self._continued(thread, chains, turns)
             if found is None:
                 name = record = thread or "c-" + uuid.uuid4().hex[:16]
                 if thread:
@@ -921,6 +1069,8 @@ class Live:
                         record = thread if done else f"{thread}~{count}"
                 found = _Conversation(name, chains[0], record, thread)
                 earlier = self._latest.get(thread) if thread else None
+                if earlier is not None:
+                    found.seen = earlier.turns
                 if earlier is not None and not earlier.reopens:
                     found.sent_whole = earlier.at
                 self._start(found, name, scan)
@@ -1134,6 +1284,19 @@ class Live:
                     other.lock.release()
         return None
 
+    def _continued(self, thread: str, chains: list[str], turns) -> _Conversation | None:
+        """The conversation of this name that a request goes on with, after turns that went out elsewhere.
+
+        Other processes, as workers behind a load balancer, answered those. It keeps its name,
+        so that what it archives is named as they name it, and the cache they left is read.
+        """
+        found = self._latest.get(thread)
+        if found is None or found.pending is not None or found.agentic:
+            return None
+        if not 0 < found.turns < len(turns) - 1 or chains[found.turns] != found.chain:
+            return None
+        return found
+
     @staticmethod
     def _left_off(other: _Conversation) -> _Conversation:
         """A conversation like another, between its turns. Its lock is held."""
@@ -1162,6 +1325,45 @@ class Live:
             for some in (*self._by_chain.values(), *self._by_call.values()):
                 found.update((id(c), c) for c in some)
         return list(found.values())
+
+    def _sweep(self) -> None:
+        """Forget conversations nobody has gone on with for long, and the oldest where they hold too much.
+
+        One that comes back after that is met in the middle, as after a restart. Its cache
+        has expired by then.
+        """
+        now = self.clock()
+        if now - self._swept < _SWEEP_EVERY:
+            return
+        self._swept = now
+        with self._lock:
+            known = self.conversations()
+            free = []
+            for conversation in known:
+                pending = conversation.pending
+                busy = pending is not None and pending.in_flight
+                if not busy and id(conversation) not in self._warm:
+                    free.append(conversation)
+            gone = {id(c) for c in free if c.at < now - _IDLE}
+            held = sum(c.size for c in known if id(c) not in gone)
+            for conversation in sorted(free, key=lambda c: c.at):
+                if held <= self._most_bytes:
+                    break
+                if id(conversation) not in gone:
+                    gone.add(id(conversation))
+                    held -= conversation.size
+            if not gone:
+                return
+            for index in (self._by_chain, self._by_call):
+                for key in list(index):
+                    kept = [c for c in index[key] if id(c) not in gone]
+                    if kept:
+                        index[key] = kept
+                    else:
+                        del index[key]
+            for index in (self._by_base, self._latest):
+                for key in [k for k, c in index.items() if id(c) in gone]:
+                    del index[key]
 
     def _now(self, conversation: _Conversation) -> float:
         """The time, and never one this conversation has already passed: a clock can step back."""
@@ -1465,6 +1667,10 @@ class Live:
 
     def _exchange(self, path, body, send, thread, at=None, asks=True) -> Result:
         self.stats["calls"] += 1
+        try:
+            self._sweep()
+        except Exception:
+            logger.warning("compache: old conversations were not let go", exc_info=True)
         dialect = wire.dialect_for(path)
         try:
             scan = (
@@ -1482,6 +1688,13 @@ class Live:
             # A shape this does not know: the application's request goes out as it is.
             self.stats["passed_through"] += 1
             return send(body)
+        if _warming(body) and at is None:
+            try:
+                return self._only_warm(
+                    conversation, chains, dialect, body, scan, turns, send
+                )
+            finally:
+                conversation.lock.release()
         try:
             conversation.when = at[0] if at is not None else None
             try:
@@ -1506,6 +1719,38 @@ class Live:
             conversation.when = None
             conversation.lock.release()
 
+    def _only_warm(
+        self, conversation, chains, dialect, body, scan, turns, send
+    ) -> Result:
+        """A request that only warms the cache, as an agent sends before it expires.
+
+        It goes out once, as the conversation would go out now, so that it warms what the
+        next request will read. Nothing is asked again, no turn is counted, and the
+        conversation is left as it stood.
+        """
+        kept = _Kept(conversation)
+        try:
+            call = self._prepare(
+                conversation, chains, dialect, body, scan, turns, send, asks=False
+            )
+            outgoing = call.marked
+        except Exception:
+            logger.warning("compache: a request was passed on unchanged", exc_info=True)
+            outgoing = body
+        finally:
+            kept.restore(self)
+        self.stats["warmed"] += 1
+        result = send(outgoing)
+        if result.status in _REFUSED and outgoing is not body:
+            self.stats["retried"] += 1
+            result = send(body)
+        try:
+            if result.json is not None:
+                self._receipt(conversation, "ping", dialect.reply(result.json))
+        except Exception:
+            logger.warning("compache: a reply was not recorded", exc_info=True)
+        return result
+
     def _turns(self, scan) -> list[_Segment]:
         """The turns of a request. What a harness says beside its results is a remark only to an agent."""
         policy = self.policy
@@ -1517,6 +1762,7 @@ class Live:
         """Bring the conversation up to this request and work out what to send for it."""
         now, number, current = self._now(conversation), len(turns), turns[-1]
         conversation.system_bytes, conversation.tools_bytes = self._opens(scan)
+        conversation.size = wire.volume(body)
         conversation.superseded = False
         plain, kept = body, None
         before = frozenset(conversation.unbound), conversation.sent_as
@@ -1881,18 +2127,34 @@ class Live:
     def _walk(self, conversation, chains, turns, now, scan) -> None:
         """Walk the policy through a conversation that is met in the middle, up to its last question."""
         done = len(turns) - 1
+        # More turns than this process saw: they went out elsewhere.
+        elsewhere = done > max(conversation.turns, conversation.seen)
         conversation.pending, conversation.turns, conversation.stale = None, 0, False
         conversation.inserts, conversation.went = [], []
         conversation.fetched, conversation.wanted = set(), _Wanted()
         conversation.base = conversation.here = conversation.quotes = None
         policy = self._start(conversation, conversation.thread_id, scan)
         if policy is not None:
-            # When it was said is not known, and a process that meets a conversation in the middle
-            # has usually just been started: the provider's cache is taken to have expired. It has
-            # not where this process sent the conversation itself, before a turn was asked again.
-            before = now - policy.spec.cache_ttl_seconds - 60
-            if conversation.sent_whole is not None:
-                before = max(before, min(conversation.sent_whole, now - 1e-3))
+            # When it was said is not known. Taken as long past, the provider's cache has expired,
+            # and the next question weighs how likely its users are back while it lives: a process
+            # that meets it may have just started, or be one of several that take turns. Where this
+            # process sent the conversation itself, before a turn was asked again, that is known.
+            # An agent in the middle of its tools made its last call moments ago.
+            ttl = policy.spec.cache_ttl_seconds
+            before = now - ttl - 60
+            sent = conversation.sent_whole
+            if sent is not None and now - sent < ttl:
+                # It went out from here within the lifetime: whatever else went out since, it is cached.
+                before = min(sent, now - 1e-3)
+            elif (
+                policy.agentic
+                and turns[-1].retrievals
+                and turns[-1].retrievals[-1].answers
+            ):
+                before = now - 1.0
+            if elsewhere:
+                # The earlier turns are decided again as they were decided there.
+                conversation.shared = True
             for k, segment in enumerate(turns[:done]):
                 at = before - (done - k) * 1e-3
                 # Behind the same instructions and tools as now, or they would look changed.
@@ -1915,16 +2177,19 @@ class Live:
         session, found = conversation.session, segment.retrievals
         if segment.inputs:
             self._thought(conversation, scan, segment.inputs[0].message)
-        ahead = len(found)
-        if conversation.agentic:
-            # What came before the question is there at once. What its tools returned came round by round.
-            ahead = next((i for i, part in enumerate(found) if part.answers), ahead)
+        # What came before the question is there at once. What its tools returned came later: round
+        # by round for an agent, at once for a chat, whose turn was decided before any of it came.
+        ahead = next((i for i, part in enumerate(found) if part.answers), len(found))
+        # A chat that other processes go on with too is decided by what is likely, never by what
+        # only this process saw: each of them then reaches the same requests.
+        uncertain = conversation.shared and not conversation.agentic
         turn = session.prepare(
             segment.question,
             [part.taken for part in found[:ahead]],
             at=at,
             system_prompt=scan.system,
             tools=scan.tools,
+            uncertain=uncertain,
         )
         self._went(conversation, turn)
         return self._extended(conversation, turn, found[ahead:], at, scan)
@@ -1960,6 +2225,8 @@ class Live:
         )
         if session is not None:
             pending.turn = self._shown(conversation, current, now, scan)
+        # From its answer on, this process knows what it sent.
+        conversation.shared = False
         self._heard(conversation, number, current.question, found)
         return pending
 
@@ -2027,6 +2294,9 @@ class Live:
         """The request with every archived part replaced by its notice, and the tool to fetch one back."""
         pending, name = conversation.pending, conversation.thread_id
         turn, out = pending.turn, body
+        # Tool results to leave out whole, with their calls, by call ID: their handles.
+        cleared: dict = {}
+        listed = self._lists(dialect, scan)
         if turn.archived_ids:
             shown = {
                 p.part_id: p.text for p in turn.parts if p.part_id in turn.archived_ids
@@ -2055,6 +2325,23 @@ class Live:
                         shown[part_id] = explained(at.group()) if at else shown[part_id]
                         first = False
                 for part_id, slots in pieces:
+                    if (
+                        listed
+                        and part_id in shown
+                        and slots
+                        and ":retrieval:" in part_id
+                    ):
+                        item = (
+                            body["input"][slots[0].message]
+                            if isinstance(body.get("input"), list)
+                            else None
+                        )
+                        call = item.get("call_id") if isinstance(item, dict) else None
+                        handle = _HANDLE.search(shown[part_id])
+                        if call and handle:
+                            # Changed, it would cost the reasoning that came after it.
+                            cleared[call] = handle.group()
+                            continue
                     if part_id in shown and slots and slots[0].whole is not None:
                         out = wire.put(out, slots[0].whole, shown[part_id])
                     elif part_id in shown:
@@ -2098,9 +2385,15 @@ class Live:
             # a chat it comes with the first notice, and stays: the first cut rewrites the request
             # from near its start anyway, and after that the tool never changes what is cached.
             if conversation.agentic:
-                out = dialect.with_tool(out, _AGENT_TOOL)
+                out = dialect.with_tool(
+                    out, _AGENT_TOOL_LISTED if listed else _AGENT_TOOL
+                )
+            elif listed:
+                out = dialect.with_tool(out, _REOPEN_TOOL_LISTED, _REOPEN_HOW_LISTED)
             else:
                 out = dialect.with_tool(out, _REOPEN_TOOL, _REOPEN_HOW)
+        if cleared:
+            out = self._without_cleared(dialect, body, out, cleared)
         if self.recorder is not None:
             pending.held = wire.volume(out)
             pending.left = wire.volume(body) - pending.held
@@ -2122,6 +2415,38 @@ class Live:
             for at in places
         )
         return out
+
+    @staticmethod
+    def _lists(dialect, scan) -> bool:
+        """Whether cleared tool results are left out whole and listed at the end, rather than changed.
+
+        So it is where the API drops the reasoning that follows an earlier item that was changed,
+        and not the reasoning behind items that are taken out whole.
+        """
+        return hasattr(dialect, "without_calls") and drops_reasoning_on_edits(
+            scan.model
+        )
+
+    @staticmethod
+    def _without_cleared(dialect, body, out, cleared: dict) -> Any:
+        """The request without the cleared tool calls and their results, and a list of them at its end."""
+        lines = []
+        for item in dialect.said_so_far(body):
+            call = item.get("call_id") if isinstance(item, dict) else None
+            kind = str(item.get("type", "")) if isinstance(item, dict) else ""
+            if call in cleared and kind.endswith("_call"):
+                named = item.get("name") or kind
+                said = item.get("arguments") or item.get("input") or ""
+                said = (
+                    said
+                    if isinstance(said, str)
+                    else json.dumps(said, ensure_ascii=False)
+                )
+                said = " ".join(said.split())
+                said = said if len(said) <= 80 else said[:79] + "…"
+                lines.append(f"- {cleared[call]}: {named} {said}".rstrip())
+        out = dialect.without_calls(out, cleared)
+        return dialect.with_cleared(out, "\n".join([_CLEARED, *lines]))
 
     @staticmethod
     def _bound(conversation, dialect, messages) -> list:

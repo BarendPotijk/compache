@@ -8,9 +8,11 @@ import threading
 import time
 import unittest
 import urllib.parse
+import urllib.request
 from unittest import mock
 
 from compache import _tls
+from compache import proxy as proxy_module
 from compache.cli import main
 from compache.live import Live
 from compache.proxy import _family, _thread, _Upstream, serve
@@ -369,3 +371,60 @@ class ProxyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class KeptConnectionTests(unittest.TestCase):
+    """The proxy keeps its connections to a provider open between calls, as an SDK does."""
+
+    def test_calls_go_out_on_one_connection_and_a_closed_one_is_replaced(self):
+        model = FakeModel()
+        url, stop = serve_fake(model)
+        self.addCleanup(stop)
+        opened = []
+        real = proxy_module.http.client.HTTPConnection
+        provider = urllib.parse.urlsplit(url).port
+
+        class Counted(real):
+            def connect(self):
+                if self.port == provider:
+                    opened.append(1)
+                return super().connect()
+
+        live = Live()
+        with mock.patch.object(proxy_module.http.client, "HTTPConnection", Counted):
+            server = proxy_module.serve(live, port=0, upstream=url)
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+            self.addCleanup(server.server_close)
+            self.addCleanup(server.shutdown)
+            base = f"http://127.0.0.1:{server.server_address[1]}"
+
+            def ask(stream=False):
+                body = json.dumps(
+                    {
+                        "model": "gpt-6-luna",
+                        "stream": stream,
+                        "messages": [{"role": "user", "content": "Hello"}],
+                    }
+                ).encode()
+                request = urllib.request.Request(
+                    base + "/v1/chat/completions",
+                    body,
+                    {
+                        "content-type": "application/json",
+                        "authorization": "Bearer sk-proj-x",
+                    },
+                )
+                with urllib.request.urlopen(request, timeout=10) as response:
+                    return response.read()
+
+            for k in range(4):
+                ask(stream=k % 2 == 1)
+            self.assertEqual(len(opened), 1)
+            # The provider closes it: the next call opens another and goes through.
+            for connection, _ in [
+                c for found in proxy_module._POOL._kept.values() for c in found
+            ]:
+                connection.sock.close()
+            ask()
+            self.assertEqual(len(opened), 2)
+        self.assertEqual(len(model.bodies), 5)

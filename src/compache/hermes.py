@@ -31,7 +31,7 @@ import os
 from typing import Any
 
 from . import wire
-from .live import Live, _REOPEN_TOOL
+from .live import _AGENT_TOOL, _REOPEN_TOOL, Live
 
 __all__ = ["make", "register"]
 
@@ -148,10 +148,15 @@ def make(live: Live | None = None):
         # -- the model fetching an archived part back -------------------------------
 
         def get_tool_schemas(self) -> list:
-            """`reopen`, which reads an archived part. It is shown only when there can be one."""
-            if self.live.policy is None:
+            """`reopen`, which reads an archived part. It is shown only when there can be one.
+
+            An agent's policy clears old tool results, and its tool says so in the words an agent
+            reads best.
+            """
+            policy = self.live.policy
+            if policy is None:
                 return []
-            function = _REOPEN_TOOL["function"]
+            function = (_AGENT_TOOL if policy.agentic else _REOPEN_TOOL)["function"]
             return [
                 {
                     "name": function["name"],

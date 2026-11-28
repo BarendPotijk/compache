@@ -2109,3 +2109,266 @@ class StreamTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ThreadTests(unittest.TestCase):
+    """Anthropic's message threads keep the conversation at the provider: a request is passed on as it is."""
+
+    def test_create_and_continue_go_out_untouched(self):
+        live = compache.Live(policy(rounds=1))
+        tools = [{"name": "read", "input_schema": {"type": "object"}}]
+        create = {
+            "model": "claude-sonnet-5-5",
+            "max_tokens": 64,
+            "system": "You read files.",
+            "tools": tools,
+            "thread": {"type": "create"},
+            "messages": [
+                {"role": "user", "content": "Read them"},
+                *[
+                    m
+                    for k in range(1, 6)
+                    for m in (
+                        {
+                            "role": "assistant",
+                            "content": [
+                                {
+                                    "type": "tool_use",
+                                    "id": f"toolu_{k:020d}ab",
+                                    "name": "read",
+                                    "input": {},
+                                }
+                            ],
+                        },
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "tool_result",
+                                    "tool_use_id": f"toolu_{k:020d}ab",
+                                    "content": result(k),
+                                }
+                            ],
+                        },
+                    )
+                ],
+            ],
+        }
+        cont = {
+            "model": "claude-sonnet-5-5",
+            "max_tokens": 64,
+            "thread": {"type": "continue", "previous_message_id": "msg_1"},
+            "messages": [{"role": "user", "content": "And now?"}],
+        }
+        for body in (create, cont):
+            seen = []
+
+            def send(payload):
+                seen.append(payload)
+                return live_module.Result(
+                    200,
+                    json={
+                        "id": "msg_2",
+                        "type": "message",
+                        "role": "assistant",
+                        "model": "claude-sonnet-5-5",
+                        "content": [{"type": "text", "text": "Done."}],
+                        "stop_reason": "end_turn",
+                        "usage": {"input_tokens": 10, "output_tokens": 2},
+                    },
+                )
+
+            live.exchange("/v1/messages", body, send, thread="threaded")
+            self.assertEqual(len(seen), 1)
+            self.assertIs(seen[0], body)
+        self.assertEqual(live.stats["passed_through"], 2)
+
+
+class WarmTests(unittest.TestCase):
+    """Requests that only warm the cache, as Anthropic documents and agents send between prompts."""
+
+    def play(self, warm):
+        clock = Clock(1_900_000_000.0)
+        live = compache.Live(policy(rounds=2, ratio=0.0), clock=clock)
+        sent, messages = [], []
+        tools = [{"name": "read", "input_schema": {"type": "object"}}]
+
+        def send(payload):
+            sent.append(payload)
+            limit = payload.get("max_tokens")
+            if limit is not None and limit <= 1:
+                content, stop = [], "max_tokens"
+            elif state["k"] < 5:
+                state["n"] += 1
+                content = [
+                    {
+                        "type": "tool_use",
+                        "id": f"toolu_{state['n']:020d}ab",
+                        "name": "read",
+                        "input": {},
+                    }
+                ]
+                stop = "tool_use"
+            else:
+                content, stop = [{"type": "text", "text": "Done."}], "end_turn"
+            return live_module.Result(
+                200,
+                json={
+                    "id": f"msg_{len(sent)}",
+                    "type": "message",
+                    "role": "assistant",
+                    "model": "claude-sonnet-5-5",
+                    "content": content,
+                    "stop_reason": stop,
+                    "usage": {
+                        "input_tokens": 100,
+                        "cache_read_input_tokens": 0,
+                        "cache_creation_input_tokens": 0,
+                        "output_tokens": 0 if not content else 5,
+                    },
+                },
+            )
+
+        state = {"k": 0, "n": 0}
+        base = {
+            "model": "claude-sonnet-5-5",
+            "max_tokens": 64,
+            "system": "You read files.",
+            "tools": tools,
+        }
+        mark = 0
+        for prompt in range(3):
+            messages.append({"role": "user", "content": f"Prompt {prompt}"})
+            for k in range(6):
+                state["k"] = k
+                body = {**base, "messages": json.loads(json.dumps(messages))}
+                reply = live.exchange("/v1/messages", body, send, thread="warmed").json
+                messages.append({"role": "assistant", "content": reply["content"]})
+                for block in reply["content"]:
+                    if block["type"] == "tool_use":
+                        messages.append(
+                            {
+                                "role": "user",
+                                "content": [
+                                    {
+                                        "type": "tool_result",
+                                        "tool_use_id": block["id"],
+                                        "content": result(len(messages)),
+                                    }
+                                ],
+                            }
+                        )
+                clock.at += 5
+            clock.at += 200
+            if warm and prompt < 2:
+                for limit in (0, 1):
+                    mark = len(sent)
+                    again = {
+                        **base,
+                        "max_tokens": limit,
+                        "messages": json.loads(json.dumps(messages[:-1])),
+                    }
+                    live.exchange("/v1/messages", again, send, thread="warmed")
+                    # One request each, never asked again as written.
+                    self.assertEqual(len(sent), mark + 1)
+                    clock.at += 30
+        return live, [b for b in sent if b.get("max_tokens", 64) > 1]
+
+    def test_a_warm_request_goes_out_once_and_leaves_no_trace(self):
+        plain, unwarmed = self.play(warm=False)
+        live, warmed = self.play(warm=True)
+        self.assertEqual(live.stats["warmed"], 4)
+        self.assertEqual(live.stats["turns"], plain.stats["turns"])
+        self.assertEqual(live.stats["fell_back"], 0)
+        # What the application's own requests became is the same with and without them.
+        self.assertEqual(
+            [json.dumps(b, sort_keys=True) for b in warmed],
+            [json.dumps(b, sort_keys=True) for b in unwarmed],
+        )
+
+
+class ListedTests(unittest.TestCase):
+    """GPT-6.2 and later drop the reasoning behind an earlier item that was changed, not behind one taken out."""
+
+    class Sol(Codex):
+        model = "gpt-6.2-sol"
+
+    def run_agent(self, files=10, fetch_at=None):
+        def script(request):
+            items = request["body"]["input"]
+            shown = [i for i in items if i.get("type") == "function_call_output"]
+            listed = [i for i in items if i.get("role") == "developer"]
+            fetched = [i for i in shown if '"handle"' in str(i.get("output"))]
+            seen = len(shown) - len(fetched)
+            if listed:
+                seen += len(NOTICE.findall(listed[0]["content"][0]["text"]))
+            if fetch_at is not None and seen == fetch_at and listed and not fetched:
+                handle = NOTICE.search(listed[0]["content"][0]["text"]).group()
+                return {"text": "", "tool": (REOPEN, {"reference": handle})}
+            if seen < files:
+                return {
+                    "text": f"Reading {seen + 1}.",
+                    "tool": ("read", {"file": seen}),
+                    "reasoning": "thinking",
+                    "thinking": 20,
+                }
+            return {"text": "All done."}
+
+        clock = Clock(1_980_000_000.0)
+        model = FakeModel(script, clock=clock, min_tokens=0)
+        live = compache.Live(policy(rounds=2, ratio=0.0), clock=clock)
+        agent = Agent(live, self.Sol(), model, clock=clock, thread="sol")
+        said = agent.run("Read them all")
+        return said, model, agent
+
+    def test_cleared_results_are_left_out_whole_and_listed_at_the_end(self):
+        said, model, agent = self.run_agent()
+        self.assertEqual(said, "All done.")
+        mine = agent.shape.said
+        cut = [
+            b
+            for b in model.bodies
+            if any(
+                i.get("role") == "developer" for i in b["input"] if isinstance(i, dict)
+            )
+        ]
+        self.assertTrue(cut)
+        for body in model.bodies:
+            items = body["input"]
+            listed = [
+                i for i in items if isinstance(i, dict) and i.get("role") == "developer"
+            ]
+            kept = [i for i in items if i not in listed]
+            # Nothing that is left was changed: every item is one the application sent, as it sent it.
+            for item in kept:
+                self.assertIn(item, mine)
+            # Every reasoning item that is left still leads to what it said.
+            for k, item in enumerate(kept):
+                if item.get("type") == "reasoning":
+                    self.assertTrue(
+                        kept[k + 1].get("type", "").endswith("_call")
+                        or kept[k + 1].get("role") == "assistant"
+                    )
+            if listed:
+                self.assertIs(items[-1], listed[0])
+                handles = NOTICE.findall(listed[0]["content"][0]["text"])
+                self.assertTrue(handles)
+                calls = {
+                    i.get("call_id") for i in kept if i.get("type") == "function_call"
+                }
+                outputs = {
+                    i.get("call_id")
+                    for i in kept
+                    if i.get("type") == "function_call_output"
+                }
+                self.assertEqual(calls, outputs)
+        tools = model.bodies[-1]["tools"]
+        self.assertIn(
+            "listed at the end",
+            [t for t in tools if t["name"] == REOPEN][0]["description"],
+        )
+
+    def test_what_was_cleared_can_be_read_again(self):
+        said, model, agent = self.run_agent(fetch_at=6)
+        self.assertEqual(said, "All done.")
+        self.assertGreaterEqual(agent.live.stats["reopened"], 1)

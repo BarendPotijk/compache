@@ -457,6 +457,29 @@ def freeze_distribution(profile, spec):
     )
 
 
+def alive_chance(demand, spec, run_index, *, max_pings=0, ping_lead_seconds=45.0):
+    """How likely a user who comes back for run `run_index` still finds the conversation cached.
+
+    From the fitted returns after the run before: its answer took some time and the user
+    some more, and the lifetime counts from the start of that request. Pings planned while
+    users are away keep it alive for longer. A conversation whose last request was not
+    seen here is decided on this chance.
+    """
+    ttl = spec.cache_ttl_seconds
+    if ttl <= 0:
+        return 0.0
+    row = demand.positions.get(run_index - 1, demand.pooled)
+    if not row.returns:
+        row = demand.pooled
+    gaps = sorted(observation[0] for observation in row.returns)
+    if not gaps:
+        return 0.0
+    durations = [response[2] for response in row.responses] or [0.0]
+    window = ttl + max(0, max_pings) * max(0.0, ttl - ping_lead_seconds)
+    found = sum(bisect_left(gaps, window - duration) for duration in durations)
+    return found / (len(gaps) * len(durations))
+
+
 def request_charge(
     spec, input_tokens, shared_prefix_tokens, output_tokens, read_share=1.0
 ):

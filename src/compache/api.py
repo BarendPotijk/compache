@@ -16,6 +16,7 @@ from .errors import ContractError
 from .models import cache_lifetimes, model_spec, pricing
 from .optimizer.cache_breaks import CacheBreakChecker, CacheScope
 from .optimizer.contracts import ModelSpec, number, seconds
+from .optimizer.distribution import alive_chance
 from .optimizer.parts import Request, Source
 from .optimizer.recovery import reopen as _reopen
 from .optimizer.replay import arm_costs, replay_workload
@@ -814,14 +815,23 @@ class Session:
         return parts
 
     def prepare(
-        self, question: str, retrieved=(), *, at=None, system_prompt=None, tools=None
+        self,
+        question: str,
+        retrieved=(),
+        *,
+        at=None,
+        system_prompt=None,
+        tools=None,
+        uncertain: bool = False,
     ) -> Turn:
         """The request to send for a new user message and the text retrieved for it.
 
         Each retrieved item is text, or a dict with `text` and optionally
         `part_id`, `document_id`, `version` and `chunk_id`. An explicit part ID
         identifies this occurrence and must be unique in the thread. Call again with the same
-        arguments to retry a request that was never answered.
+        arguments to retry a request that was never answered. `uncertain` says that when the
+        request before went out is not known, as for a conversation met in the middle: the
+        policy then weighs how likely its users are back while the cache lives.
         """
         run = self._run + 1
         parts = [Source(f"{self.thread_id}:{run}:input", "input", run, question)]
@@ -829,6 +839,16 @@ class Session:
         if not isinstance(question, str):
             raise ContractError("a question and every retrieved item need text")
         request = self._request(run, parts)
+        more = {}
+        if uncertain and not self.policy.agentic:
+            compiled = self.policy._compiled
+            more["warm_chance"] = alive_chance(
+                compiled.forecast,
+                self.policy.spec,
+                run,
+                max_pings=compiled.options["max_pings"],
+                ping_lead_seconds=compiled.options["ping_lead_seconds"],
+            )
         plan = self._engine.prepare(
             request,
             started_at=time.time() if at is None else at,
@@ -836,6 +856,7 @@ class Session:
             if system_prompt is None
             else system_prompt,
             tools=self.tools if tools is None else tools,
+            **more,
         )
         self._pending = (request, tuple(parts))
         view = plan.view

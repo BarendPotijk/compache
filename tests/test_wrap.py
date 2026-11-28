@@ -773,3 +773,172 @@ class LangChainTests(SdkCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(
+    has("anthropic", "botocore"), "needs the Anthropic SDK and botocore"
+)
+class SignedTests(unittest.TestCase):
+    """A request signed over its body (AWS SigV4) goes out as it was signed, or not at all."""
+
+    def test_a_signed_request_goes_out_as_the_sdk_signed_it(self):
+        import anthropic
+
+        made = getattr(anthropic, "AnthropicAWS", None)
+        if made is None:
+            self.skipTest("this Anthropic SDK has no client for Claude on AWS")
+        import inspect
+
+        sent = []
+        for wrapped in (False, True):
+            model = FakeModel()
+            url, stop = serve(model)
+            self.addCleanup(stop)
+            given = {
+                "aws_access_key": "AKIAEXAMPLE",
+                "aws_secret_key": "secret",
+                "aws_region": "us-east-1",
+                "base_url": url,
+                "workspace_id": "wrkspc_1",
+            }
+            known = inspect.signature(made.__init__).parameters
+            client = made(**{k: v for k, v in given.items() if k in known})
+            live = Live(fitted())
+            if wrapped:
+                client = wrap(client, live=live)
+            client.messages.create(
+                model="claude-sonnet-5-5",
+                max_tokens=16,
+                system=SYSTEM,
+                messages=[{"role": "user", "content": "Hello"}],
+            )
+            headers = {k.lower(): v for k, v in model.headers[-1].items()}
+            self.assertTrue(headers["authorization"].startswith("AWS4-HMAC-SHA256"))
+            sent.append(model.bodies[-1])
+        self.assertEqual(sent[0], sent[1])
+        self.assertNotIn("cache_control", json.dumps(sent[1]))
+        self.assertEqual(live.stats["passed_through"], 1)
+
+
+@unittest.skipUnless(
+    has("google.genai", "aiohttp"), "needs the Google GenAI SDK and aiohttp"
+)
+class GeminiAsyncTests(SdkCase):
+    def test_async_calls_come_through_where_aiohttp_is_installed(self):
+        from google import genai
+        from google.genai import types
+
+        live = self.start(lambda request: {"text": "Fine."}, sample=0.0)
+        client = wrap(
+            genai.Client(
+                api_key="key", http_options=types.HttpOptions(base_url=self.url)
+            ),
+            live=live,
+        )
+
+        async def run():
+            await client.aio.models.generate_content(
+                model="gemini-2.5-flash-lite", contents="Hello"
+            )
+            async for _ in await client.aio.models.generate_content_stream(
+                model="gemini-2.5-flash-lite", contents="Hello again"
+            ):
+                pass
+
+            await client.aio.aclose()
+
+        asyncio.run(run())
+        self.assertEqual(len(self.model.bodies), 2)
+        self.assertEqual(live.stats["calls"], 2)
+
+
+@unittest.skipUnless(has("openai"), "needs the OpenAI SDK")
+class CancelTests(unittest.TestCase):
+    def test_a_call_the_application_gives_up_on_is_given_up_upstream(self):
+        import select
+        import socket
+        import threading
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+        from openai import AsyncOpenAI
+
+        seen = {"hung_up": threading.Event(), "finished": threading.Event()}
+
+        class Slow(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def log_message(self, *args):
+                pass
+
+            def do_POST(self):
+                self.rfile.read(int(self.headers.get("Content-Length") or 0))
+                end = time.time() + 5
+                while time.time() < end:
+                    ready, _, _ = select.select([self.connection], [], [], 0.05)
+                    if ready:
+                        try:
+                            peeked = self.connection.recv(1, socket.MSG_PEEK)
+                        except OSError:
+                            peeked = b""
+                        if not peeked:
+                            seen["hung_up"].set()
+                            self.close_connection = True
+                            return
+                seen["finished"].set()
+                self.send_response(500)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+        class Server(ThreadingHTTPServer):
+            daemon_threads = True
+
+        server = Server(("127.0.0.1", 0), Slow)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        client = wrap(
+            AsyncOpenAI(
+                api_key="key",
+                base_url=f"http://127.0.0.1:{server.server_address[1]}/v1",
+                max_retries=0,
+            ),
+            fitted(),
+        )
+
+        async def run():
+            with self.assertRaises(asyncio.TimeoutError):
+                await asyncio.wait_for(
+                    client.chat.completions.create(
+                        model="claude-sonnet-5-5",
+                        messages=[{"role": "user", "content": "Hello"}],
+                    ),
+                    0.3,
+                )
+            await client.close()
+
+        asyncio.run(run())
+        self.assertTrue(seen["hung_up"].wait(3))
+        self.assertFalse(seen["finished"].is_set())
+
+
+class ForkTests(unittest.TestCase):
+    def test_a_forked_worker_starts_its_pings_again(self):
+        from compache import wrap as _unused  # noqa: F401
+        import sys
+
+        from test_agent_live import policy
+
+        module = sys.modules["compache.wrap"]
+        live = Live(policy(rounds=2, tool_pings=3))
+        self.assertTrue(live.policy.max_pings)
+        module.start_pings(live)
+        before, workers = live.pinger, module._workers
+        self.addCleanup(lambda: live.pinger and live.pinger.stop())
+        # A fork leaves the child the objects of the parent's threads, not the threads.
+        before.stop()
+        before._thread.join(3)
+        self.assertFalse(before._thread.is_alive())
+        module._forked()
+        self.assertIsNot(live.pinger, before)
+        self.assertTrue(live.pinger._thread.is_alive())
+        self.assertIsNot(module._workers, workers)

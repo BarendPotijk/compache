@@ -6,7 +6,7 @@ Long sessions get cheaper. This context engine leaves out of each request what l
 
 ```sh
 hermes plugins install BarendPotijk/compache/integrations/hermes
-compache default --model claude-sonnet-5-5 -o ~/.hermes/compache.json
+compache default --agent --model claude-sonnet-5-5 -o ~/.hermes/compache.json
 echo "COMPACHE_POLICY=$HOME/.hermes/compache.json" >> ~/.hermes/.env
 ```
 

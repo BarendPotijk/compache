@@ -166,6 +166,19 @@ def binds_reasoning(model, budget: bool = False) -> bool:
     return not (budget or _OLD_CLAUDE.search(name))
 
 
+_GPT_VERSION = re.compile(r"gpt-(\d+)(?:\.(\d+))?")
+
+
+def drops_reasoning_on_edits(model) -> bool:
+    """Whether a model's API drops the reasoning that follows an earlier item that was changed.
+
+    So it is with OpenAI from GPT-6.2 on, on the Responses API. Deleting whole items does
+    not do that. https://developers.openai.com/api/docs/guides/keep-prefix-unchanged
+    """
+    found = _GPT_VERSION.search(str(model or "").lower())
+    return found is not None and (int(found[1]), int(found[2] or 0)) >= (6, 2)
+
+
 def pricing(model) -> dict | None:
     """List price behind a known model name, for reports in dollars. None for a custom spec."""
     if not isinstance(model, str) or model.endswith(".json"):

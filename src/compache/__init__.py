@@ -14,7 +14,7 @@ Metadata-only chat records can fit caching. Supply dependency labels to fit chat
 compaction, or opt into sampled labeling requests to the provider with sample=0.1.
 """
 
-__version__ = "0.15.1"
+__version__ = "0.15.2"
 
 from . import langchain, langfuse, litellm, mlflow, otel
 from .api import Policy, Session, Turn, fit, replay

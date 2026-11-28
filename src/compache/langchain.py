@@ -8,7 +8,9 @@ Any chat model, through a middleware of the agent:
 
 What the graph keeps is left as it is. Archived results go to the model as a notice, and the
 agent gets a `reopen` tool for them, which runs like any other. The thread ID names the
-conversation. compache makes no requests of its own here, so it sends no keep-warm pings.
+conversation. Claude's requests are marked for the prompt cache, with the lifetime the policy
+counts on, unless the agent marks them already. compache makes no requests of its own here, so
+it sends no keep-warm pings.
 
 A chat model that takes an HTTP client, as `ChatOpenAI` does, can have compache inside
 instead. Fetching back is then unseen by the graph, and pings go out:
@@ -23,6 +25,7 @@ import json
 import logging
 from typing import Any
 
+from . import wire
 from .live import _AGENT_TOOL, _REOPEN, Live
 from .wrap import async_http_client, http_client, thread
 
@@ -195,6 +198,68 @@ def _replied(shown, name: str, body: dict, response) -> None:
         shown.conclude({**body, "messages": messages}, thread=name)
 
 
+def _claude(model) -> bool:
+    """Whether a chat model is Anthropic's, which caches only what a request marks."""
+    return any(
+        kind.__name__ == "ChatAnthropic"
+        or kind.__module__.split(".")[0] == "langchain_anthropic"
+        for kind in type(model).__mro__
+    )
+
+
+def _marked(request, body: dict) -> Any:
+    """The cache mark the agent gives a request itself, or True where it marks blocks of its own."""
+    settings = getattr(request, "model_settings", None) or {}
+    if settings.get("cache_control"):
+        return settings["cache_control"]
+    if wire.has_cache_mark(body):
+        return True
+    found = [getattr(request, "system_message", None), *request.messages]
+    for message in found:
+        content = getattr(message, "content", None)
+        if isinstance(content, list) and any(
+            isinstance(block, dict) and block.get("cache_control") for block in content
+        ):
+            return True
+    return any(
+        isinstance(getattr(tool, "extras", None), dict)
+        and tool.extras.get("cache_control")
+        for tool in request.tools or ()
+    )
+
+
+# What a mark asks for where the policy counts on the provider's default lifetime, or on an hour.
+_TTL = {None: "5m", 300: "5m", 3600: "1h"}
+
+
+def _settings(live: Live, shown, request, body: dict) -> dict | None:
+    """The request's model settings with Claude's cache mark, where the agent sets none. None to leave them.
+
+    The middleware is where Claude learns what to cache: nothing else in the agent marks a
+    request, and without a mark the whole conversation is paid in full on every call.
+    """
+    conversation = getattr(shown, "_conversation", None)
+    if conversation is None or conversation.session is None:
+        return None
+    if not _claude(request.model):
+        return None
+    ttl = _TTL.get(conversation.lifetime)
+    given = _marked(request, body)
+    if given:
+        if isinstance(given, dict) and ttl and given.get("ttl", "5m") != ttl:
+            live.tell(
+                "lifetime",
+                f"the agent's cache marks ask for {given.get('ttl', '5m')} and the policy counts on {ttl}",
+            )
+        return None
+    if ttl is None:
+        return None
+    return {
+        **(getattr(request, "model_settings", None) or {}),
+        "cache_control": {"type": "ephemeral", "ttl": ttl},
+    }
+
+
 def _reopen_tool(live: Live):
     """The agent's `reopen` tool, which reads what a notice stands for."""
     from langchain_core.tools import StructuredTool
@@ -238,7 +303,15 @@ def middleware(live: Live | None = None):
                 return name, request, None
             try:
                 changed = _shown(request, body, shown.body, owners)
-                return name, request.override(messages=changed), (shown, body)
+                more = {}
+                settings = _settings(live, shown, request, body)
+                if settings is not None:
+                    more["model_settings"] = settings
+                return (
+                    name,
+                    request.override(messages=changed, **more),
+                    (shown, body),
+                )
             except Exception:
                 shown.over()
                 logger.warning(

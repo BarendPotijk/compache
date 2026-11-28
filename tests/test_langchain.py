@@ -5,10 +5,11 @@ from __future__ import annotations
 import importlib.util
 import tempfile
 import unittest
+from dataclasses import replace
 
 import compache
 from compache.record import load
-from test_agent_live import policy, result
+from test_agent_live import SPEC, policy, result
 
 HERE = all(
     importlib.util.find_spec(name)
@@ -252,3 +253,112 @@ class MiddlewareTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+CLAUDE = HERE and importlib.util.find_spec("langchain_anthropic") is not None
+
+
+@unittest.skipUnless(CLAUDE, "needs LangChain's Anthropic models")
+class ClaudeMarkTests(unittest.TestCase):
+    """Nothing else in a LangChain agent marks Claude's requests for the cache: the middleware does."""
+
+    def run_agent(self, live, more=(), reads=6, before=()):
+        import json as json_
+        import time
+
+        from fakes import FakeModel, serve
+        from langchain.agents import create_agent
+        from langchain_anthropic import ChatAnthropic
+        from langchain_core.tools import tool
+        from langgraph.checkpoint.memory import InMemorySaver
+
+        def script(request):
+            made = sum(
+                1
+                for m in request["body"]["messages"]
+                if isinstance(m["content"], list)
+                for b in m["content"]
+                if b.get("type") == "tool_result"
+            )
+            if made < reads:
+                return {"text": "", "tool": ("read", {"file": made + 1})}
+            return {"text": "All read."}
+
+        @tool
+        def read(file: int) -> str:
+            """Read a file."""
+            return result(file)
+
+        model = FakeModel(script, clock=time.time)
+        url, stop = serve(model)
+        self.addCleanup(stop)
+        middleware = [*before, compache.langchain.middleware(live), *more]
+        agent = create_agent(
+            ChatAnthropic(
+                model="claude-sonnet-5-5", api_key="k", base_url=url, max_tokens=64
+            ),
+            [read],
+            middleware=middleware,
+            checkpointer=InMemorySaver(),
+        )
+        agent.invoke(
+            {"messages": [{"role": "user", "content": "Read them"}]},
+            {"configurable": {"thread_id": "t-1"}, "recursion_limit": 100},
+        )
+        return [json_.loads(json_.dumps(b)) for b in model.bodies]
+
+    @staticmethod
+    def marks(body):
+        found = []
+
+        def walk(value, at):
+            if isinstance(value, dict):
+                if "cache_control" in value:
+                    found.append((at, value["cache_control"]))
+                for key, inner in value.items():
+                    walk(inner, f"{at}.{key}" if at else key)
+            elif isinstance(value, list):
+                for inner in value:
+                    walk(inner, at)
+
+        walk(body, "")
+        return found
+
+    def test_every_request_is_marked_for_five_minutes(self):
+        bodies = self.run_agent(compache.Live(policy(rounds=2)))
+        self.assertGreater(len(bodies), 5)
+        for body in bodies:
+            self.assertEqual(
+                body.get("cache_control"), {"type": "ephemeral", "ttl": "5m"}
+            )
+            self.assertLessEqual(len(self.marks(body)), 4)
+
+    def test_a_policy_fitted_for_an_hour_asks_for_an_hour(self):
+        hour = replace(SPEC, cache_ttl_seconds=3600, write_multiplier=2.0)
+        made = policy(rounds=2, spec=hour)
+        made = compache.Policy({**made.artifact, "standard_spec": SPEC.to_dict()})
+        self.assertEqual(made.cache_lifetime, 3600)
+        for body in self.run_agent(compache.Live(made)):
+            self.assertEqual(
+                body.get("cache_control"), {"type": "ephemeral", "ttl": "1h"}
+            )
+
+    def test_marks_of_the_agent_s_own_are_left_as_they_are(self):
+        from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
+
+        for first in (True, False):
+            with self.subTest(compache_first=first):
+                caching = [AnthropicPromptCachingMiddleware()]
+                live = compache.Live(policy(rounds=2))
+                if first:
+                    bodies = self.run_agent(live, more=caching)
+                else:
+                    bodies = self.run_agent(live, before=caching)
+                for body in bodies:
+                    top = [m for at, m in self.marks(body) if at == ""]
+                    self.assertEqual(top, [{"type": "ephemeral", "ttl": "5m"}])
+                    self.assertLessEqual(len(self.marks(body)), 4)
+
+    def test_without_a_policy_nothing_is_marked(self):
+        for body in self.run_agent(compache.Live()):
+            self.assertEqual(self.marks(body), [])
