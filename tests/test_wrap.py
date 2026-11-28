@@ -5,6 +5,7 @@ These tests need the SDKs themselves and are skipped where they are not installe
 """
 
 import asyncio
+from contextvars import ContextVar
 import gc
 import importlib.util
 import json
@@ -19,6 +20,7 @@ from compache.record import load
 from compache.wrap import async_http_client, thread, wrap
 from fakes import NOTE_ASKED, FakeModel, noticed, serve
 from test_live import (
+    ChatApp,
     CLAUDE_SEARCH,
     SEARCH,
     SYSTEM,
@@ -78,6 +80,86 @@ class SdkCase(unittest.TestCase):
         headers = {k.lower(): v for k, v in self.model.headers[-1].items()}
         self.assertNotIn("x-compache-thread", headers)
         return headers
+
+
+@unittest.skipUnless(has("httpx"), "needs an HTTP transport")
+class RequestContextTests(unittest.IsolatedAsyncioTestCase):
+    async def test_async_reopens_keep_the_originating_request_context(self):
+        import httpx
+        from fakes import NOTICE
+
+        def script(request):
+            if request["last"].startswith('{"status": "ok"'):
+                return {"text": "Recovered."}
+            match = NOTICE.search(json.dumps(request["body"]))
+            if match:
+                return {"tool": ("reopen", {"reference": match.group()})}
+            return looping(request)
+
+        request_id = ContextVar("gateway_request_id", default=None)
+        policy = fitted()
+
+        async def conversation(name, stream):
+            clock = Clock()
+            model = FakeModel(script, clock=clock)
+            live = Live(policy, clock=clock)
+            app = ChatApp(live, model, thread=name, name=policy.spec.model_id)
+            for n in (1, 2):
+                app.turn(f"Question {n}?", passage(n))
+                clock.at += 3600
+
+            seen = []
+
+            class Events(httpx.AsyncByteStream):
+                def __init__(self, pieces):
+                    self.pieces = pieces
+
+                async def __aiter__(self):
+                    for piece in self.pieces:
+                        yield piece
+
+            async def upstream(request):
+                seen.append(request_id.get())
+                status, reply = model.handle(
+                    request.url.path, json.loads(request.content)
+                )
+                if isinstance(reply, list):
+                    return httpx.Response(
+                        status,
+                        headers={"content-type": "text/event-stream"},
+                        stream=Events(reply),
+                    )
+                return httpx.Response(status, json=reply)
+
+            body = {
+                "model": app.name,
+                "messages": [*app.messages, {"role": "user", "content": "Question 3?"}],
+                "tools": app.tools,
+                "stream": stream,
+            }
+            async with async_http_client(
+                live, inner=httpx.MockTransport(upstream), pings=False
+            ) as client:
+                request = client.build_request(
+                    "POST", "https://provider.test/v1/chat/completions", json=body
+                )
+                token = request_id.set(name)
+                try:
+                    with thread(name):
+                        response = await client.send(request, stream=stream)
+                finally:
+                    request_id.reset(token)
+                async with asyncio.TaskGroup() as group:
+                    # The foreground turn owns the reopen even when another task consumes its stream.
+                    group.create_task(response.aread())
+                await response.aclose()
+            self.assertEqual(seen, [name, name])
+            self.assertEqual(live.stats["reopened"], 1)
+            self.assertEqual(live.stats["physical_calls"], len(model.bodies))
+
+        await asyncio.gather(
+            conversation("json-request", False), conversation("stream-request", True)
+        )
 
 
 @unittest.skipUnless(has("openai"), "needs the OpenAI SDK")

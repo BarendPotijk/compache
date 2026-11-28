@@ -42,7 +42,7 @@ def flow_of(recipe, rounds, tokens=1_000, spec=SPEC, at=0.0, every=5.0):
     return flow
 
 
-def runs(count, calls=40, seed=1, quotes=0.3, tokens=600, away=None):
+def runs(count, calls=40, seed=1, quotes=0.3, tokens=600, away=None, cohort="run"):
     """Recorded agent runs whose replies quote earlier results, mostly recent ones."""
     rng, made = random.Random(seed), []
     for i in range(count):
@@ -91,7 +91,7 @@ def runs(count, calls=40, seed=1, quotes=0.3, tokens=600, away=None):
                     {"role": "user", "content": "Now the next part", "at": at}
                 )
         messages.append({"role": "assistant", "content": "Done.", "at": at + 8})
-        made.append({"thread_id": f"run-{i}", "messages": messages})
+        made.append({"thread_id": f"{cohort}-{i}", "messages": messages})
     return made
 
 
@@ -231,17 +231,19 @@ class FitTests(unittest.TestCase):
         self.assertGreaterEqual(solved["chosen"]["coverage"], agent.FLOOR)
         self.assertGreater(solved["relying_calls"], 40)
 
-    def test_where_little_is_relied_on_few_calls_may_miss(self):
-        """Agents that rarely quote: what counts is how many of all calls would have to fetch back."""
+    def test_rare_observed_dependencies_still_have_to_meet_the_requested_minimum(self):
         rows = runs(10, quotes=0.03, tokens=2_500, seed=4)
         threads = compache.load_threads(rows, model=SPEC.model_id)
         fitted = agent.fit_agent(threads, SPEC)
         solved = fitted["solve"]
         self.assertLess(solved["relying_calls"], 40)
         self.assertGreaterEqual(solved["known_calls"], 200)
-        self.assertLess(fitted["recipe"]["rounds"], 8, "less is kept than the default")
-        missed = solved["chosen"]["missed_calls"]
-        self.assertLessEqual((missed + 1) / solved["known_calls"], agent.MOST_MISSED)
+        self.assertGreater(solved["relying_calls"], 0)
+        self.assertEqual(solved["min_retention"], 0.8)
+        self.assertGreaterEqual(solved["chosen"]["coverage"], 0.8)
+        strict = compache.fit(rows, model=SPEC, min_retention=1)
+        self.assertEqual(strict.summary["coverage"], 1)
+        self.assertEqual(strict.min_retention, 1)
 
     def test_it_holds_on_runs_it_has_not_seen(self):
         train, test = self.threads[::2], self.threads[1::2]
@@ -253,13 +255,10 @@ class FitTests(unittest.TestCase):
 
     def test_what_is_chosen_is_the_cheapest_that_may_be(self):
         fitted = agent.fit_agent(self.threads, SPEC)
-        known = fitted["solve"]["known_calls"]
         allowed = [
             row
             for row in fitted["solve"]["candidates"]
-            if row["recipe"]["rounds"] is None
-            or (row["coverage"] or 0) >= agent.FLOOR
-            or (row["missed_calls"] + 1) / known <= agent.MOST_MISSED
+            if row["coverage"] is None or row["coverage"] >= agent.FLOOR
         ]
         self.assertEqual(
             fitted["solve"]["chosen"]["cost"], min(row["cost"] for row in allowed)
@@ -358,7 +357,15 @@ class FitTests(unittest.TestCase):
         self.assertLess(min(r["cost"] for r in both), min(r["cost"] for r in plain))
         self.assertEqual(fitted["header_spec"]["cache_ttl_seconds"], 3600)
         self.assertEqual(fitted["model_spec"]["cache_ttl_seconds"], 300)
-        held = agent.replay_agent(fitted, threads, header_tokens=20_000)
+        # An independent cohort with the same synthetic workload has the same cost.
+        held_rows = self.prompts(900, header=20_000)
+        for row in held_rows:
+            row["thread_id"] = "held-" + row["thread_id"]
+        held = agent.replay_agent(
+            fitted,
+            compache.load_threads(held_rows, model=SPEC.model_id),
+            header_tokens=20_000,
+        )
         self.assertAlmostEqual(held["policy_cost"], solved["chosen"]["cost"])
 
     def test_small_instructions_are_left_at_the_default(self):
@@ -547,7 +554,17 @@ class PolicyTests(unittest.TestCase):
             policy.save(path)
             again = compache.Policy.load(path)
             self.assertEqual(again.recipe, policy.recipe)
-            report = compache.replay(path and again, runs(4, seed=9))
+            with self.assertRaisesRegex(compache.ContractError, "training thread"):
+                compache.replay(again, runs(1, cohort="held") + runs(1))
+            report = compache.replay(again, runs(4, seed=9, cohort="held"))
+            self.assertEqual(report["min_retention"], 0.8)
+            self.assertEqual(report["training_retention"], policy.summary["coverage"])
+            self.assertEqual(report["heldout_retention"], report["coverage"])
+        legacy = dict(policy.artifact)
+        legacy["solve"] = {
+            k: v for k, v in legacy["solve"].items() if k != "min_retention"
+        }
+        self.assertIsNone(compache.Policy(legacy).min_retention)
         self.assertGreater(report["saving"], 0)
         self.assertIn("policy", report["cost_per_1000_calls"])
 
@@ -599,7 +616,9 @@ class CommandTests(unittest.TestCase):
             folder = Path(folder)
             for name, seed in (("train", 1), ("test", 2)):
                 with open(folder / f"{name}.jsonl", "w", encoding="utf-8") as stream:
-                    for row in runs(8, seed=seed, quotes=0.5, tokens=2_000):
+                    for row in runs(
+                        8, seed=seed, quotes=0.5, tokens=2_000, cohort=name
+                    ):
                         stream.write(json.dumps(row) + "\n")
             code, said = self.run_it(
                 "fit",

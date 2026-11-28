@@ -130,6 +130,7 @@ def price(folder: Path, output: Path | None) -> None:
             specs = {s.cache_ttl_seconds: s.to_dict() for s in (spec, *longer)}
             cached = agent.replay_agent(
                 {
+                    "training_threads": fitted["training_threads"],
                     "recipe": alone["recipe"],
                     "model_spec": specs[alone["cache_ttl_seconds"]],
                     "header_spec": specs[alone["header_ttl_seconds"]],

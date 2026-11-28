@@ -15,7 +15,7 @@ from . import agent
 from .errors import ContractError
 from .models import cache_lifetimes, model_spec, pricing
 from .optimizer.cache_breaks import CacheBreakChecker, CacheScope
-from .optimizer.contracts import ModelSpec, seconds
+from .optimizer.contracts import ModelSpec, number, seconds
 from .optimizer.distribution import alive_chance
 from .optimizer.parts import Request, Source
 from .optimizer.recovery import reopen as _reopen
@@ -131,6 +131,7 @@ def fit(
     system_prompt=None,
     tools=None,
     observed_until=None,
+    min_retention=None,
     **options,
 ) -> Policy:
     """Fit what to keep in view, how many keep-warm pings to send and how long the cache is to live.
@@ -141,6 +142,9 @@ def fit(
     tools and when the record was read. Without labels only the caching is
     fitted and the whole history stays in view. Where the threads record
     several model calls in a turn, those are priced.
+
+    `min_retention` is the training minimum before recovery (default 0.8).
+    A held-out replay measures how well that minimum generalizes.
 
     Every candidate is replayed against the provider's cache rules at the
     threads' own timestamps, each thread priced by a model of returns fitted on
@@ -171,7 +175,13 @@ def fit(
     tools = list(found["tools"] or ()) if tools is None else list(tools)
     header = {"system_prompt": system_prompt, "default_tools": tools}
     agentic = options.pop("agent", None)
-    if agent.is_agentic(threads) if agentic is None else agentic:
+    is_agent = agent.is_agentic(threads) if agentic is None else agentic
+    if min_retention is not None:
+        number(min_retention, "min_retention", 0, 1)
+        if {"floor", "retention_floor", "tradeoff_floor"} & options.keys():
+            raise ContractError("use min_retention by itself to set a training minimum")
+        options["floor" if is_agent else "retention_floor"] = min_retention
+    if is_agent:
         unknown = sorted(set(options) - {"floor", "reserve", "pings"})
         if unknown:
             raise ContractError(
@@ -232,12 +242,14 @@ def fit(
         model,
         header_size(spec, system_prompt, tools),
     )
+    policy = Policy(artifact)
+    scenario["retentionRequirement"] = policy.min_retention
     artifact["workload"] = {
         "model": preset,
         "scenario": scenario,
         "source": f"{len(threads):,} threads, {artifact['fitted']['turns']:,} turns",
     }
-    return Policy(artifact)
+    return policy
 
 
 def replay(policy, threads, labels=None, *, observed_until=None, **options) -> dict:
@@ -251,6 +263,12 @@ def replay(policy, threads, labels=None, *, observed_until=None, **options) -> d
     labels = _labels(labels, threads)
     threads, spec, found, _ = _threads(threads, policy.spec)
     header = policy.artifact.get("header") or {}
+    retention = {
+        "min_retention": policy.min_retention,
+        "training_retention": (
+            (policy.artifact.get("solve") or {}).get("chosen") or {}
+        ).get("coverage"),
+    }
     if policy.agentic:
         prompt, tools = header.get("system_prompt", ""), header.get("default_tools")
         opens = header_size(spec, prompt, tools or ())
@@ -264,7 +282,12 @@ def replay(policy, threads, labels=None, *, observed_until=None, **options) -> d
         costs = {"policy": report["policy_cost"]}
         if report["keep_everything_cost"] is not None:
             costs["keep_everything"] = report["keep_everything_cost"]
-        return {**report, "cost_per_1000_calls": policy._per_1000(costs, calls)}
+        return {
+            **report,
+            **retention,
+            "heldout_retention": report["coverage"],
+            "cost_per_1000_calls": policy._per_1000(costs, calls),
+        }
     # Threads share a cached system prompt in the replay if they did in the fit.
     options.setdefault("share_headers", header.get("share_headers", True))
     options.setdefault("calls_per_run", _calls(threads))
@@ -321,6 +344,8 @@ def replay(policy, threads, labels=None, *, observed_until=None, **options) -> d
         },
         "pings": candidate["pings"],
         "needs_history": candidate["historical_required"] if labels else None,
+        **retention,
+        "heldout_retention": candidate["coverage"],
         "coverage": candidate["coverage"],
         "coverage_by_thread": {
             tid: {"retained": n, "required": d, "coverage": n / d if d else None}
@@ -452,6 +477,15 @@ class Policy:
         }
 
     @property
+    def min_retention(self):
+        """Enforced training minimum, when the saved policy specifies one."""
+        if self.agentic:
+            # Older agent policies could waive their nominal floor on sparse labels.
+            return (self.artifact.get("solve") or {}).get("min_retention")
+        relaxed = (self.artifact.get("recipe_selection") or {}).get("tradeoff_floor")
+        return self.artifact.get("retention_floor") if relaxed is None else relaxed
+
+    @property
     def summary(self) -> dict:
         """The decision and what it costs on the fitted threads, as plain numbers."""
         if self.agentic:
@@ -471,7 +505,7 @@ class Policy:
         fitted = self.artifact.get("fitted") or {}
         return {
             "model": self.spec.model_id,
-            "threads": len(self.artifact["training_threads"]),
+            "threads": fitted.get("threads", len(self.artifact["training_threads"])),
             "turns": solved.get("turns"),
             "labelled_turns": fitted.get("labelled_turns", 0),
             "unknown_requirements": fitted.get("unknown_requirements"),
@@ -495,6 +529,7 @@ class Policy:
             "max_pings": self.max_pings,
             "cache_lifetime_seconds": self.cache_lifetime,
             "coverage": chosen.get("coverage"),
+            "min_retention": self.min_retention,
             "saving": solved.get("saving_fraction"),
             "cost_per_1000_turns": None
             if None in costs.values()
@@ -524,6 +559,7 @@ class Policy:
             "cache_lifetime_seconds": self.cache_lifetime,
             "header_lifetime_seconds": self.header_lifetime,
             "coverage": chosen.get("coverage"),
+            "min_retention": self.min_retention,
             "missed_calls": chosen.get("missed_calls"),
             "saving": solved.get("saving_fraction"),
             "cost_per_1000_calls": None
@@ -545,12 +581,18 @@ class Policy:
                 f"Ask for {_duration(summary['header_lifetime_seconds'])} cache entries for the "
                 "instructions and tools that open every request.",
             )
-        if recipe.rounds is not None and summary["coverage"] is not None:
-            kept = f"{summary['coverage']:.0%} of the calls that rely on an earlier result find it in view."
+        if self.min_retention is not None:
+            lines.append(f"Minimum training retention: {self.min_retention:.2%}.")
+        if summary["coverage"] is not None:
+            kept = f"On the training threads, {summary['coverage']:.2%} of the calls that rely on an earlier result find it in view."
             if summary["missed_calls"]:
                 share = summary["missed_calls"] / summary["calls"]
                 kept += f" The others, {share:.1%} of all calls, fetch it back, and that is in the cost."
             lines.append(kept)
+        else:
+            lines.append(
+                "Training retention is unmeasured because there are no observed dependencies."
+            )
         costs, saving = summary["cost_per_1000_calls"], summary["saving"]
         if costs and saving is not None:
             if costs["unit"] == "USD":
@@ -606,11 +648,17 @@ class Policy:
             if pings
             else "Send no keep-warm pings."
         )
-        if recipe is not None and summary["coverage"] is not None:
-            kept = f"{summary['coverage']:.0%} of what the labelled turns need from earlier turns stays in view."
+        if self.min_retention is not None:
+            lines.append(f"Minimum training retention: {self.min_retention:.2%}.")
+        if summary["coverage"] is not None:
+            kept = f"On the training threads, {summary['coverage']:.2%} of what the labelled turns need from earlier turns stays in view."
             if summary["coverage"] < 0.995:
                 kept += " The rest is fetched back, and that call is in the cost."
             lines.append(kept)
+        else:
+            lines.append(
+                "Training retention is unmeasured because there are no observed dependencies."
+            )
         costs, saving = summary["cost_per_1000_turns"], summary["saving"]
         if costs and saving is not None:
             if costs["unit"] == "USD":

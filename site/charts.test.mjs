@@ -1,8 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {contextSeries,survivalView,pingProfile} from './charts.mjs';
+import {contextSeries,survivalView,pingProfile,ticks} from './charts.mjs';
 import {DEFAULTS} from './engine.mjs';
 const row=(thread,turn,inputTokens,admitted=true)=>({thread,turn,inputTokens,cachedTokens:0,admitted,role:'answer'});
+test('chart axes terminate for unavailable forecasts and have a usable range at zero cost', () => {
+  for (const bound of [NaN, Infinity, -Infinity]) assert.deepEqual(ticks(0, bound).values, [0, 1]);
+  assert.deepEqual(ticks(0, 0).values, [0, .25, .5, .75, 1]);
+  assert.deepEqual(ticks(-.31, .45, 4).values, [-.4, -.2, 0, .2, .4, .6]);
+});
 test('context average uses the same surviving cohort, without zero-padding ended threads',()=>{
  const r={compache:{ledger:[row('a',0,10),row('b',0,30),row('a',1,50),row('b',1,99,false)]},baseline:{arm:{ledger:[row('a',0,20),row('b',0,40),row('a',1,70),row('b',1,90)]}}};
  const [a,b]=contextSeries(r);assert.deepEqual(a.map(x=>[x.turn,x.count,x.inputTokens]),[[0,2,20],[1,1,50]]);assert.deepEqual(b.map(x=>[x.count,x.inputTokens]),[[2,30],[1,70]]);

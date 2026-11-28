@@ -5,7 +5,7 @@ from dataclasses import replace
 from compache.errors import ContractError
 from compache.labels import label_index
 
-from .contracts import digest, number, seconds
+from .contracts import DEFAULT_MIN_RETENTION, digest, number, seconds
 from .distribution import fit_distribution, measure_cache_reads, validate_calls_per_run
 from .replay import _run_arm
 from .retention import evidence_windows, fit_recipes, recipe_grid, size_ladder
@@ -56,8 +56,8 @@ def solve_workload(
     system_prompt,
     default_tools,
     retention_threads=None,
-    retention_floor=0.95,
-    tradeoff_floor=0.8,
+    retention_floor=DEFAULT_MIN_RETENTION,
+    tradeoff_floor=None,
     unknowns="excluded",
     ping_counts=(0, 1, 3),
     folds=3,
@@ -81,7 +81,7 @@ def solve_workload(
     depends on how often the cache is still warm when the user returns. So each
     candidate is replayed against the provider's cache at the threads' own
     timestamps. Candidates are the cuts on the retention frontier between
-    `tradeoff_floor` and full retention, each with every ping count, plus
+    the training minimum and full retention, each with every ping count, plus
     keeping everything. A thread is always priced by a demand model fitted
     without it. A cut also pays for what it loses: every lost requirement is
     one more request that reads the cached view, writes the reopened sources
@@ -133,6 +133,7 @@ def solve_workload(
     if any(p.exposed_to_model for t in threads for r in t.runs for p in r.retrievals):
         kinds.add("retrieval")
     # Labelled runs are read twice: once for where evidence lies, once to score.
+    training_ids = {t.thread_id for t in threads}
     labelled = (
         (lambda: threads)
         if retention_threads is None
@@ -140,16 +141,22 @@ def solve_workload(
         if callable(retention_threads)
         else (lambda kept=list(retention_threads): kept)
     )
+
+    def labelled_fit():
+        for thread in labelled():
+            training_ids.add(thread.thread_id)
+            yield thread
+
     grid = recipe_grid(
         max(len(t.runs) for t in threads),
         kinds=kinds,
         keep_under_tokens=size_ladder(threads, spec),
         include_citations=any(r.cited_part_ids for t in threads for r in t.runs),
-        extra_windows=evidence_windows(labelled(), labels),
+        extra_windows=evidence_windows(labelled_fit(), labels),
         protect_query_matches=(True, False) if match_questions else (False,),
     )
     rows = fit_recipes(
-        labelled(),
+        labelled_fit(),
         labels,
         spec,
         grid,
@@ -378,5 +385,5 @@ def solve_workload(
             "caching_alone": cheapest(kept_whole) if kept_whole else None,
             "candidates": report,
         },
-        "training_threads": sorted(digest(t.thread_id) for t in threads),
+        "training_threads": sorted(digest(tid) for tid in training_ids),
     }

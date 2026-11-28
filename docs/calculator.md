@@ -1,13 +1,13 @@
 # Calculator
 
-The [calculator](https://barendpotijk.github.io/compache/) prices one chat workload under a fitted compache policy, your own rules and the defaults of other tools. It runs in the browser from `site/`, with no keys and no provider requests.
+The [calculator](https://barendpotijk.github.io/compache/) estimates cost per 1,000 user turns for Compache and one baseline you choose. It runs in the browser from `site/`, with no keys and no provider requests.
 
 ## What it needs, and the easiest way to give it
 
 | It needs | Least effort first |
 |---|---|
 | What a turn adds, how long threads run, how long users are away, what later turns need | A starting point · drop a chat log, with labels if you have them · drop a `policy.json` · the link `compache profile` prints · draw the distributions · type a median and a 95th percentile |
-| What you do today | Send everything, unless you say otherwise · pick a tool's defaults · edit the rules under *Your app today* · enter what you pay per 1,000 turns |
+| What you do today | OpenClaw is the default baseline. Choose another preset in **Baseline**, edit the rules under *Your app today*, or enter what you pay per 1,000 turns |
 | Model and prices | A preset, or your own prices |
 
 A file is read in the browser and sent nowhere. A chat log is measured as `compache profile` measures it, with the observed distributions instead of a fitted curve.
@@ -23,14 +23,14 @@ prints a link with the workload and the policy filled in. `compache fit` also wr
 The address bar always holds the scenario on screen, and **Share** copies the result with its link. A link names only what it changes, so it can be written by hand:
 
 ```text
-https://barendpotijk.github.io/compache/#v=7&model=haiku&start=documents&gapMedianMinutes=30&app.keepTurns=10&compare=app
+https://barendpotijk.github.io/compache/#v=8&model=haiku&start=documents&gapMedianMinutes=30&app.keepTurns=10&compare=app
 ```
 
 ## What it shows
 
 | Part | Shows |
 |---|---|
-| Cost per 1,000 turns | Every side at once, with the share of needed text each one no longer has. Click one to compare with it |
+| Cost per 1,000 turns | Two bars show Compache and the selected baseline for the same workload. The headline saving is relative to that baseline |
 | The policy | What stays of questions, answers and retrieved text, over where later turns need it. The one fitted here, the one in your `policy.json`, or your own: drag a window to price it. Every candidate, by cost and needed text in view |
 | One conversation | What each turn sends, when the cache expired, what was trimmed, fetched back and pinged. Click a turn for the expected cost of both choices and of each number of pings |
 
@@ -44,7 +44,7 @@ The policy has the package's form and decides the way it does: before each reque
 | Package replay, held-out threads | 43% | 83% | 89% |
 | Package, training threads | 32% | 84% | 90% |
 
-Treat its figure as an estimate and `compache fit` with `compache replay` as the number for your threads.
+The browser draws synthetic threads from a workload profile. Package replay uses the held-out threads you supply and still estimates cost. The table compares both estimates against sending the full history with the default cache. A provider bill requires live traffic.
 
 ## What it models
 
@@ -54,11 +54,12 @@ Treat its figure as an estimate and `compache fit` with `compache replay` as the
 | Prices | List prices and cache rules of seven models, checked on 2026-11-20. The same sheet as the package: `src/compache/models.json` |
 | compache | Windows for questions, answers and retrieved text, 0, 1 or 3 pings, and on Claude the five-minute or the one-hour cache. The cheapest of up to 42 candidates on one set of threads that keeps the chosen share in view, priced on a second set |
 | Comparisons | One vocabulary of rules: cache lifetime, turns kept, retrieved text dropped, shrunk or cleared, summaries, pings. [Where each tool's come from](comparisons.md) |
-| Fetching back | A part compache archived costs one extra call for the turn that needs it. A comparison pays when its tool would fetch again, and otherwise the text is missing |
+| Fetching back | A turn needing one or more archived parts incurs one extra recovery call. A comparison pays when its tool would fetch again, and otherwise the text is missing |
 | The range | The 5th to 95th percentile of the saving when the sampled threads are drawn again |
 
 ## What it leaves out
 
+- Browser retention estimates the share of earlier-part dependencies available before recovery. Package chat replay can evaluate a labelled need with multiple acceptable sets of sources.
 - No model is called. Answer quality is not measured, and every side is assumed to know which earlier parts a turn needs.
 - A policy that keeps retrieved text matching the question, or cited sources, is priced without that.
 

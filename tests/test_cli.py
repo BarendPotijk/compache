@@ -56,6 +56,8 @@ class CommandTests(unittest.TestCase):
             base / "model.json",
             "--system-prompt",
             base / "system.txt",
+            "--min-retention",
+            "0.95",
             "-o",
             base / "policy.json",
         )
@@ -81,9 +83,12 @@ class CommandTests(unittest.TestCase):
         )
         self.assertEqual(status, 0)
         self.assertIn("1 threads, 6 turns.", out)
+        self.assertIn("Minimum training retention: 95.00%", out)
+        self.assertIn("Observed training retention: 100.00%", out)
         self.assertIn("per 1,000 turns with the policy", out)
         self.assertIn(
-            "100% of the 5 labelled needs for earlier context are in view.", out
+            "On held-out threads, 100.00% of the 5 labelled needs for earlier context are in view.",
+            out,
         )
         self.assertIn(
             "candidate", json.loads((base / "report.json").read_text())["detail"]
@@ -127,7 +132,7 @@ class CommandTests(unittest.TestCase):
             out,
         )
         self.assertIn(
-            "https://barendpotijk.github.io/compache/#v=7&model=sonnet&inputTokens=",
+            "https://barendpotijk.github.io/compache/#v=8&model=sonnet&inputTokens=",
             out,
         )
         saved = json.loads((self.base / "profile.json").read_text())

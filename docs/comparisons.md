@@ -1,30 +1,30 @@
 # Other tools compared
 
-Tools for this bill come in two kinds. **Cache tools** keep the whole history and keep it cached. **Compressors** make single results smaller. compache decides what stays in the request and when the cache is worth keeping, together, from your own conversations. The [calculator](https://barendpotijk.github.io/compache/) prices your workload against all of these and against your own rules.
+The DocChat comparison uses two experiments. The first measures what the compressors remove and **models** request cost at list prices. The second sends real requests and compares **provider-billed cost and graded answers**. The browser calculator separately simulates selected product configurations. [Calculator assumptions](calculator.md)
 
 ![Cost per 1,000 turns of document chats for users back after 30 seconds, 4 minutes and 30 minutes: whole history, Headroom, Kompressor, whole history with the cache kept warm, and compache](assets/compare-cost.svg)
 
-- **Against the best a cache tool can do,** compache costs 30%, 35% and 70% less. That bar is the cheapest of ten settings, five-minute or one-hour entries with up to eight pings, picked on the very chats it is priced on.
+- **Against the cheapest whole-history setting tested,** compache costs 30%, 35% and 70% less. That bar is the cheapest of ten settings, five-minute or one-hour entries with up to eight pings, picked on the very chats it is priced on.
 - **Against a compressor,** 19% to 84% less than Headroom and 33% to 79% less than Kompressor. Retrieved prose compresses little: by a third at Headroom's setting for documents, by 3% in Kompressor.
-- **Modeled.** The chats are the 15 held-out [DocChat](../benchmarks/docchat/README.md) threads, 625 turns, at Claude Sonnet 5.5 list prices. compache keeps 92%, 85% and 88% of what these turns need in view and pays for fetching back the rest. [Run it](../benchmarks/compare/README.md).
+- **Modeled.** The chats are the 15 held-out [DocChat](../benchmarks/docchat/README.md) threads, 625 turns, at Claude Sonnet 5.5 list prices. compache retains 92%, 85% and 88% of labelled historical needs before recovery and pays for fetching back the rest. [Run it](../benchmarks/compare/README.md).
 
 ## Live
 
 ![Bill per 1,000 turns and right answers out of 52: whole history $2.90 and 33, with one-hour entries $1.80 and 30, Headroom $2.33 and 22, Kompressor $2.00 and 31, compache $1.48 and 33, Headroom and compache together $1.27 and 20](assets/compare-live.svg)
 
-- **compache has the lowest bill with the answers of the whole history.** 49% less than the whole history, 18% less than the whole history on one-hour entries, 26% less than Kompressor, 36% less than Headroom.
+- **compache and full history each scored 33/52.** 49% less than the whole history, 18% less than the whole history on one-hour entries, 26% less than Kompressor, 36% less than Headroom.
 - **Headroom's setting for documents costs answers.** It takes a third of the words out of prose: 22 right against 33 (p = 0.03), and 20 together with compache (p = 0.002). Its README says to skip prose, and its defaults leave it nearly whole. What it is made for, tool output with structure, is not in these chats.
 - **Kompressor saved no tokens** on this prose. What it saved here is its one-hour entries.
-- **The rest is within chance** (p = 0.51 to 1.00).
+- The other paired comparisons had p-values from 0.51 to 1.00. This sample cannot establish equivalent answer quality.
 
-Five short held-out chats, 10 to 12 turns each, played by the same application on Claude Haiku 5.5, users back after four minutes at the median and never after more than seven. Billed through OpenRouter on 2026-11-24, the whole history on 2026-11-23. Claude Haiku 5.5 graded 52 answers per tool against DocChat's key facts, strictly: one missed fact is wrong. p-values are paired by turn, against the whole history.
+Five short held-out chats, 10 to 12 turns each, played by the same application on Claude Haiku 5.5, users back after four minutes at the median and never after more than seven. Cost per 1,000 turns is normalized from 55 turns per arm. Billed through OpenRouter on 2026-11-24, the whole history on 2026-11-23. Claude Haiku 5.5 graded 52 answers per tool against DocChat's key facts, strictly: one missed fact is wrong. p-values are paired by turn, against the whole history.
 
 ## Coding agents
 
 ![Long Claude Code sessions on Claude Haiku 5.5, the bill after the last prompt. One task in 13 prompts: alone $0.33, Headroom $0.40, Kompressor $0.28, compache $0.13. 16 issues in one conversation: alone $0.98, compache $0.15. Alone and compache are averages of two runs](assets/agents-live.svg)
 
-- **In long sessions compache has the lowest bill, with as many answers right.** On one task in thirteen prompts 66% less than Headroom and 53% less than Kompressor, run once each, and all tests passed. On the day's first eight issues, as far as all of them got, 40% and 79% less.
-- **In short sessions little separates them.** Sessions of five or six issues with Claude Code cost 11% and 10% less than with Headroom and Kompressor, and with Codex the three are within what the agent's own choices move. On GPT-6 Luna most of the input is read from the cache at a tenth of the price, so there is less to save.
+- **In the 13-prompt task all four configurations passed 14/14 hidden tests.** The reported compache bill was 66% below Headroom and 53% below Kompressor, each run once. On the day's first eight issues, as far as all of them got, 40% and 79% less.
+- **In short sessions little separates them.** Claude Code with compache solved 24/34 issues at $0.050 per session, versus 27/34 at $0.056 with Headroom and 22/34 at $0.055 with Kompressor. Codex session costs ranged from $0.029 to $0.038 across the three tools. On GPT-6 Luna most of the input is read from the cache at a tenth of the price, so there is less to save.
 - **Where it comes from.** A compressor makes each new result smaller, and all of them are sent with every call. compache lets old ones go, at the calls where that is cheap.
 
 Claude Haiku 5.5 in Claude Code and GPT-6 Luna in Codex, billed through OpenRouter on 2026-11-24 and 2026-11-25. Runs of the day that end early had spent their money. [Every number, and how they were run](../benchmarks/agents/README.md)
@@ -33,7 +33,7 @@ Claude Haiku 5.5 in Claude Code and GPT-6 Luna in Codex, billed through OpenRout
 
 | Tool | What it does | While a user is away | Fitted to traffic | Compared how |
 |---|---|---|---|---|
-| compache | Keeps in view what later turns need, trims when the cache has expired, fetches back | Pings while they pay, or one-hour entries | What stays, the pings and the entries' lifetime | |
+| compache | Fits windows against observed needs, trims when replay predicts a saving, supports reopening | Pings while they pay, or one-hour entries | What stays, the pings and the entries' lifetime | Package replay and live proxy |
 | caching.ai | Keeps every token, and the provider's cache warm | Pings, or one-hour entries | The entries' lifetime | Modeled: the cheapest cache setting. Live: one-hour entries |
 | OptScale Kompressor | Shrinks tool output for coding agents | One-hour entries after a first long pause. Its pings are for running tools | The lifetime | Run live, and on the text |
 | Headroom | Compresses the content of new tool output, keeps every message | Nothing | No | Run live, and on the text |
@@ -52,8 +52,8 @@ Read on 2026-11-24 from [its site](https://caching.ai) and [documentation](https
 
 - **What it does.** A proxy behind a base-URL change. It adds cache marks where a request has none, sends one-token pings on Anthropic where that is switched on, and Auto-Tune picks five-minute or one-hour entries from how far apart calls come. It changes nothing a request holds.
 - **What it reports.** 67% saved on support-style traffic with pauses longer than the cache lifetime, pings included, against calling the provider directly. The cloud costs 20% of net savings.
-- **Not run.** Its site calls the core open source, but the repository it links could not be opened. The chart has what a cache tool can reach at best instead.
-- **Its best idea is the one-hour entry,** [the long cache](#the-long-cache). compache fits the lifetime as well: it asks for one-hour entries where users take half an hour, and five minutes with pings is cheaper in the other two cases.
+- **Benchmark configuration.** The authors did not run caching.ai. The modeled comparator picks the cheapest of ten whole-history cache configurations on the evaluation chats. The live comparator requests one-hour entries.
+- **Its best idea is the one-hour entry,** [the long cache](#the-long-cache). compache fits the lifetime as well: it asks for one-hour entries where users take half an hour, and five minutes in the other two cases. The 30-second policy uses no pings.
 
 ## OptScale
 
@@ -80,7 +80,7 @@ Run as 0.45.0 on 2026-11-24, and read first-hand: README, documentation and sour
 - **History and cache.** It never drops a message. Told how many messages the request before held, it left them as they were in 624 of 625 turns here, so the cached prefix holds. It sends no keep-warm request.
 - **Recovery.** Compressed content can be fetched back through a retrieve tool, in the proxy.
 
-The two are not alternatives. Headroom makes a single tool result smaller. compache decides which whole parts stay in the request and when the cache is kept warm. On structured tool output both can go in. On prose, leave Headroom out.
+These tools can run together. On the five prose chats above, the combined configuration cost $1.27 per 1,000 turns and scored 20/52. Its performance on structured tool output requires a separate workload.
 
 ## OpenClaw
 
@@ -112,7 +112,7 @@ Anthropic's tool-result clearing and compaction, and OpenAI's compaction endpoin
 
 ## The long cache
 
-Anthropic keeps an entry for an hour at 2× the input price for a write instead of 1.25×, and OpenAI for 12 hours at 2.5×, in the Responses API only. For an app that sends everything it is the simplest saving there is, and the baseline to beat. DocChat's held-out threads in the package's replay, Claude Sonnet 5.5, per 1,000 turns:
+The benchmark prices a one-hour Claude cache write at 2× input, versus 1.25× for five minutes. Keeping the whole history under both lifetimes isolates the effect of changing the cache setting. DocChat's held-out threads in the package's replay, Claude Sonnet 5.5, per 1,000 turns:
 
 | Users back after | Everything, 5-minute cache | Everything, 1-hour cache | compache | compache against the 1-hour cache |
 |---|---|---|---|---|
@@ -120,7 +120,7 @@ Anthropic keeps an entry for an hour at 2× the input price for a write instead 
 | 4 minutes | $143 | $39 | $24, 5-minute cache and pings | 38% less |
 | 30 minutes | $286 | $155 | $32, 1-hour cache and pings | 79% less |
 
-`python benchmarks/docchat/run.py cost` reports both. compache fits Claude's lifetime to your users, and does not ask OpenAI for the 12 hours.
+`python benchmarks/docchat/run.py cost` reports both. The fitted Claude policy can select either lifetime.
 
 ## In the calculator
 

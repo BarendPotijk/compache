@@ -4,7 +4,7 @@ import {RULES, OPENCLAW_RULES} from './baselines.mjs';
 import {applyPreset, presetKey} from './models.mjs';
 import {STARTS} from './starts.mjs';
 
-export const LINK_VERSION = 7;
+export const LINK_VERSION = 8;
 export const EXPORT_SCHEMA = `compache-cost-explorer-v${LINK_VERSION}`;
 export const PROFILE_SCHEMA = 'compache-profile-v1';
 const KINDS = ['input', 'retrieval', 'output'];
@@ -13,6 +13,7 @@ const isObject = value => value !== null && typeof value === 'object' && !Array.
 // Settings saved by an earlier version of the page, rewritten for this one.
 export function migrateScenario(version, scenario) {
   const v = Number(version), s = {...scenario};
+  if (v === 7) return {compare: 'everything', ...s};
   if (v <= 5) for (const kind of KINDS) {
     const chance = `${kind}DependencyProbability`, lookback = `${kind}DependencyLookback`;
     // Versions 1 and 2 had one chance and one look-back for every kind, and no floor on what stays in view.
@@ -40,7 +41,7 @@ export function migrateScenario(version, scenario) {
 }
 
 // -- links -------------------------------------------------------------------
-// A link names each setting it changes (`v=7&model=haiku&start=documents&gapMedianMinutes=30`), from the defaults or from
+// A link names each setting it changes (`v=8&model=haiku&start=documents&gapMedianMinutes=30`), from the defaults or from
 // a starting point. What belongs together is dotted (`app.keepTurns=6`, `policy.questions=4`), a drawn distribution lists
 // its weights (`gapDrawn=0,2,1`), and `all` is a window without an end.
 const GROUPS = {model: DEFAULTS.model, app: RULES, policy: {questions: null, answers: null, retrieved: null, maxPings: 0, keepUnder: 0, long: false}};

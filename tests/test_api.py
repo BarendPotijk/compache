@@ -88,6 +88,30 @@ class FitTests(unittest.TestCase):
             self.assertEqual(again.summary, summary)
             self.assertEqual(again.recipe, policy.recipe)
 
+    def test_custom_retention_reaches_the_calculator_and_survives_loading(self):
+        sample = threads()
+        policy = compache.fit(sample, labels(sample), model=SPEC, min_retention=0.95)
+        self.assertEqual(
+            policy.artifact["workload"]["scenario"]["retentionRequirement"], 0.95
+        )
+        self.assertGreaterEqual(policy.summary["coverage"], 0.95)
+        self.assertEqual(
+            compache.Policy(json.loads(json.dumps(policy.artifact))).min_retention, 0.95
+        )
+        calculator = compache.profile(sample, model=SPEC, policy=policy)["calculator"]
+        self.assertEqual(calculator["scenario"]["retentionRequirement"], 0.95)
+        with self.assertRaisesRegex(ContractError, "min_retention"):
+            compache.fit(sample, model=SPEC, min_retention=1.01)
+        with self.assertRaisesRegex(ContractError, "min_retention"):
+            compache.fit(sample, model=SPEC, min_retention=0.95, tradeoff_floor=0.6)
+        # Earlier chat artifacts could explicitly allow a lower minimum.
+        legacy = {
+            **policy.artifact,
+            "retention_floor": 0.95,
+            "recipe_selection": {"tradeoff_floor": 0.8},
+        }
+        self.assertEqual(compache.Policy(legacy).min_retention, 0.8)
+
     def test_threads_read_minutes_after_they_ended_fit_too(self):
         # Read off a trace store the same day, nobody can have been seen to stay away for a day:
         # the threads are taken to be over then, as those of a record are.
@@ -741,7 +765,7 @@ class ProfileTests(unittest.TestCase):
         )
         self.assertEqual(result["calculator"]["model"], "sonnet")
         query = parse_qs(urlsplit(result["link"]).fragment)
-        self.assertEqual(query["v"], ["7"])
+        self.assertEqual(query["v"], ["8"])
         self.assertEqual(query["model"], ["sonnet"])
         self.assertEqual(query["source"], ["4 threads, 24 turns"])
         # Every measured setting by name, and nothing else.

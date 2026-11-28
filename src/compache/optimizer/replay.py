@@ -10,7 +10,7 @@ from compache.errors import ContractError
 from compache.labels import label_index
 
 from .cache_breaks import CacheBreakChecker, CacheScope
-from .contracts import ModelSpec, digest, number, seconds
+from .contracts import ModelSpec, number, require_held_out, seconds
 from .distribution import (
     _input_buckets,
     repeat_input_usage,
@@ -543,16 +543,13 @@ def replay_workload(
     lack a matched submitted view for the replay's input; both arms model it.
     """
     threads, labels = list(threads), list(labels)
-    if not threads:
-        raise ContractError("held-out evaluation requires at least one thread")
+    require_held_out(threads, artifact["training_threads"])
     policy = WorkloadPolicy(artifact, **policy_options)
     # This is the synthetic receipt at dispatch. Planning sees only the
     # configured forecast until the ping has actually returned.
     if modeled_ping_output_tokens is None:
         modeled_ping_output_tokens = policy.spec.ping_output_tokens
     number(modeled_ping_output_tokens, "modeled_ping_output_tokens", integer=True)
-    if any(digest(t.thread_id) in policy.training_threads for t in threads):
-        raise ContractError("held-out evaluation includes a training thread")
     cutoff = (
         seconds(observation_end)
         if isinstance(observation_end, str)

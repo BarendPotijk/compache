@@ -1,8 +1,8 @@
 import {BINS, DEFAULTS, DRAWN, WINDOW, configure, describePolicy, drawnStats, longAvailable, lawWeights, needLaw, warmReturnShare} from './engine.mjs';
 import {RULES, comparisons, configureRules} from './baselines.mjs';
 import {presets, applyPreset} from './models.mjs';
-import {contextSeries, coverage} from './charts.mjs';
-import {EXPORT_SCHEMA, parseLink, parseFile, resolveScenario, shareHash} from './scenario.mjs';
+import {contextSeries, coverage, ticks} from './charts.mjs';
+import {EXPORT_SCHEMA, LINK_VERSION, parseLink, parseFile, resolveScenario, shareHash} from './scenario.mjs';
 import {STARTS} from './starts.mjs';
 import {isLabel, isThread, measure, parseRows} from './traces.mjs';
 import {isPolicy, readPolicy} from './policy.mjs';
@@ -22,12 +22,12 @@ const pct = (n, digits = 1) => n === null || !Number.isFinite(n) ? '—' : `${fi
 const compact = n => n >= 1e6 ? `${fixed(2).format(n / 1e6)}M` : n >= 1000 ? `${num(n / 1000)}k` : num(n);
 const usd = (n, digits) => new Intl.NumberFormat('en-US', {style: 'currency', currency: 'USD', minimumFractionDigits: digits, maximumFractionDigits: digits}).format(n);
 // Whole dollars from $100, cents below. An amount that cents would round to nothing says so.
-const dollars = n => { if (!Number.isFinite(n)) return '—'; const a = Math.abs(n); return a > 0 && a < 0.005 ? `${n < 0 ? '−' : ''}<$0.01` : usd(n, a === 0 || a >= 100 ? 0 : 2); };
+const dollars = (n, cents = false) => { if (!Number.isFinite(n)) return '—'; const a = Math.abs(n); return a > 0 && a < 0.005 ? `${n < 0 ? '−' : ''}<$0.01` : usd(n, !cents && (a === 0 || a >= 100) ? 0 : 2); };
 const esc = text => String(text).replace(/[&<>"]/g, ch => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'})[ch]);
 const plural = (n, word) => `${num(n)} ${word}${n === 1 ? '' : 's'}`;
 const minutes = m => m < 1 ? `${num(m * 60)} s` : m < 90 ? `${num(m)} min` : m < 2880 ? `${num(m / 60)} h` : `${num(m / 1440)} d`;
 
-let current = null, baseConfig = DEFAULTS, latest = 0, timer, worker = null;
+let current = null, baseConfig = DEFAULTS, latest = 0, timer, worker = null, running = false;
 let priorTokens = 0, priorLength = 0, retrievalSpread = 1.8;
 // Where the scenario came from, whether it was changed since, and a load failure that stays on screen until the next edit.
 let source = '', edited = false, loadError = '', startId = '';
@@ -111,39 +111,53 @@ function invalidate(message) {
   current = null; busy('false');
   $('errors').textContent = message; $('errors').hidden = false; $('status').textContent = 'Check inputs';
   $('savingPercent').textContent = '—'; $('savingAmount').textContent = ''; $('savingRange').textContent = ''; $('savingFacts').innerHTML = ''; $('sides').innerHTML = '';
+  $('baselineNote').textContent = '';
   $('export').disabled = true; $('share').disabled = true;
 }
+// An idle worker holds the fit for the current workload. Interrupt only an unfinished calculation.
+function cancelCalculation() {
+  latest++;
+  if (running) { worker.terminate(); worker = null; running = false; }
+}
 function update() {
-  clearTimeout(timer); worker?.terminate(); latest++; labels();
+  clearTimeout(timer); cancelCalculation(); labels();
   if (!form.checkValidity()) {
     const bad = Array.from(form.elements).find(e => e.validity && !e.validity.valid); bad?.closest('details')?.setAttribute('open', '');
     invalidate(`${labelOf(bad?.dataset.model ? `model.${bad.dataset.model}` : bad?.dataset.rule ? `app.${bad.dataset.rule}` : bad?.name || '') || 'Input'}: ${bad?.validationMessage || 'check this value'}`);
     return;
   }
   current = null; $('errors').textContent = loadError; $('errors').hidden = !loadError;
-  $('status').textContent = 'Fitting…'; busy('true'); $('export').disabled = true; $('share').disabled = true;
-  const c = readForm();
-  worker = new Worker(new URL('./worker.mjs', import.meta.url), {type: 'module'});
-  worker.onmessage = ({data}) => { if (data.id !== latest) return; if (data.error) { invalidate(readable(data.error)); return; } render(data.result); };
-  worker.onerror = () => invalidate('Could not load the calculator. Serve this folder over HTTP and reload.');
-  worker.postMessage({id: latest, config: c});
+  $('status').textContent = 'Calculating…'; busy('true'); $('export').disabled = true; $('share').disabled = true;
+  const id = latest;
+  function workerFailed() {
+    if (id !== latest) return;
+    worker?.terminate(); worker = null; running = false;
+    invalidate('The calculator could not start its background worker. Reload the page to try again.');
+    $('status').textContent = 'Calculation unavailable';
+  }
+  try {
+    worker ??= new Worker(new URL('./worker.mjs', import.meta.url), {type: 'module'});
+    worker.onmessage = ({data}) => {
+      if (data.id !== latest) return;
+      if (data.candidate) { $('status').textContent = `Fitting policy ${data.candidate} of ${data.total}…`; return; }
+      running = false;
+      if (data.error) { invalidate(readable(data.error)); return; }
+      render(data.result);
+    };
+    worker.onerror = workerFailed;
+    worker.onmessageerror = workerFailed;
+    running = true;
+    worker.postMessage({id, config: readForm(), reportProgress: true});
+  } catch { workerFailed(); }
 }
 const changed = () => { if (source) edited = true; startId = ''; };
 function soon() {
-  loadError = ''; labels(); worker?.terminate(); latest++; current = null; $('export').disabled = true; $('share').disabled = true; busy('true');
+  loadError = ''; labels(); cancelCalculation(); current = null; $('export').disabled = true; $('share').disabled = true; busy('true');
   try { renderInputs(configure(readForm())); } catch { /* an unfinished entry: the check in update() reports it */ }
   clearTimeout(timer); timer = setTimeout(update, 250);
 }
 
 // Chart pieces. Every colour is a class that resolves to a design token in style.css.
-// Clean axis values from lo to at least hi, about `count` steps apart.
-function ticks(lo, hi, count = 4) {
-  const raw = (hi - lo || 1) / count, mag = 10 ** Math.floor(Math.log10(raw)), norm = raw / mag;
-  const step = (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 2.5 ? 2.5 : norm <= 5 ? 5 : 10) * mag, first = Math.floor(lo / step + 1e-9), values = [];
-  for (let i = first; ; i++) { const v = tidy(i * step); values.push(v); if (v >= hi - step * 1e-9) break; }
-  let digits = 0; while (digits < 6 && Math.abs(step * 10 ** digits - Math.round(step * 10 ** digits)) > 1e-9) digits++;
-  return {step, values, digits};
-}
 // A bar from the baseline y0 to the value y1, rounded at the data end only.
 function bar(x, w, y0, y1) {
   const r = Math.min(4, w / 2, Math.abs(y1 - y0)), toward = y1 < y0 ? -1 : 1;
@@ -229,24 +243,31 @@ function renderInputs(c) {
 const role = (arm, key, field = 'cost') => arm.byRole[key]?.[field] || 0;
 function renderLead(r) {
   const ours = r.compache.complete ? 1000 * r.compache.totals.cost / r.workload.totalRuns : null, s = r.savings, known = s && s.percent !== null, dearer = s?.absolute < 0;
-  $('againstName').textContent = r.selected.name;
   $('savingPercent').textContent = known ? `${dearer ? '−' : ''}${num(Math.abs(s.percent))}%` : '—';
   $('savingAmount').className = `delta ${s ? (dearer ? 'bad' : 'good') : ''}`;
-  $('savingAmount').textContent = s ? `${dollars(ours)} instead of ${dollars(r.selected.per1000)} per 1,000 turns` : r.compache.complete ? 'No comparison: these requests do not fit the model' : 'The requests do not fit the model';
+  if (s) {
+    const difference = s.absolute === 0 ? 'Same cost' : `${dollars(Math.abs(s.absolute), true)} ${dearer ? 'more' : 'less'}`;
+    $('savingAmount').textContent = `${difference} per 1,000 turns`;
+  } else {
+    $('savingAmount').textContent = r.compache.complete && r.selected.complete ? 'No eligible fitted policy' : 'Requests exceed the context window';
+  }
   $('savingRange').textContent = s?.range ? `${pct(s.range.low, 0)} to ${pct(s.range.high, 0)} when the sampled threads are drawn again` : '';
   const facts = [['Fetches trimmed text back', `${pct(role(r.compache, 'recovery', 'calls') / r.workload.totalRuns)} of turns`], ['Needed text in view before that', pct(r.compache.retention.observed, 0)]];
-  if (r.selected.missing !== null) facts.push([`Needed text ${r.selected.name} does not have`, pct(r.selected.missing, 0)]);
+  if (r.selected.missing !== null) facts.push(['Needed text missing with the baseline', pct(r.selected.missing, 0)]);
   if (r.fit.pinned && r.fit.fittedHere !== null) facts.push(['The policy fitted here would cost', dollars(r.fit.fittedHere)]);
   $('savingFacts').innerHTML = facts.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${v}</dd></div>`).join('');
   document.querySelectorAll('[data-against]').forEach(el => { el.textContent = r.baseline.name; });
-  // Every side, cheapest first, Compache among them.
-  const list = [{id: 'compache', name: 'Compache', per1000: ours, missing: r.compache.dependencyCoverage === null ? null : 1 - r.compache.dependencyCoverage, note: describePolicy(r.policy, r.config.longTtlMinutes).join(' '), complete: r.compache.complete}, ...r.sides];
-  const most = Math.max(...list.map(b => b.per1000 ?? 0)) || 1; list.sort((a, b) => (a.per1000 ?? Infinity) - (b.per1000 ?? Infinity));
-  $('sides').innerHTML = `<div class="side head"><span></span><span></span><span>cost</span><span title="What turns need and this side no longer has.">missing</span></div>` + list.map(b => {
-    const us = b.id === 'compache', picked = b.id === r.selected.id, missing = b.missing === null ? '' : b.missing < .005 ? '0%' : pct(b.missing, 0);
-    const cells = `<span class="name">${us ? '<i></i>' : ''}${esc(b.name)}</span><span class="track"><i class="${us ? 'compache' : picked ? 'picked' : ''}" style="width:${b.per1000 === null ? 0 : Math.max(.6, 100 * b.per1000 / most).toFixed(2)}%"></i></span><span class="value">${b.per1000 === null ? 'does not fit' : dollars(b.per1000)}</span><span class="value ${b.missing >= .05 ? 'bad' : 'muted'}">${missing}</span>`;
-    return us ? `<div class="side us" title="${esc(b.note)}">${cells}</div>` : `<button type="button" class="side" role="radio" aria-checked="${picked}" data-id="${b.id}" title="${esc(b.note)}${b.checked ? ` Read ${b.checked}.` : ''}">${cells}</button>`;
-  }).join('');
+  const picker = $('baselinePicker');
+  picker.replaceChildren(...r.sides.map(side => new Option(side.name, side.id)));
+  picker.value = r.selected.id;
+  picker.disabled = false;
+  const costs = [['Baseline', r.selected.per1000], ['Compache', ours]];
+  const scale = Math.max(r.selected.per1000 ?? 0, ours ?? 0) || 1;
+  $('sides').innerHTML = costs.map(([name, cost]) => `
+    <div><dt>${name}</dt><dd>
+      <span>${cost === null ? 'Does not fit' : dollars(cost, true)}</span>
+      <span class="cost-track" aria-hidden="true"><i style="width:${100 * (cost ?? 0) / scale}%"></i></span>
+    </dd></div>`).join('');
 }
 function renderPolicy(r) {
   const p = r.policy, c = r.config, file = mode === 'file' && filePolicy;
@@ -359,6 +380,11 @@ function renderTurn(d, list) {
   const p = d.planner, box = $('pingChart'), W2 = Math.max(220, box.clientWidth), H = box.clientHeight || 160, L2 = 50, R = 8, T = 10, B = 34, data = p.rows.map(r => ({...r, net: 1000 * r.net, cost: 1000 * r.expectedCost, gain: 1000 * r.expectedGain}));
   $('pingExplanation').textContent = p.chosen ? `Up to ${plural(p.chosen, 'ping')}, every ${num(p.interval)} min. ${d.actualPings < p.chosen ? `${d.actualPings || 'None'} sent before the user was back` : 'All sent'}.` : WHY_NO_PING[p.reason] ?? p.reason;
   if (data.length < 2) { box.innerHTML = ''; return; }
+  if (data.some(row => !Number.isFinite(row.net))) {
+    $('pingExplanation').textContent = 'The projected requests exceed the context window. A keep-warm saving is unavailable for this turn.';
+    box.replaceChildren();
+    return;
+  }
   const ys = ticks(Math.min(0, ...data.map(r => r.net)), Math.max(1e-9, ...data.map(r => r.net)), 3), lo = ys.values[0], hi = ys.values.at(-1), y = v => T + (hi - v) / (hi - lo || 1) * (H - T - B), slot = (W2 - L2 - R) / data.length;
   svg = `<svg viewBox="0 0 ${W2} ${H}" role="img" aria-label="Expected net saving of 0 to ${data.length - 1} pings, per 1,000 such waits">`;
   for (const v of ys.values) svg += `<line class="${v ? 'g-grid' : 'g-axis'}" x1="${L2}" x2="${W2 - R}" y1="${y(v)}" y2="${y(v)}"/><text x="${L2 - 6}" y="${y(v) + 4}" text-anchor="end">${usd(v, ys.digits)}</text>`;
@@ -416,6 +442,7 @@ function resultLine(r) {
 }
 const sourceLabel = () => source ? `${source}${edited && !source.endsWith('(edited)') ? ' (edited)' : ''}` : '';
 function render(r) {
+  baseConfig = {...baseConfig, compare: r.selected.id};
   current = r; busy('false'); $('export').disabled = false; $('share').disabled = false; showAddress();
   const c = r.config, preset = presets[$('modelPreset').value];
   $('status').textContent = `Seed ${c.seed} · updated`;
@@ -459,7 +486,11 @@ form.addEventListener('input', e => {
 form.addEventListener('click', e => { const name = e.target.dataset?.reset; if (name) { baseConfig = {...baseConfig, [name]: null}; STATS[name].forEach((field, i) => { if (curveOf[name]) form.elements[field].value = curveOf[name][i]; }); delete curveOf[name]; changed(); soon(); } });
 $('modelPreset').addEventListener('change', () => { if (presets[$('modelPreset').value]) { setForm(applyPreset(readForm(), $('modelPreset').value)); fillFrom(); update(); } });
 $('needTabs').addEventListener('click', e => { const kind = e.target.dataset?.kind; if (!kind) return; for (const b of $('needTabs').children) b.setAttribute('aria-selected', b.dataset.kind === kind); for (const box of form.querySelectorAll('.need')) box.hidden = box.dataset.kind !== kind; });
-$('sides').addEventListener('click', e => { const id = e.target.closest('[data-id]')?.dataset.id; if (!id) return; baseConfig = {...baseConfig, compare: id}; if (id === 'app') $('appSettings').open = true; update(); });
+$('baselinePicker').addEventListener('change', e => {
+  baseConfig = {...baseConfig, compare: e.target.value};
+  if (e.target.value === 'app') $('appSettings').open = true;
+  update();
+});
 $('policyTabs').addEventListener('click', e => { const next = e.target.dataset?.mode; if (!next || next === mode) return; if (next === 'own') ownPolicy = {...(current?.policy ?? {questions: null, answers: null, retrieved: null, maxPings: 0, keepUnder: 0})}; mode = next; update(); });
 $('ownPings').addEventListener('change', e => { const n = Math.max(0, Math.min(60, Math.round(Number(e.target.value) || 0))); ownPolicy = {...(current?.policy ?? {}), maxPings: n}; mode = 'own'; update(); });
 $('ownLong').addEventListener('change', e => { ownPolicy = {...(current?.policy ?? {}), long: e.target.checked}; mode = 'own'; update(); });
@@ -476,13 +507,12 @@ function adopt(config) { mode = 'fit'; ownPolicy = null; if (config.policy) { mo
 function load(carried, origin) {
   const {preset, config, source: label, legacy} = resolveScenario(carried);
   $('modelPreset').value = preset; source = label; edited = false; loadError = ''; startId = ''; adopt(config); setForm(config); fillFrom();
-  note(legacy ? 'Made with an earlier version of the calculator. Its numbers were computed differently.' : origin === 'file' ? 'Imported.' : ''); update();
+  note(legacy ? 'Loaded settings from an earlier calculator version.' : origin === 'file' ? 'Imported.' : ''); update();
 }
 function begin(id) {
   const start = STARTS.find(s => s.id === id) ?? STARTS[0], preset = $('modelPreset').value;
   startId = start.id; source = ''; edited = false; loadError = ''; filePolicy = null; rows = []; labelRows = []; mode = 'fit'; ownPolicy = null; turnIndex = 0; $('threadPicker').replaceChildren();
-  const keep = {...compared(), ...(start.compare && compared().compare === 'everything' ? {compare: start.compare} : {})};
-  setForm(applyPreset({...DEFAULTS, ...start.scenario, ...keep}, presets[preset] ? preset : 'sonnet')); if (!presets[preset]) $('modelPreset').value = 'sonnet'; fillFrom(); update();
+  setForm(applyPreset({...DEFAULTS, ...start.scenario, ...compared()}, presets[preset] ? preset : 'sonnet')); if (!presets[preset]) $('modelPreset').value = 'sonnet'; fillFrom(); update();
 }
 function start() {
   try { const carried = parseLink(location.hash); if (carried) { load(carried, 'link'); return; } }
@@ -513,7 +543,7 @@ async function importFiles(files) {
       told.push(`Measured ${m.source}.`, m.assessed ? `${m.assessed} labelled turns, ${m.needing} need something earlier.` : 'No labels: what later turns need keeps its defaults.');
     }
     if (policy) {
-      if (!threads.length && policy.workload) { const w = resolveScenario({version: 7, model: policy.workload.model ?? policy.preset, scenario: policy.workload.scenario, source: policy.workload.source ?? ''}); $('modelPreset').value = w.preset; source = w.source; edited = false; startId = ''; setForm({...w.config, ...compared()}); fillFrom(); }
+      if (!threads.length && policy.workload) { const w = resolveScenario({version: LINK_VERSION, model: policy.workload.model ?? policy.preset, scenario: policy.workload.scenario, source: policy.workload.source ?? ''}); $('modelPreset').value = w.preset; source = w.source; edited = false; startId = ''; setForm({...w.config, ...compared()}); fillFrom(); }
       else if (policy.preset) { $('modelPreset').value = policy.preset; setForm(applyPreset(readForm(), policy.preset)); }
       filePolicy = policy; mode = 'file'; told.push('Showing the policy from the file.');
     }

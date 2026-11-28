@@ -299,6 +299,7 @@ def async_http_client(live: Live, *, inner=None, pings: bool = True, **options):
     class Stream(httpx.AsyncByteStream):
         def __init__(self, result):
             self._events, self._close = iter(result.events), result.close
+            self._context = contextvars.copy_context()
             self._over = False
             _LATER.ready()
 
@@ -307,7 +308,9 @@ def async_http_client(live: Live, *, inner=None, pings: bool = True, **options):
 
         async def __anext__(self):
             loop = asyncio.get_running_loop()
-            chunk = await loop.run_in_executor(_workers, next, self._events, done)
+            chunk = await loop.run_in_executor(
+                _workers, self._context.copy().run, next, self._events, done
+            )
             if chunk is done:
                 self._over = True
                 raise StopAsyncIteration
@@ -317,11 +320,21 @@ def async_http_client(live: Live, *, inner=None, pings: bool = True, **options):
             if not self._over:
                 self._over = True
                 loop = asyncio.get_running_loop()
-                await loop.run_in_executor(_workers, _let_go, self._events, self._close)
+                await loop.run_in_executor(
+                    _workers,
+                    self._context.copy().run,
+                    _let_go,
+                    self._events,
+                    self._close,
+                )
 
         def __del__(self):
             if not self._over:
-                _LATER.do(partial(_let_go, self._events, self._close))
+                _LATER.do(
+                    partial(
+                        self._context.copy().run, _let_go, self._events, self._close
+                    )
+                )
 
     class Transport(httpx.AsyncBaseTransport):
         async def _forward(self, request):
@@ -408,8 +421,9 @@ def async_http_client(live: Live, *, inner=None, pings: bool = True, **options):
             try:
                 result = await loop.run_in_executor(
                     _workers,
-                    lambda: live.exchange(
-                        request.url.path, body, perform, thread=named
+                    contextvars.copy_context().run,
+                    partial(
+                        live.exchange, request.url.path, body, perform, thread=named
                     ),
                 )
             except asyncio.CancelledError:

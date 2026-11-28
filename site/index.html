@@ -4,13 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<meta name="description" content="Price your chat workload under a fitted context and cache policy, your own rules, and the defaults of other tools.">
+<meta name="description" content="Estimate the cost of your chat workload with Compache and a baseline you choose.">
 <title>Compache · Cost calculator</title>
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="compache">
 <meta property="og:url" content="https://barendpotijk.github.io/compache/">
 <meta property="og:title" content="What does your chat cost?">
-<meta property="og:description" content="Put in your own numbers, or open a chat log: priced at the provider's list prices and cache rules, with a fitted policy, your own rules and other tools' defaults.">
+<meta property="og:description" content="Estimate the cost per 1,000 turns with Compache and your chosen baseline using your workload and provider prices.">
 <meta property="og:image" content="https://barendpotijk.github.io/compache/preview.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -31,7 +31,7 @@
 </header>
 
 <div class="title-row">
-  <div><h1>What does your chat cost?</h1><p>Set the workload, pick what you do today, see what a fitted policy changes.</p></div>
+  <div><h1>What does your chat cost?</h1><p>Estimate the cost of your workload with Compache and your current setup.</p></div>
   <span id="status" role="status">Calculating…</span>
 </div>
 
@@ -45,18 +45,22 @@
 
 <section class="results lead" aria-label="Headline result">
   <article class="panel saving">
-    <h2>Compache saves, against <b id="againstName">—</b></h2>
+    <h2>Estimated savings vs. baseline</h2>
     <strong class="hero" id="savingPercent">—</strong>
     <p class="delta" id="savingAmount"></p>
     <p class="caption" id="savingRange"></p>
     <dl id="savingFacts"></dl>
   </article>
   <article class="panel sides">
-    <div class="panel-head"><h2>Cost per 1,000 turns</h2><span class="caption">click one to compare with it</span></div>
-    <div id="sides" role="radiogroup" aria-label="What Compache is compared with"></div>
+    <div class="panel-head">
+      <h2>Cost per 1,000 turns</h2>
+      <label class="baseline-picker">Baseline<select id="baselinePicker" disabled></select></label>
+    </div>
+    <dl id="sides" class="cost-bars"></dl>
+    <p class="caption" id="baselineNote"></p>
   </article>
 </section>
-<p class="meta"><span id="workloadNote"></span><span id="baselineNote"></span></p>
+<p class="meta"><span id="workloadNote"></span></p>
 <div id="warnings" class="alert" hidden></div>
 
 <form id="scenario" class="panel inputs">
@@ -300,8 +304,8 @@
     <ul>
       <li>Token counts and list prices. No model is called, and answer quality is not measured.</li>
       <li>The policy has the package's form: how many turns of questions, answers and retrieved text stay, and how many pings. Before each request and after each answer it looks three turns ahead, as the package does. The cheapest candidate on one set of threads wins. Costs come from a second set.</li>
-      <li>A needed part that Compache archived costs one extra call. A comparison that drops text for good does not pay for it and does not have it: that is the “missing” column. Text that is in a summary counts as missing.</li>
-      <li>Comparisons follow documented defaults, read on the date in each tooltip, and are not run. OpenAI's own compaction has no documented default and is not modeled.</li>
+      <li>A needed part that Compache archived costs one extra call. The baseline counts needed text as missing if it drops it without recovery. Text that is in a summary counts as missing.</li>
+      <li>Preset baselines use the documented settings listed in the methodology. OpenAI's own compaction has no documented default and is not modeled.</li>
       <li>A cache entry needs an identical start of the request and lives exactly its lifetime from when the request was sent.</li>
       <li>The range beside the saving draws the sampled threads again. It does not cover what the model leaves out.</li>
     </ul>
@@ -309,7 +313,7 @@
   </details>
 </section>
 
-<footer><span>Compache · cost calculator</span><span>Prices checked 20 Nov 2026 · <a href="./methodology.html">Methodology</a> · <a href="https://github.com/BarendPotijk/compache/tree/main/site">Source</a></span></footer>
+<footer><span>Compache · cost calculator</span><span>Prices checked 20 Nov 2026 · <a href="./methodology.html">Methodology</a> · <a href="https://github.com/BarendPotijk/compache/blob/main/docs/README.md">Developer docs</a> · <a href="https://github.com/BarendPotijk/compache/tree/main/site">Source</a></span></footer>
 </main>
 <div id="tip" class="tip" role="status" hidden></div>
 <script type="module" src="./app.mjs"></script>
